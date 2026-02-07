@@ -81,3 +81,11 @@ export function parsePageRange(pages: string | undefined, totalPages: number): n
 
   return [...new Set(result)].sort((a, b) => a - b);
 }
+
+/**
+ * Resolve page numbers from a page range string.
+ * If no range is specified, returns all pages [1..totalPages].
+ */
+export function resolvePageNumbers(pages: string | undefined, totalPages: number): number[] {
+  return parsePageRange(pages, totalPages) ?? Array.from({ length: totalPages }, (_, i) => i + 1);
+}

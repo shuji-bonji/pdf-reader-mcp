@@ -19,7 +19,7 @@ export const DEFAULT_SEARCH_CONTEXT = 80;
 
 /** Server info */
 export const SERVER_NAME = 'pdf-reader-mcp';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.2.0';
 
 /** Response format enum */
 export enum ResponseFormat {

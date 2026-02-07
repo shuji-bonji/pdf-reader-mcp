@@ -24,7 +24,7 @@ import type {
   TagNode,
   TagsAnalysis,
 } from '../types.js';
-import { getFileSize, parsePageRange, readPdfFile } from '../utils/pdf-helpers.js';
+import { getFileSize, readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
@@ -55,39 +55,49 @@ export async function loadDocumentFromData(data: Uint8Array): Promise<PDFDocumen
  */
 export async function getMetadata(filePath: string): Promise<PdfMetadata> {
   const doc = await loadDocument(filePath);
-  const fileSize = await getFileSize(filePath);
-
   try {
-    const meta = await doc.getMetadata();
-    const info = meta.info as Record<string, unknown>;
-
-    // Check if tagged
-    const markInfo = await getMarkInfo(doc);
-    const isTagged = markInfo?.Marked === true;
-
-    // Check signatures (presence of signature fields in AcroForm)
-    const hasSignatures = await checkSignatures(doc);
-
-    return {
-      title: asStringOrNull(info.Title),
-      author: asStringOrNull(info.Author),
-      subject: asStringOrNull(info.Subject),
-      keywords: asStringOrNull(info.Keywords),
-      creator: asStringOrNull(info.Creator),
-      producer: asStringOrNull(info.Producer),
-      creationDate: asStringOrNull(info.CreationDate),
-      modificationDate: asStringOrNull(info.ModDate),
-      pageCount: doc.numPages,
-      pdfVersion: asStringOrNull(info.PDFFormatVersion),
-      isLinearized: info.IsLinearized === true,
-      isEncrypted: await detectEncryption(filePath),
-      isTagged,
-      hasSignatures,
-      fileSize,
-    };
+    return await getMetadataFromDoc(doc, filePath);
   } finally {
     await doc.destroy();
   }
+}
+
+/**
+ * Get full metadata from a pre-loaded PDFDocumentProxy.
+ * Does NOT destroy the document — caller is responsible for lifecycle.
+ */
+export async function getMetadataFromDoc(
+  doc: PDFDocumentProxy,
+  filePath: string,
+): Promise<PdfMetadata> {
+  const fileSize = await getFileSize(filePath);
+  const meta = await doc.getMetadata();
+  const info = meta.info as Record<string, unknown>;
+
+  // Check if tagged
+  const markInfo = await getMarkInfo(doc);
+  const isTagged = markInfo?.Marked === true;
+
+  // Check signatures (heuristic check via first few pages)
+  const hasSignatures = await checkSignatures(doc);
+
+  return {
+    title: asStringOrNull(info.Title),
+    author: asStringOrNull(info.Author),
+    subject: asStringOrNull(info.Subject),
+    keywords: asStringOrNull(info.Keywords),
+    creator: asStringOrNull(info.Creator),
+    producer: asStringOrNull(info.Producer),
+    creationDate: asStringOrNull(info.CreationDate),
+    modificationDate: asStringOrNull(info.ModDate),
+    pageCount: doc.numPages,
+    pdfVersion: asStringOrNull(info.PDFFormatVersion),
+    isLinearized: info.IsLinearized === true,
+    isEncrypted: await detectEncryption(filePath),
+    isTagged,
+    hasSignatures,
+    fileSize,
+  };
 }
 
 /**
@@ -98,8 +108,7 @@ export async function extractTextFromDoc(
   doc: PDFDocumentProxy,
   pages?: string,
 ): Promise<PageText[]> {
-  const pageNumbers =
-    parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+  const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
   const results: PageText[] = [];
   for (const pageNum of pageNumbers) {
@@ -137,8 +146,7 @@ export async function searchText(
   const lowerQuery = query.toLowerCase();
 
   try {
-    const pageNumbers =
-      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+    const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
     const matches: SearchMatch[] = [];
 
@@ -183,27 +191,34 @@ export async function searchText(
 }
 
 /**
+ * Count images from a pre-loaded PDFDocumentProxy.
+ * Does NOT destroy the document — caller is responsible for lifecycle.
+ */
+export async function countImagesFromDoc(doc: PDFDocumentProxy, pages?: string): Promise<number> {
+  const pageNumbers = resolvePageNumbers(pages, doc.numPages);
+
+  let total = 0;
+  for (const pageNum of pageNumbers) {
+    const page = await doc.getPage(pageNum);
+    const opList = await page.getOperatorList();
+    for (const op of opList.fnArray) {
+      if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
+        total++;
+      }
+    }
+  }
+
+  return total;
+}
+
+/**
  * Count images on specified pages.
  */
 export async function countImages(filePath: string, pages?: string): Promise<number> {
   const doc = await loadDocument(filePath);
 
   try {
-    const pageNumbers =
-      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
-
-    let total = 0;
-    for (const pageNum of pageNumbers) {
-      const page = await doc.getPage(pageNum);
-      const opList = await page.getOperatorList();
-      for (const op of opList.fnArray) {
-        if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
-          total++;
-        }
-      }
-    }
-
-    return total;
+    return await countImagesFromDoc(doc, pages);
   } finally {
     await doc.destroy();
   }
@@ -220,8 +235,7 @@ export async function extractImages(
   const doc = await loadDocument(filePath);
 
   try {
-    const pageNumbers =
-      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+    const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
     const images: ExtractedImage[] = [];
     let detectedCount = 0;
@@ -340,6 +354,11 @@ async function getMarkInfo(doc: PDFDocumentProxy): Promise<Record<string, boolea
 
 /**
  * Check if the document has digital signatures.
+ *
+ * NOTE: This is a heuristic check that only scans the first 5 pages
+ * for signature Widget annotations. It may miss signatures attached
+ * to later pages. For comprehensive signature analysis, use the
+ * `inspect_signatures` tool which uses AcroForm-based detection via pdf-lib.
  */
 async function checkSignatures(doc: PDFDocumentProxy): Promise<boolean> {
   try {
@@ -440,8 +459,7 @@ export async function analyzeAnnotations(
   const doc = await loadDocument(filePath);
 
   try {
-    const pageNumbers =
-      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+    const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
     const annotations: AnnotationInfo[] = [];
     const bySubtype: Record<string, number> = {};

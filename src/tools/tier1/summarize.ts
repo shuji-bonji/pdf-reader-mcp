@@ -5,7 +5,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type SummarizeInput, SummarizeSchema } from '../../schemas/tier1.js';
-import { countImages, extractText, getMetadata } from '../../services/pdfjs-service.js';
+import {
+  countImagesFromDoc,
+  extractTextFromDoc,
+  getMetadataFromDoc,
+  loadDocument,
+} from '../../services/pdfjs-service.js';
 import type { PdfSummary } from '../../types.js';
 import { handleError } from '../../utils/error-handler.js';
 import { formatSummaryMarkdown } from '../../utils/formatter.js';
@@ -39,32 +44,38 @@ Examples:
     },
     async (params: SummarizeInput) => {
       try {
-        // Run metadata, text preview, and image count in parallel
-        const [metadata, firstPageTexts, imageCount] = await Promise.all([
-          getMetadata(params.file_path),
-          extractText(params.file_path, '1'),
-          countImages(params.file_path),
-        ]);
+        // Load the PDF document once and reuse for all operations
+        const doc = await loadDocument(params.file_path);
 
-        const textPreview = firstPageTexts[0]?.text?.slice(0, 500) ?? '';
-        const hasText = textPreview.trim().length > 0;
+        try {
+          const [metadata, firstPageTexts, imageCount] = await Promise.all([
+            getMetadataFromDoc(doc, params.file_path),
+            extractTextFromDoc(doc, '1'),
+            countImagesFromDoc(doc),
+          ]);
 
-        const summary: PdfSummary = {
-          filePath: params.file_path,
-          metadata,
-          textPreview,
-          imageCount,
-          hasText,
-        };
+          const textPreview = firstPageTexts[0]?.text?.slice(0, 500) ?? '';
+          const hasText = textPreview.trim().length > 0;
 
-        const text =
-          params.response_format === ResponseFormat.JSON
-            ? JSON.stringify(summary, null, 2)
-            : formatSummaryMarkdown(summary);
+          const summary: PdfSummary = {
+            filePath: params.file_path,
+            metadata,
+            textPreview,
+            imageCount,
+            hasText,
+          };
 
-        return {
-          content: [{ type: 'text' as const, text }],
-        };
+          const text =
+            params.response_format === ResponseFormat.JSON
+              ? JSON.stringify(summary, null, 2)
+              : formatSummaryMarkdown(summary);
+
+          return {
+            content: [{ type: 'text' as const, text }],
+          };
+        } finally {
+          await doc.destroy();
+        }
       } catch (error) {
         return {
           content: [{ type: 'text' as const, text: handleError(error) }],

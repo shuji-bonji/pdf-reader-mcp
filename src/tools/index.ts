@@ -18,6 +18,10 @@ import { registerInspectFonts } from './tier2/inspect-fonts.js';
 import { registerInspectSignatures } from './tier2/inspect-signatures.js';
 import { registerInspectStructure } from './tier2/inspect-structure.js';
 import { registerInspectTags } from './tier2/inspect-tags.js';
+// Tier 3: Validation & analysis
+import { registerCompareStructure } from './tier3/compare-structure.js';
+import { registerValidateMetadata } from './tier3/validate-metadata.js';
+import { registerValidateTagged } from './tier3/validate-tagged.js';
 
 /**
  * Register all tools with the MCP server.
@@ -39,8 +43,8 @@ export function registerAllTools(server: McpServer): void {
   registerInspectAnnotations(server);
   registerInspectSignatures(server);
 
-  // Tier 3: Validation & analysis (future)
-  // registerValidateTagged(server);
-  // registerValidateMetadata(server);
-  // registerCompareStructure(server);
+  // Tier 3: Validation & analysis
+  registerValidateTagged(server);
+  registerValidateMetadata(server);
+  registerCompareStructure(server);
 }

@@ -36,12 +36,14 @@ Examples:
     async (params: GetPageCountInput) => {
       try {
         const doc = await loadDocument(params.file_path);
-        const count = doc.numPages;
-        await doc.destroy();
-
-        return {
-          content: [{ type: 'text' as const, text: String(count) }],
-        };
+        try {
+          const count = doc.numPages;
+          return {
+            content: [{ type: 'text' as const, text: String(count) }],
+          };
+        } finally {
+          await doc.destroy();
+        }
       } catch (error) {
         return {
           content: [{ type: 'text' as const, text: handleError(error) }],

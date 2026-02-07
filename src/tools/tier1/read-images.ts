@@ -59,20 +59,22 @@ Examples:
           };
         }
 
-        const summary = result.images.map((img) => ({
+        // Build response with full image data including base64
+        const imagesWithData = result.images.map((img) => ({
           page: img.page,
           index: img.index,
           width: img.width,
           height: img.height,
           colorSpace: img.colorSpace,
-          dataLength: img.dataBase64.length,
+          bitsPerComponent: img.bitsPerComponent,
+          dataBase64: img.dataBase64,
         }));
 
         let text = `Found ${result.extractedCount} image(s).`;
         if (result.skippedCount > 0) {
           text += ` (${result.skippedCount} additional image(s) could not be extracted)`;
         }
-        text += `\n\n${JSON.stringify(summary, null, 2)}`;
+        text += `\n\n${JSON.stringify(imagesWithData, null, 2)}`;
 
         return {
           content: [{ type: 'text' as const, text }],

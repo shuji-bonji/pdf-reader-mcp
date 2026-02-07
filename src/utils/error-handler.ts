@@ -2,6 +2,8 @@
  * Unified error handling for pdf-reader-mcp
  */
 
+import { isAbsolute, normalize } from 'node:path';
+
 export class PdfReaderError extends Error {
   constructor(
     message: string,
@@ -61,6 +63,12 @@ export function handleError(error: unknown): string {
 
 /**
  * Validate that a file path points to a PDF.
+ *
+ * Security checks:
+ * - Path must be non-empty
+ * - Path must be absolute (prevents relative path traversal)
+ * - Path must not contain `..` segments after normalization
+ * - Path must have a `.pdf` extension
  */
 export function validatePdfPath(filePath: string): void {
   if (!filePath) {
@@ -71,7 +79,24 @@ export function validatePdfPath(filePath: string): void {
     );
   }
 
-  if (!filePath.toLowerCase().endsWith('.pdf')) {
+  if (!isAbsolute(filePath)) {
+    throw new PdfReaderError(
+      'File path must be absolute.',
+      'RELATIVE_PATH',
+      'Provide an absolute file path (e.g., /home/user/document.pdf).',
+    );
+  }
+
+  const normalized = normalize(filePath);
+  if (normalized.includes('..')) {
+    throw new PdfReaderError(
+      'Path traversal is not allowed.',
+      'PATH_TRAVERSAL',
+      'Provide a direct absolute path without ".." segments.',
+    );
+  }
+
+  if (!normalized.toLowerCase().endsWith('.pdf')) {
     throw new PdfReaderError(
       `Expected a .pdf file, got: ${filePath}`,
       'INVALID_EXTENSION',

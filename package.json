@@ -1,12 +1,20 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "bin": {
     "pdf-reader-mcp": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
@@ -31,6 +39,7 @@
     "pdf-reader",
     "pdf-structure",
     "tagged-pdf",
+    "pdf-ua",
     "digital-signatures",
     "model-context-protocol"
   ],
@@ -39,6 +48,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/shuji-bonji/pdf-reader-mcp.git"
+  },
+  "homepage": "https://github.com/shuji-bonji/pdf-reader-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/shuji-bonji/pdf-reader-mcp/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",

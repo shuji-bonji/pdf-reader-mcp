@@ -2,7 +2,7 @@
  * Remote PDF fetcher service.
  */
 
-import { MAX_FILE_SIZE } from '../constants.js';
+import { MAX_FILE_SIZE, SERVER_NAME, SERVER_VERSION } from '../constants.js';
 import { PdfReaderError } from '../utils/error-handler.js';
 
 /**
@@ -31,7 +31,7 @@ export async function fetchPdfFromUrl(url: string): Promise<Uint8Array> {
   const response = await fetch(url, {
     headers: {
       Accept: 'application/pdf',
-      'User-Agent': 'pdf-reader-mcp/0.1.0',
+      'User-Agent': `${SERVER_NAME}/${SERVER_VERSION}`,
     },
     signal: AbortSignal.timeout(30_000),
   });

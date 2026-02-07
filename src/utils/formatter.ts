@@ -6,13 +6,16 @@ import { CHARACTER_LIMIT } from '../constants.js';
 import type {
   AnnotationsAnalysis,
   FontsAnalysis,
+  MetadataValidation,
   PageText,
   PdfMetadata,
   PdfSummary,
   SearchResult,
   SignaturesAnalysis,
   StructureAnalysis,
+  StructureComparison,
   TagNode,
+  TaggedValidation,
   TagsAnalysis,
 } from '../types.js';
 
@@ -316,7 +319,7 @@ export function formatSignaturesMarkdown(analysis: SignaturesAnalysis): string {
 /**
  * Format file size in human-readable form.
  */
-function formatFileSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -338,4 +341,130 @@ function renderTagTree(node: TagNode, lines: string[], depth: number, maxDepth: 
   for (const child of node.children) {
     renderTagTree(child, lines, depth + 1, maxDepth);
   }
+}
+
+// ─── Tier 3: Validation & analysis formatters ─────────────
+
+const SEVERITY_ICONS = {
+  error: '\u274c',
+  warning: '\u26a0\ufe0f',
+  info: '\u2705',
+} as const;
+
+/**
+ * Format tagged validation results as Markdown.
+ */
+export function formatTaggedValidationMarkdown(result: TaggedValidation): string {
+  const lines: string[] = ['# PDF/UA Tag Validation', ''];
+
+  lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
+  lines.push(`- **Checks**: ${result.totalChecks}`);
+  lines.push(`- **Passed**: ${result.passed}`);
+  lines.push(`- **Failed**: ${result.failed}`);
+  lines.push(`- **Warnings**: ${result.warnings}`);
+
+  lines.push('', '## Results', '');
+
+  for (const issue of result.issues) {
+    const icon = SEVERITY_ICONS[issue.severity];
+    lines.push(`${icon} **[${issue.code}]** ${issue.message}`);
+    if (issue.details) {
+      lines.push(`  > ${issue.details}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---', '', `**Summary**: ${result.summary}`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format metadata validation results as Markdown.
+ */
+export function formatMetadataValidationMarkdown(result: MetadataValidation): string {
+  const lines: string[] = ['# Metadata Validation', ''];
+
+  lines.push(`- **Checks**: ${result.totalChecks}`);
+  lines.push(`- **Passed**: ${result.passed}`);
+  lines.push(`- **Failed**: ${result.failed}`);
+  lines.push(`- **Warnings**: ${result.warnings}`);
+
+  // Metadata field presence table
+  lines.push('', '## Field Presence', '');
+  lines.push('| Field | Present |', '|---|---|');
+  const fields = [
+    ['Title', result.metadata.hasTitle],
+    ['Author', result.metadata.hasAuthor],
+    ['Subject', result.metadata.hasSubject],
+    ['Keywords', result.metadata.hasKeywords],
+    ['Creator', result.metadata.hasCreator],
+    ['Producer', result.metadata.hasProducer],
+    ['Creation Date', result.metadata.hasCreationDate],
+    ['Modification Date', result.metadata.hasModificationDate],
+  ] as const;
+  for (const [name, present] of fields) {
+    lines.push(`| ${name} | ${present ? 'Yes' : 'No'} |`);
+  }
+  if (result.metadata.pdfVersion) {
+    lines.push(`| PDF Version | ${result.metadata.pdfVersion} |`);
+  }
+  lines.push(`| Tagged | ${result.metadata.isTagged ? 'Yes' : 'No'} |`);
+
+  // Detailed results
+  lines.push('', '## Results', '');
+  for (const issue of result.issues) {
+    const icon = SEVERITY_ICONS[issue.severity];
+    lines.push(`${icon} **[${issue.code}]** ${issue.message}`);
+    if (issue.details) {
+      lines.push(`  > ${issue.details}`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---', '', `**Summary**: ${result.summary}`);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format structure comparison results as Markdown.
+ */
+export function formatCompareStructureMarkdown(result: StructureComparison): string {
+  const lines: string[] = ['# PDF Structure Comparison', ''];
+
+  lines.push(`Comparing **${result.file1}** vs **${result.file2}**`);
+
+  // Property diff table
+  lines.push('', '## Property Comparison', '');
+  lines.push('| Property | File 1 | File 2 | Status |', '|---|---|---|---|');
+  for (const diff of result.diffs) {
+    const statusIcon = diff.status === 'match' ? '\u2705' : '\u274c';
+    lines.push(`| ${diff.property} | ${diff.file1Value} | ${diff.file2Value} | ${statusIcon} |`);
+  }
+
+  // Font comparison
+  const fc = result.fontComparison;
+  lines.push('', '## Font Comparison', '');
+
+  if (fc.inBoth.length > 0) {
+    lines.push(`- **Shared fonts** (${fc.inBoth.length}): ${fc.inBoth.join(', ')}`);
+  }
+  if (fc.onlyInFile1.length > 0) {
+    lines.push(
+      `- **Only in ${result.file1}** (${fc.onlyInFile1.length}): ${fc.onlyInFile1.join(', ')}`,
+    );
+  }
+  if (fc.onlyInFile2.length > 0) {
+    lines.push(
+      `- **Only in ${result.file2}** (${fc.onlyInFile2.length}): ${fc.onlyInFile2.join(', ')}`,
+    );
+  }
+  if (fc.inBoth.length === 0 && fc.onlyInFile1.length === 0 && fc.onlyInFile2.length === 0) {
+    lines.push('No fonts found in either document.');
+  }
+
+  lines.push('', '---', '', `**Summary**: ${result.summary}`);
+
+  return lines.join('\n');
 }

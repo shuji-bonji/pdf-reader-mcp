@@ -25,7 +25,7 @@ import type {
   SignaturesAnalysis,
   StructureAnalysis,
 } from '../types.js';
-import { readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import { readPdfFile } from '../utils/pdf-helpers.js';
 
 /**
@@ -118,9 +118,16 @@ export async function analyzeStructure(filePath: string): Promise<StructureAnaly
     pdfVersion = versionEntry.decodeText();
   } else {
     try {
-      const header = await readFile(filePath, { encoding: 'ascii' });
-      const match = header.slice(0, 20).match(/%PDF-(\d+\.\d+)/);
-      if (match) pdfVersion = match[1];
+      // Read only the first 20 bytes for the PDF header instead of the entire file
+      const fh = await open(filePath, 'r');
+      try {
+        const buf = Buffer.alloc(20);
+        await fh.read(buf, 0, 20, 0);
+        const match = buf.toString('ascii').match(/%PDF-(\d+\.\d+)/);
+        if (match) pdfVersion = match[1];
+      } finally {
+        await fh.close();
+      }
     } catch {
       // Ignore header read errors
     }

@@ -183,3 +183,70 @@ export interface SignaturesAnalysis {
   fields: SignatureFieldInfo[];
   note: string;
 }
+
+// ─── Tier 3: Validation & Analysis ──────────────────────
+
+/** Severity level for validation issues */
+export type ValidationSeverity = 'error' | 'warning' | 'info';
+
+/** A single validation issue */
+export interface ValidationIssue {
+  severity: ValidationSeverity;
+  code: string;
+  message: string;
+  details?: string;
+}
+
+/** validate_tagged output */
+export interface TaggedValidation {
+  isTagged: boolean;
+  totalChecks: number;
+  passed: number;
+  failed: number;
+  warnings: number;
+  issues: ValidationIssue[];
+  summary: string;
+}
+
+/** validate_metadata output */
+export interface MetadataValidation {
+  totalChecks: number;
+  passed: number;
+  failed: number;
+  warnings: number;
+  issues: ValidationIssue[];
+  metadata: {
+    hasTitle: boolean;
+    hasAuthor: boolean;
+    hasSubject: boolean;
+    hasKeywords: boolean;
+    hasCreator: boolean;
+    hasProducer: boolean;
+    hasCreationDate: boolean;
+    hasModificationDate: boolean;
+    pdfVersion: string | null;
+    isTagged: boolean;
+  };
+  summary: string;
+}
+
+/** Diff entry for structure comparison */
+export interface StructureDiffEntry {
+  property: string;
+  file1Value: string;
+  file2Value: string;
+  status: 'match' | 'differ';
+}
+
+/** compare_structure output */
+export interface StructureComparison {
+  file1: string;
+  file2: string;
+  diffs: StructureDiffEntry[];
+  fontComparison: {
+    onlyInFile1: string[];
+    onlyInFile2: string[];
+    inBoth: string[];
+  };
+  summary: string;
+}

@@ -18,7 +18,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `read_url` | URLからリモートPDFを取得して処理 |
 | `summarize` | 全体概要レポート（メタデータ + テキスト + 画像数） |
 
-### Tier 2: 構造解析 🚧 (予定)
+### Tier 2: 構造解析 ✅ (v0.1.0)
 
 | ツール | 説明 |
 |---|---|
@@ -28,13 +28,13 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `inspect_annotations` | 注釈一覧（タイプ別分類） |
 | `inspect_signatures` | 電子署名フィールドの構造解析 |
 
-### Tier 3: 検証・分析 🚧 (予定)
+### Tier 3: 検証・分析 ✅ (v0.2.0)
 
 | ツール | 説明 |
 |---|---|
-| `validate_tagged` | PDF/UA 要件との照合 |
-| `validate_metadata` | XMP/Info辞書の仕様適合チェック |
-| `compare_structure` | 2つのPDFの構造差分比較 |
+| `validate_tagged` | PDF/UA タグ構造の検証（8項目チェック） |
+| `validate_metadata` | メタデータの仕様適合チェック（10項目チェック） |
+| `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
 
 ## セットアップ
 
@@ -100,6 +100,37 @@ summarize({ file_path: "/path/to/document.pdf" })
   | Images | 15 |
 ```
 
+### PDF/UA タグ検証
+
+```
+validate_tagged({ file_path: "/path/to/document.pdf" })
+→ ✅ [TAG-001] Document is marked as tagged
+  ✅ [TAG-002] Structure tree root exists
+  ⚠️ [TAG-004] Heading hierarchy has gaps: H1, H3
+  ❌ [TAG-005] Document has 3 image(s) but no Figure tags
+```
+
+### メタデータ検証
+
+```
+validate_metadata({ file_path: "/path/to/document.pdf" })
+→ ✅ [META-001] Title: "Annual Report 2025"
+  ⚠️ [META-002] Author is missing
+  ✅ [META-006] PDF version: 2.0
+```
+
+### 構造比較
+
+```
+compare_structure({
+  file_path_1: "/path/to/v1.pdf",
+  file_path_2: "/path/to/v2.pdf"
+})
+→ | Page Count  | 10 | 12 | ❌ |
+  | PDF Version | 1.7 | 2.0 | ❌ |
+  | Tagged      | true | true | ✅ |
+```
+
 ## 技術スタック
 
 - **TypeScript** + MCP TypeScript SDK
@@ -125,10 +156,14 @@ pdf-reader-mcp/
 │   ├── types.ts           # 型定義
 │   ├── tools/
 │   │   ├── tier1/         # 基本ツール（7ツール）
-│   │   ├── tier2/         # 構造解析（予定）
-│   │   ├── tier3/         # 検証・分析（予定）
+│   │   ├── tier2/         # 構造解析（5ツール）
+│   │   ├── tier3/         # 検証・分析（3ツール）
 │   │   └── index.ts       # ツール登録の集約
 │   ├── services/          # PDF ライブラリラッパー
+│   │   ├── pdfjs-service.ts      # pdfjs-dist ラッパー
+│   │   ├── pdflib-service.ts     # pdf-lib ラッパー
+│   │   ├── validation-service.ts # 検証・比較ロジック
+│   │   └── url-fetcher.ts        # URL取得
 │   ├── schemas/           # Zod バリデーションスキーマ
 │   └── utils/             # ユーティリティ
 └── tests/
@@ -142,6 +177,7 @@ pdf-spec-mcp は PDF 仕様（ISO 32000-2 等）の知識を提供する MCP サ
 2. `inspect_tags` でタグ構造を確認
 3. pdf-spec-mcp の `get_requirements` で PDF/UA 要件を取得
 4. `validate_tagged` で適合性を検証
+5. `compare_structure` で修正前後の構造差分を確認
 
 ## ライセンス
 
