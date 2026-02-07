@@ -3,7 +3,7 @@
  *
  * PF-1〜PF-9: 各サービスのパフォーマンス計測 & 回帰チェック
  */
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, it } from 'vitest';
 import {
   countImages,
   extractText,
@@ -20,89 +20,89 @@ import {
   validateMetadata,
   validateTagged,
 } from '../../src/services/validation-service.js';
-import { checkRegression, recordPerformance, saveBaseline, withTiming } from './helpers.js';
+import { PERF_THRESHOLDS, SEARCH_QUERIES } from './constants.js';
+import { measureAndCheck, saveBaseline } from './helpers.js';
 import { FIXTURES } from './setup.js';
 
 describe('09 - Performance Baseline', () => {
   afterAll(() => {
-    // ベースラインを保存
     saveBaseline();
   });
 
   // PF-1: getMetadata (コールド)
-  it('PF-1: getMetadata < 2000ms', async () => {
-    const { durationMs } = await withTiming(() => getMetadata(FIXTURES.simple));
-    recordPerformance('getMetadata', durationMs);
-
-    const regression = checkRegression('getMetadata', durationMs);
-    if (regression.regressed) {
-      console.warn(
-        `⚠️ getMetadata 性能劣化: ${regression.baselineMs}ms → ${durationMs}ms (${regression.changePercent}%)`,
-      );
-    }
-    expect(durationMs).toBeLessThan(2000);
+  it('PF-1: getMetadata completes within threshold', async () => {
+    await measureAndCheck(
+      'getMetadata',
+      () => getMetadata(FIXTURES.simple),
+      PERF_THRESHOLDS.getMetadata,
+    );
   });
 
   // PF-2: extractText 3ページ
-  it('PF-2: extractText (3ページ) < 3000ms', async () => {
-    const { durationMs } = await withTiming(() => extractText(FIXTURES.simple));
-    recordPerformance('extractText-3pages', durationMs);
-
-    const regression = checkRegression('extractText-3pages', durationMs);
-    if (regression.regressed) {
-      console.warn(
-        `⚠️ extractText 性能劣化: ${regression.baselineMs}ms → ${durationMs}ms (${regression.changePercent}%)`,
-      );
-    }
-    expect(durationMs).toBeLessThan(3000);
+  it('PF-2: extractText (3 pages) completes within threshold', async () => {
+    await measureAndCheck(
+      'extractText-3pages',
+      () => extractText(FIXTURES.simple),
+      PERF_THRESHOLDS.extractText3Pages,
+    );
   });
 
   // PF-3: searchText
-  it('PF-3: searchText < 2000ms', async () => {
-    const { durationMs } = await withTiming(() => searchText(FIXTURES.simple, 'PDF'));
-    recordPerformance('searchText', durationMs);
-    expect(durationMs).toBeLessThan(2000);
+  it('PF-3: searchText completes within threshold', async () => {
+    await measureAndCheck(
+      'searchText',
+      () => searchText(FIXTURES.simple, SEARCH_QUERIES.pdf),
+      PERF_THRESHOLDS.searchText,
+    );
   });
 
   // PF-4: analyzeStructure
-  it('PF-4: analyzeStructure < 2000ms', async () => {
-    const { durationMs } = await withTiming(() => analyzeStructure(FIXTURES.simple));
-    recordPerformance('analyzeStructure', durationMs);
-    expect(durationMs).toBeLessThan(2000);
+  it('PF-4: analyzeStructure completes within threshold', async () => {
+    await measureAndCheck(
+      'analyzeStructure',
+      () => analyzeStructure(FIXTURES.simple),
+      PERF_THRESHOLDS.analyzeStructure,
+    );
   });
 
   // PF-5: analyzeFontsWithPdfLib
-  it('PF-5: analyzeFontsWithPdfLib < 3000ms', async () => {
-    const { durationMs } = await withTiming(() => analyzeFontsWithPdfLib(FIXTURES.multiFont));
-    recordPerformance('analyzeFonts', durationMs);
-    expect(durationMs).toBeLessThan(3000);
+  it('PF-5: analyzeFonts completes within threshold', async () => {
+    await measureAndCheck(
+      'analyzeFonts',
+      () => analyzeFontsWithPdfLib(FIXTURES.multiFont),
+      PERF_THRESHOLDS.analyzeFonts,
+    );
   });
 
   // PF-6: validateTagged
-  it('PF-6: validateTagged < 5000ms', async () => {
-    const { durationMs } = await withTiming(() => validateTagged(FIXTURES.tagged));
-    recordPerformance('validateTagged', durationMs);
-    expect(durationMs).toBeLessThan(5000);
+  it('PF-6: validateTagged completes within threshold', async () => {
+    await measureAndCheck(
+      'validateTagged',
+      () => validateTagged(FIXTURES.tagged),
+      PERF_THRESHOLDS.validateTagged,
+    );
   });
 
   // PF-7: validateMetadata
-  it('PF-7: validateMetadata < 3000ms', async () => {
-    const { durationMs } = await withTiming(() => validateMetadata(FIXTURES.simple));
-    recordPerformance('validateMetadata', durationMs);
-    expect(durationMs).toBeLessThan(3000);
+  it('PF-7: validateMetadata completes within threshold', async () => {
+    await measureAndCheck(
+      'validateMetadata',
+      () => validateMetadata(FIXTURES.simple),
+      PERF_THRESHOLDS.validateMetadata,
+    );
   });
 
   // PF-8: compareStructure
-  it('PF-8: compareStructure < 5000ms', async () => {
-    const { durationMs } = await withTiming(() =>
-      compareStructure(FIXTURES.simple, FIXTURES.annotated),
+  it('PF-8: compareStructure completes within threshold', async () => {
+    await measureAndCheck(
+      'compareStructure',
+      () => compareStructure(FIXTURES.simple, FIXTURES.annotated),
+      PERF_THRESHOLDS.compareStructure,
     );
-    recordPerformance('compareStructure', durationMs);
-    expect(durationMs).toBeLessThan(5000);
   });
 
   // PF-9: 全フィクスチャの getMetadata 合計
-  it('PF-9: 全フィクスチャの getMetadata 合計 < 15000ms', async () => {
+  it('PF-9: getMetadata for all fixtures within threshold', async () => {
     const fixtures = [
       FIXTURES.simple,
       FIXTURES.empty,
@@ -112,26 +112,32 @@ describe('09 - Performance Baseline', () => {
       FIXTURES.multiFont,
       FIXTURES.noMetadata,
     ];
-    const { durationMs } = await withTiming(async () => {
-      for (const f of fixtures) {
-        await getMetadata(f);
-      }
-    });
-    recordPerformance('getMetadata-all-7', durationMs);
-    expect(durationMs).toBeLessThan(15000);
+    await measureAndCheck(
+      'getMetadata-all-7',
+      async () => {
+        for (const f of fixtures) {
+          await getMetadata(f);
+        }
+      },
+      PERF_THRESHOLDS.allFixturesMetadata,
+    );
   });
 
   // PF-extra: countImages
-  it('PF-extra: countImages < 2000ms', async () => {
-    const { durationMs } = await withTiming(() => countImages(FIXTURES.comprehensive));
-    recordPerformance('countImages', durationMs);
-    expect(durationMs).toBeLessThan(2000);
+  it('PF-extra: countImages completes within threshold', async () => {
+    await measureAndCheck(
+      'countImages',
+      () => countImages(FIXTURES.comprehensive),
+      PERF_THRESHOLDS.countImages,
+    );
   });
 
   // PF-extra: analyzeSignatures
-  it('PF-extra: analyzeSignatures < 2000ms', async () => {
-    const { durationMs } = await withTiming(() => analyzeSignatures(FIXTURES.annotated));
-    recordPerformance('analyzeSignatures', durationMs);
-    expect(durationMs).toBeLessThan(2000);
+  it('PF-extra: analyzeSignatures completes within threshold', async () => {
+    await measureAndCheck(
+      'analyzeSignatures',
+      () => analyzeSignatures(FIXTURES.annotated),
+      PERF_THRESHOLDS.analyzeSignatures,
+    );
   });
 });

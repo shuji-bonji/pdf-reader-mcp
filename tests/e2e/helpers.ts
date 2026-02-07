@@ -1,15 +1,14 @@
 /**
  * E2E Test Helpers
  *
- * - Performance measurement
- * - Assertion helpers
- * - Baseline tracking
+ * パフォーマンス計測・ベースライン管理・アサーションヘルパー
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { REGRESSION_THRESHOLD } from './constants.js';
 
 // ========================================
-// パフォーマンス計測
+// Performance measurement
 // ========================================
 
 export interface TimingResult<T> {
@@ -28,7 +27,7 @@ export async function withTiming<T>(fn: () => Promise<T>): Promise<TimingResult<
 }
 
 // ========================================
-// パフォーマンスベースライン
+// Performance baseline
 // ========================================
 
 interface BaselineEntry {
@@ -45,6 +44,9 @@ interface Baseline {
 const BASELINE_PATH = join(process.cwd(), 'tests', 'e2e', 'baseline.json');
 const performanceEntries: BaselineEntry[] = [];
 
+/** ベースラインキャッシュ（同一テスト実行内で1回だけ読む） */
+let cachedBaseline: Baseline | null | undefined;
+
 /**
  * パフォーマンス計測結果を記録する
  */
@@ -57,13 +59,19 @@ export function recordPerformance(operation: string, durationMs: number): void {
 }
 
 /**
- * 前回のベースラインを読み込む
+ * 前回のベースラインを読み込む（キャッシュあり）
  */
 export function loadBaseline(): Baseline | null {
-  if (!existsSync(BASELINE_PATH)) return null;
+  if (cachedBaseline !== undefined) return cachedBaseline;
+  if (!existsSync(BASELINE_PATH)) {
+    cachedBaseline = null;
+    return null;
+  }
   try {
-    return JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) as Baseline;
+    cachedBaseline = JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) as Baseline;
+    return cachedBaseline;
   } catch {
+    cachedBaseline = null;
     return null;
   }
 }
@@ -77,15 +85,17 @@ export function saveBaseline(): void {
     entries: performanceEntries,
   };
   writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`, 'utf-8');
+  // キャッシュを無効化（次回テスト実行時に再読み込み）
+  cachedBaseline = undefined;
 }
 
 /**
- * 前回ベースラインとの比較で ±20% 超の劣化がないかチェック
+ * 前回ベースラインとの比較で劣化がないかチェック
  */
 export function checkRegression(
   operation: string,
   currentMs: number,
-  threshold = 0.2,
+  threshold = REGRESSION_THRESHOLD,
 ): { regressed: boolean; baselineMs?: number; changePercent?: number } {
   const baseline = loadBaseline();
   if (!baseline) return { regressed: false };
@@ -101,8 +111,30 @@ export function checkRegression(
   };
 }
 
+/**
+ * パフォーマンス計測＋記録＋回帰チェックを1関数で行うヘルパー
+ */
+export async function measureAndCheck(
+  operation: string,
+  fn: () => Promise<unknown>,
+  thresholdMs: number,
+): Promise<number> {
+  const { durationMs } = await withTiming(fn);
+  recordPerformance(operation, durationMs);
+
+  const regression = checkRegression(operation, durationMs);
+  if (regression.regressed) {
+    console.warn(
+      `⚠️ Performance regression in ${operation}: ${regression.baselineMs}ms → ${durationMs}ms (${regression.changePercent}%)`,
+    );
+  }
+
+  expect(durationMs).toBeLessThan(thresholdMs);
+  return durationMs;
+}
+
 // ========================================
-// アサーションヘルパー
+// Assertion helpers
 // ========================================
 
 /**
@@ -130,5 +162,17 @@ export async function expectError(
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     expect(message.toLowerCase()).toContain(expectedSubstring.toLowerCase());
+  }
+}
+
+/**
+ * オブジェクトの各フィールドが指定された型であることを検証
+ */
+export function expectFieldTypes(
+  obj: Record<string, unknown>,
+  typeMap: Record<string, string>,
+): void {
+  for (const [key, expectedType] of Object.entries(typeMap)) {
+    expect(typeof obj[key]).toBe(expectedType);
   }
 }

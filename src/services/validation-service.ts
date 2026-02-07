@@ -14,8 +14,12 @@ import type {
   ValidationIssue,
 } from '../types.js';
 import { formatFileSize } from '../utils/formatter.js';
-import { getMetadata } from './pdfjs-service.js';
-import { analyzeTags, countImages } from './pdfjs-service.js';
+import {
+  getMetadata,
+  loadDocument,
+  analyzeTagsFromDoc,
+  countImagesFromDoc,
+} from './pdfjs-service.js';
 import { analyzeStructure, analyzeFontsWithPdfLib } from './pdflib-service.js';
 
 // ─── validate_tagged ─────────────────────────────────────
@@ -39,8 +43,20 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
   let failed = 0;
   let warnings = 0;
 
-  // Load tag analysis
-  const tagsAnalysis = await analyzeTags(filePath);
+  // ドキュメントを1回だけロードし、タグ解析と画像カウントで共有
+  const doc = await loadDocument(filePath);
+  let tagsAnalysis: Awaited<ReturnType<typeof analyzeTagsFromDoc>>;
+  let imageCount: number;
+
+  try {
+    // タグ解析と画像カウントを並列実行
+    [tagsAnalysis, imageCount] = await Promise.all([
+      analyzeTagsFromDoc(doc),
+      countImagesFromDoc(doc),
+    ]);
+  } finally {
+    await doc.destroy();
+  }
 
   // Check 1: Is the document tagged?
   totalChecks++;
@@ -172,7 +188,6 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
   // Check 5: Figure tags for images
   totalChecks++;
   const figureCount = tagsAnalysis.roleCounts.Figure ?? 0;
-  const imageCount = await countImages(filePath);
 
   if (imageCount > 0 && figureCount === 0) {
     failed++;

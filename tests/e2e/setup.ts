@@ -1,9 +1,7 @@
 /**
  * E2E Test Common Setup
  *
- * - Fixture file paths
- * - PDF existence checks
- * - Fixture metadata expectations
+ * フィクスチャパス定義・存在チェック・期待値テーブル
  */
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -11,11 +9,6 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(__dirname, '..', 'fixtures');
-
-/** Check that all fixture files exist */
-export function checkFixtures(): boolean {
-  return ALL_FIXTURES.every((f) => existsSync(f.path));
-}
 
 // ========================================
 // Fixture paths
@@ -33,7 +26,7 @@ export const FIXTURES = {
 } as const;
 
 // ========================================
-// Fixture expectations
+// Fixture expectations (parametric test table)
 // ========================================
 
 export interface FixtureExpectation {
@@ -111,6 +104,11 @@ export const ALL_FIXTURES: FixtureExpectation[] = [
     hasSignatureFields: false,
   },
 ];
+
+/** Check that all fixture files exist */
+export function checkFixtures(): boolean {
+  return ALL_FIXTURES.every((f) => existsSync(f.path));
+}
 
 /** Invalid/non-existent paths for error testing */
 export const INVALID_PATHS = {

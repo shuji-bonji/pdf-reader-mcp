@@ -14,154 +14,133 @@ import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdf
 import { validateMetadata } from '../../src/services/validation-service.js';
 import { validatePdfPath } from '../../src/utils/error-handler.js';
 import { parsePageRange } from '../../src/utils/pdf-helpers.js';
+import { EXPECTED_METADATA, PAGE_RANGE_CASES, SEARCH_QUERIES } from './constants.js';
 import { FIXTURES, INVALID_PATHS } from './setup.js';
 
 // ========================================
-// パスバリデーション & セキュリティ
+// Path validation & security
 // ========================================
 
-describe('08 - パスバリデーション', () => {
+describe('08 - path validation', () => {
   // EH-1: 存在しないファイルパス
-  it('EH-1: 存在しないファイルパスでエラー', async () => {
+  it('EH-1: non-existent path throws error', async () => {
     await expect(getMetadata(INVALID_PATHS.nonExistent)).rejects.toThrow();
   });
 
   // EH-2: 空文字パス
-  it('EH-2: 空文字パスでバリデーションエラー', () => {
+  it('EH-2: empty string path throws validation error', () => {
     expect(() => validatePdfPath('')).toThrow();
   });
 
   // EH-3: 相対パス
-  it('EH-3: 相対パスでバリデーションエラー', () => {
-    expect(() => validatePdfPath('tests/fixtures/simple.pdf')).toThrow(/absolute/i);
+  it('EH-3: relative path throws validation error', () => {
+    expect(() => validatePdfPath(INVALID_PATHS.relative)).toThrow(/absolute/i);
   });
 
   // EH-4: ".." を含むパス
-  it('EH-4: ".." を含むパスでセキュリティエラー', () => {
-    expect(() => validatePdfPath('/tmp/../etc/passwd')).toThrow();
+  it('EH-4: traversal path throws security error', () => {
+    expect(() => validatePdfPath(INVALID_PATHS.traversal)).toThrow();
   });
 
   // EH-5: 非PDF拡張子
-  it('EH-5: .txt 拡張子でバリデーションエラー', () => {
-    expect(() => validatePdfPath('/tmp/test-file.txt')).toThrow(/\.pdf/i);
+  it('EH-5: non-PDF extension throws validation error', () => {
+    expect(() => validatePdfPath(INVALID_PATHS.notPdf)).toThrow(/\.pdf/i);
   });
 
   // EH-extra: 正常なパスは通過
-  it('EH-extra: 正常な PDF パスは通過', () => {
+  it('EH-extra: valid PDF path passes validation', () => {
     expect(() => validatePdfPath(FIXTURES.simple)).not.toThrow();
   });
 });
 
 // ========================================
-// 壊れたPDFの処理
+// Corrupted PDF handling
 // ========================================
 
-describe('08 - 壊れたPDFの処理', () => {
+describe('08 - corrupted PDF handling', () => {
   // EH-6: corrupted.pdf
-  it('EH-6: corrupted.pdf でパース失敗', async () => {
+  it('EH-6: corrupted.pdf loadDocument fails', async () => {
     await expect(loadDocument(FIXTURES.corrupted)).rejects.toThrow();
   });
 
-  it('EH-6b: corrupted.pdf の getMetadata でエラー', async () => {
+  it('EH-6b: corrupted.pdf getMetadata fails', async () => {
     await expect(getMetadata(FIXTURES.corrupted)).rejects.toThrow();
   });
 
-  it('EH-6c: corrupted.pdf の analyzeStructure でエラー', async () => {
+  it('EH-6c: corrupted.pdf analyzeStructure fails', async () => {
     await expect(analyzeStructure(FIXTURES.corrupted)).rejects.toThrow();
   });
 });
 
 // ========================================
-// ページ範囲パース
+// Page range parsing (table-driven)
 // ========================================
 
 describe('08 - parsePageRange', () => {
-  it('単一ページ "2" → [2]', () => {
-    const result = parsePageRange('2', 5);
-    expect(result).toEqual([2]);
-  });
+  for (const { input, totalPages, expected, label } of PAGE_RANGE_CASES) {
+    it(label, () => {
+      const result = parsePageRange(input, totalPages);
+      expect(result).toEqual(expected);
+    });
+  }
 
-  it('範囲 "1-3" → [1, 2, 3]', () => {
-    const result = parsePageRange('1-3', 5);
-    expect(result).toEqual([1, 2, 3]);
-  });
-
-  it('複合 "1,3,5" → [1, 3, 5]', () => {
-    const result = parsePageRange('1,3,5', 5);
-    expect(result).toEqual([1, 3, 5]);
-  });
-
-  it('混合 "1,3-5" → [1, 3, 4, 5]', () => {
-    const result = parsePageRange('1,3-5', 5);
-    expect(result).toEqual([1, 3, 4, 5]);
-  });
-
-  it('重複排除と並び替え "3,1,2,1" → [1, 2, 3]', () => {
-    const result = parsePageRange('3,1,2,1', 5);
-    expect(result).toEqual([1, 2, 3]);
-  });
-
-  it('undefined → null (全ページ指定)', () => {
+  it('undefined → null (all pages)', () => {
     const result = parsePageRange(undefined, 5);
     expect(result).toBeNull();
   });
 });
 
 // ========================================
-// サービス横断テスト
+// Cross-service integration
 // ========================================
 
-describe('08 - サービス横断テスト', () => {
+describe('08 - cross-service integration', () => {
   // 同一ファイルを複数サービスで処理
-  it('同一ファイルを pdfjs と pdflib で同時処理', async () => {
+  it('pdfjs and pdflib page counts agree', async () => {
     const [meta, structure] = await Promise.all([
       getMetadata(FIXTURES.simple),
       analyzeStructure(FIXTURES.simple),
     ]);
-
-    // ページ数が一致
     expect(meta.pageCount).toBe(structure.pageTree.totalPages);
   });
 
   // 連続呼び出し安定性
-  it('同一ファイルの連続メタデータ取得が安定', async () => {
+  it('repeated getMetadata calls return consistent results', async () => {
     const results = await Promise.all([
       getMetadata(FIXTURES.simple),
       getMetadata(FIXTURES.simple),
       getMetadata(FIXTURES.simple),
     ]);
-
-    // 全て同じ結果
     for (const r of results) {
-      expect(r.title).toBe('Test PDF Document');
-      expect(r.pageCount).toBe(3);
+      expect(r.title).toBe(EXPECTED_METADATA.simple.title);
+      expect(r.pageCount).toBe(EXPECTED_METADATA.simple.pageCount);
     }
   });
 
   // 異なるフィクスチャの交互処理
-  it('異なるフィクスチャの交互処理が正常', async () => {
+  it('alternating fixture processing is stable', async () => {
     const meta1 = await getMetadata(FIXTURES.simple);
     const meta2 = await getMetadata(FIXTURES.annotated);
     const meta3 = await getMetadata(FIXTURES.simple);
 
-    expect(meta1.title).toBe('Test PDF Document');
-    expect(meta2.title).toBe('Annotated Test PDF');
-    expect(meta3.title).toBe('Test PDF Document');
+    expect(meta1.title).toBe(EXPECTED_METADATA.simple.title);
+    expect(meta2.title).toBe(EXPECTED_METADATA.annotated.title);
+    expect(meta3.title).toBe(EXPECTED_METADATA.simple.title);
   });
 
   // テキスト抽出 → 検索の組み合わせ
-  it('テキスト抽出後に検索が正常動作', async () => {
+  it('text extraction followed by search works correctly', async () => {
     await extractText(FIXTURES.simple);
-    const matches = await searchText(FIXTURES.simple, 'Hello');
+    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   // 全サービスの順次実行
-  it('全サービスの順次実行でクラッシュしない', async () => {
+  it('sequential execution of all services completes without crash', async () => {
     // Tier 1
     await getMetadata(FIXTURES.simple);
     await extractText(FIXTURES.simple, '1');
-    await searchText(FIXTURES.simple, 'test');
+    await searchText(FIXTURES.simple, SEARCH_QUERIES.test);
 
     // Tier 2
     await analyzeStructure(FIXTURES.simple);
@@ -170,7 +149,6 @@ describe('08 - サービス横断テスト', () => {
     // Tier 3
     await validateMetadata(FIXTURES.simple);
 
-    // 正常終了
     expect(true).toBe(true);
   });
 });

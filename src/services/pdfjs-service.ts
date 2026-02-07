@@ -110,12 +110,14 @@ export async function extractTextFromDoc(
 ): Promise<PageText[]> {
   const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
-  const results: PageText[] = [];
-  for (const pageNum of pageNumbers) {
-    const page = await doc.getPage(pageNum);
-    const text = await extractPageText(page);
-    results.push({ page: pageNum, text });
-  }
+  // 全ページを並列に処理（pdfjs-dist は並列ページアクセスが安全）
+  const results = await Promise.all(
+    pageNumbers.map(async (pageNum) => {
+      const page = await doc.getPage(pageNum);
+      const text = await extractPageText(page);
+      return { page: pageNum, text };
+    }),
+  );
 
   return results;
 }
@@ -148,11 +150,18 @@ export async function searchText(
   try {
     const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
-    const matches: SearchMatch[] = [];
+    // 全ページのテキストを並列に抽出
+    const pageTexts = await Promise.all(
+      pageNumbers.map(async (pageNum) => {
+        const page = await doc.getPage(pageNum);
+        const fullText = await extractPageText(page);
+        return { pageNum, fullText };
+      }),
+    );
 
-    for (const pageNum of pageNumbers) {
-      const page = await doc.getPage(pageNum);
-      const fullText = await extractPageText(page);
+    // 抽出済みテキストからマッチを検索（CPU処理のみ、同期で十分）
+    const matches: SearchMatch[] = [];
+    for (const { pageNum, fullText } of pageTexts) {
       const lines = fullText.split('\n');
 
       for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
@@ -197,18 +206,22 @@ export async function searchText(
 export async function countImagesFromDoc(doc: PDFDocumentProxy, pages?: string): Promise<number> {
   const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
-  let total = 0;
-  for (const pageNum of pageNumbers) {
-    const page = await doc.getPage(pageNum);
-    const opList = await page.getOperatorList();
-    for (const op of opList.fnArray) {
-      if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
-        total++;
+  // 全ページのオペレータリストを並列取得し、画像数を集計
+  const counts = await Promise.all(
+    pageNumbers.map(async (pageNum) => {
+      const page = await doc.getPage(pageNum);
+      const opList = await page.getOperatorList();
+      let count = 0;
+      for (const op of opList.fnArray) {
+        if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
+          count++;
+        }
       }
-    }
-  }
+      return count;
+    }),
+  );
 
-  return total;
+  return counts.reduce((sum, c) => sum + c, 0);
 }
 
 /**
@@ -237,50 +250,58 @@ export async function extractImages(
   try {
     const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
-    const images: ExtractedImage[] = [];
-    let detectedCount = 0;
+    // 全ページの画像抽出を並列実行
+    const pageResults = await Promise.all(
+      pageNumbers.map(async (pageNum) => {
+        const page = await doc.getPage(pageNum);
+        const opList = await page.getOperatorList();
 
-    for (const pageNum of pageNumbers) {
-      const page = await doc.getPage(pageNum);
-      const opList = await page.getOperatorList();
+        const pageImages: ExtractedImage[] = [];
+        let pageDetected = 0;
+        let imageIndex = 0;
 
-      let imageIndex = 0;
-      for (let i = 0; i < opList.fnArray.length; i++) {
-        const op = opList.fnArray[i];
-        if (op === OPS.paintImageXObject) {
-          detectedCount++;
-          try {
-            const imgName = opList.argsArray[i][0] as string;
-            const objs = page.objs;
-            const imgData = objs.get(imgName) as {
-              width: number;
-              height: number;
-              data: Uint8Array | Uint8ClampedArray;
-              kind: number;
-            } | null;
+        for (let i = 0; i < opList.fnArray.length; i++) {
+          const op = opList.fnArray[i];
+          if (op === OPS.paintImageXObject) {
+            pageDetected++;
+            try {
+              const imgName = opList.argsArray[i][0] as string;
+              const objs = page.objs;
+              const imgData = objs.get(imgName) as {
+                width: number;
+                height: number;
+                data: Uint8Array | Uint8ClampedArray;
+                kind: number;
+              } | null;
 
-            if (imgData?.data) {
-              const base64 = Buffer.from(imgData.data).toString('base64');
-              const colorSpace =
-                imgData.kind === 1 ? 'RGB' : imgData.kind === 2 ? 'RGBA' : 'Grayscale';
+              if (imgData?.data) {
+                const base64 = Buffer.from(imgData.data).toString('base64');
+                const colorSpace =
+                  imgData.kind === 1 ? 'RGB' : imgData.kind === 2 ? 'RGBA' : 'Grayscale';
 
-              images.push({
-                page: pageNum,
-                index: imageIndex,
-                width: imgData.width,
-                height: imgData.height,
-                colorSpace,
-                bitsPerComponent: 8,
-                dataBase64: base64,
-              });
+                pageImages.push({
+                  page: pageNum,
+                  index: imageIndex,
+                  width: imgData.width,
+                  height: imgData.height,
+                  colorSpace,
+                  bitsPerComponent: 8,
+                  dataBase64: base64,
+                });
+              }
+            } catch {
+              // Some images may not be directly accessible; skip
             }
-          } catch {
-            // Some images may not be directly accessible; skip
+            imageIndex++;
           }
-          imageIndex++;
         }
-      }
-    }
+        return { pageImages, pageDetected };
+      }),
+    );
+
+    // 各ページの結果を集約
+    const images = pageResults.flatMap((r) => r.pageImages);
+    const detectedCount = pageResults.reduce((sum, r) => sum + r.pageDetected, 0);
 
     return {
       images,
@@ -362,18 +383,19 @@ async function getMarkInfo(doc: PDFDocumentProxy): Promise<Record<string, boolea
  */
 async function checkSignatures(doc: PDFDocumentProxy): Promise<boolean> {
   try {
-    // Check for signature fields in annotations across first few pages
+    // 最初の5ページを並列チェックし、いずれかに署名フィールドがあれば true
     const pagesToCheck = Math.min(doc.numPages, 5);
-    for (let i = 1; i <= pagesToCheck; i++) {
-      const page = await doc.getPage(i);
-      const annotations = await page.getAnnotations();
-      for (const annot of annotations) {
-        if (annot.subtype === 'Widget' && annot.fieldType === 'Sig') {
-          return true;
-        }
-      }
-    }
-    return false;
+    const pageNumbers = Array.from({ length: pagesToCheck }, (_, i) => i + 1);
+
+    const results = await Promise.all(
+      pageNumbers.map(async (pageNum) => {
+        const page = await doc.getPage(pageNum);
+        const annotations = await page.getAnnotations();
+        return annotations.some((annot) => annot.subtype === 'Widget' && annot.fieldType === 'Sig');
+      }),
+    );
+
+    return results.some((hasSig) => hasSig);
   } catch {
     return false;
   }
@@ -387,63 +409,85 @@ function asStringOrNull(value: unknown): string | null {
 // ─── Tier 2: Structure analysis functions ────────────────
 
 /**
- * Analyze Tagged PDF structure tree.
+ * Analyze Tagged PDF structure tree from a pre-loaded document.
+ * Does NOT destroy the document — caller is responsible for lifecycle.
  */
-export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
-  const doc = await loadDocument(filePath);
+export async function analyzeTagsFromDoc(doc: PDFDocumentProxy): Promise<TagsAnalysis> {
+  // Check if tagged
+  const markInfo = await getMarkInfo(doc);
+  const isTagged = markInfo?.Marked === true;
 
-  try {
-    // Check if tagged
-    const markInfo = await getMarkInfo(doc);
-    const isTagged = markInfo?.Marked === true;
+  if (!isTagged) {
+    return {
+      isTagged: false,
+      rootTag: null,
+      maxDepth: 0,
+      totalElements: 0,
+      roleCounts: {},
+    };
+  }
 
-    if (!isTagged) {
-      return {
-        isTagged: false,
-        rootTag: null,
-        maxDepth: 0,
-        totalElements: 0,
-        roleCounts: {},
-      };
-    }
-
-    // Collect structure trees from all pages
-    const roleCounts: Record<string, number> = {};
-    let totalElements = 0;
-    let maxDepth = 0;
-    const rootChildren: TagNode[] = [];
-
-    for (let i = 1; i <= doc.numPages; i++) {
-      const page = await doc.getPage(i);
+  // 全ページの構造ツリーを並列取得
+  const pageNumbers = Array.from({ length: doc.numPages }, (_, i) => i + 1);
+  const pageResults = await Promise.all(
+    pageNumbers.map(async (pageNum) => {
+      const page = await doc.getPage(pageNum);
       try {
         const tree = await page.getStructTree();
         if (tree) {
-          const node = buildTagNode(tree, roleCounts, 1);
-          totalElements += countTagElements(node);
-          maxDepth = Math.max(maxDepth, getTagDepth(node));
-          rootChildren.push(node);
+          const localRoleCounts: Record<string, number> = {};
+          const node = buildTagNode(tree, localRoleCounts, 1);
+          return { node, roleCounts: localRoleCounts };
         }
       } catch {
         // Some pages may not have structure tree
       }
+      return null;
+    }),
+  );
+
+  // 各ページの結果を集約
+  const roleCounts: Record<string, number> = {};
+  let totalElements = 0;
+  let maxDepth = 0;
+  const rootChildren: TagNode[] = [];
+
+  for (const result of pageResults) {
+    if (!result) continue;
+    rootChildren.push(result.node);
+    totalElements += countTagElements(result.node);
+    maxDepth = Math.max(maxDepth, getTagDepth(result.node));
+    // ページごとの roleCounts をマージ
+    for (const [role, count] of Object.entries(result.roleCounts)) {
+      roleCounts[role] = (roleCounts[role] ?? 0) + count;
     }
+  }
 
-    const rootTag: TagNode | null =
-      rootChildren.length > 0
-        ? { role: 'StructTreeRoot', children: rootChildren, contentCount: 0 }
-        : null;
+  const rootTag: TagNode | null =
+    rootChildren.length > 0
+      ? { role: 'StructTreeRoot', children: rootChildren, contentCount: 0 }
+      : null;
 
-    if (rootTag) {
-      maxDepth += 1; // Account for the root level
-    }
+  if (rootTag) {
+    maxDepth += 1; // Account for the root level
+  }
 
-    return {
-      isTagged,
-      rootTag,
-      maxDepth,
-      totalElements,
-      roleCounts,
-    };
+  return {
+    isTagged,
+    rootTag,
+    maxDepth,
+    totalElements,
+    roleCounts,
+  };
+}
+
+/**
+ * Analyze Tagged PDF structure tree.
+ */
+export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
+  const doc = await loadDocument(filePath);
+  try {
+    return await analyzeTagsFromDoc(doc);
   } finally {
     await doc.destroy();
   }
@@ -460,13 +504,6 @@ export async function analyzeAnnotations(
 
   try {
     const pageNumbers = resolvePageNumbers(pages, doc.numPages);
-
-    const annotations: AnnotationInfo[] = [];
-    const bySubtype: Record<string, number> = {};
-    const byPage: Record<number, number> = {};
-    let hasLinks = false;
-    let hasForms = false;
-    let hasMarkup = false;
 
     const markupSubtypes = new Set([
       'Text',
@@ -487,29 +524,65 @@ export async function analyzeAnnotations(
       'Redact',
     ]);
 
-    for (const pageNum of pageNumbers) {
-      const page = await doc.getPage(pageNum);
-      const annots = await page.getAnnotations();
+    // 全ページのアノテーションを並列取得
+    const pageResults = await Promise.all(
+      pageNumbers.map(async (pageNum) => {
+        const page = await doc.getPage(pageNum);
+        const annots = await page.getAnnotations();
 
-      for (const annot of annots) {
-        const subtype: string = annot.subtype ?? 'Unknown';
+        const pageAnnotations: AnnotationInfo[] = [];
+        const pageBySubtype: Record<string, number> = {};
+        let pageHasLinks = false;
+        let pageHasForms = false;
+        let pageHasMarkup = false;
 
-        bySubtype[subtype] = (bySubtype[subtype] ?? 0) + 1;
-        byPage[pageNum] = (byPage[pageNum] ?? 0) + 1;
+        for (const annot of annots) {
+          const subtype: string = annot.subtype ?? 'Unknown';
 
-        if (subtype === 'Link') hasLinks = true;
-        if (subtype === 'Widget') hasForms = true;
-        if (markupSubtypes.has(subtype)) hasMarkup = true;
+          pageBySubtype[subtype] = (pageBySubtype[subtype] ?? 0) + 1;
 
-        annotations.push({
-          subtype,
-          page: pageNum,
-          rect: annot.rect ?? null,
-          contents: asStringOrNull(annot.contentsObj?.str) ?? asStringOrNull(annot.contents),
-          author: asStringOrNull(annot.titleObj?.str) ?? null,
-          modificationDate: asStringOrNull(annot.modificationDate) ?? null,
-          hasAppearance: annot.hasAppearance === true,
-        });
+          if (subtype === 'Link') pageHasLinks = true;
+          if (subtype === 'Widget') pageHasForms = true;
+          if (markupSubtypes.has(subtype)) pageHasMarkup = true;
+
+          pageAnnotations.push({
+            subtype,
+            page: pageNum,
+            rect: annot.rect ?? null,
+            contents: asStringOrNull(annot.contentsObj?.str) ?? asStringOrNull(annot.contents),
+            author: asStringOrNull(annot.titleObj?.str) ?? null,
+            modificationDate: asStringOrNull(annot.modificationDate) ?? null,
+            hasAppearance: annot.hasAppearance === true,
+          });
+        }
+
+        return {
+          pageNum,
+          annotations: pageAnnotations,
+          bySubtype: pageBySubtype,
+          hasLinks: pageHasLinks,
+          hasForms: pageHasForms,
+          hasMarkup: pageHasMarkup,
+        };
+      }),
+    );
+
+    // 各ページの結果を集約
+    const annotations: AnnotationInfo[] = [];
+    const bySubtype: Record<string, number> = {};
+    const byPage: Record<number, number> = {};
+    let hasLinks = false;
+    let hasForms = false;
+    let hasMarkup = false;
+
+    for (const result of pageResults) {
+      annotations.push(...result.annotations);
+      byPage[result.pageNum] = result.annotations.length;
+      hasLinks = hasLinks || result.hasLinks;
+      hasForms = hasForms || result.hasForms;
+      hasMarkup = hasMarkup || result.hasMarkup;
+      for (const [subtype, count] of Object.entries(result.bySubtype)) {
+        bySubtype[subtype] = (bySubtype[subtype] ?? 0) + count;
       }
     }
 
