@@ -1,0 +1,56 @@
+{
+  "name": "@shuji-bonji/pdf-reader-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "pdf-reader-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome lint ./src ./tests",
+    "lint:fix": "biome lint --fix ./src ./tests",
+    "format": "biome format ./src ./tests",
+    "format:fix": "biome format --write ./src ./tests",
+    "check": "biome check ./src ./tests",
+    "check:fix": "biome check --fix ./src ./tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "pdf",
+    "pdf-reader",
+    "pdf-structure",
+    "tagged-pdf",
+    "digital-signatures",
+    "model-context-protocol"
+  ],
+  "author": "shuji-bonji",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shuji-bonji/pdf-reader-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "pdfjs-dist": "^4.9.155",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "@types/node": "^22.10.0",
+    "pdf-lib": "^1.17.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}
