@@ -1,65 +1,79 @@
 # PDF Reader MCP Server
 
-PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー。
+[![npm version](https://img.shields.io/npm/v/@shuji-bonji/pdf-reader-mcp)](https://www.npmjs.com/package/@shuji-bonji/pdf-reader-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet?logo=anthropic)](https://claude.ai/code)
 
-既存の pdf-reader-mcp がテキスト抽出の薄いラッパーに留まるのに対し、本プロジェクトは **PDF の内部構造を読み解く** ことに焦点を当てています。[pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) と組み合わせることで、仕様知識に基づいた構造解析・検証が可能になります。
+**English** | [日本語](./README.ja.md)
 
-## ツール一覧
+An MCP (Model Context Protocol) server specialized in **deciphering PDF internal structures**.
 
-### Tier 1: 基本機能 ✅ (v0.1.0)
+While typical PDF MCP servers are thin wrappers for text extraction, this project focuses on **reading and analyzing the internal structure** of PDF documents. Pair it with [pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) for specification-aware structural analysis and validation.
 
-| ツール           | 説明                                                |
-| ---------------- | --------------------------------------------------- |
-| `get_page_count` | ページ数の軽量取得                                  |
-| `get_metadata`   | メタデータ抽出（タイトル、著者、PDF版、タグ有無等） |
-| `read_text`      | テキスト抽出（Y座標ベースの読み順保持）             |
-| `search_text`    | 全文検索（前後コンテキスト付き）                    |
-| `read_images`    | 画像抽出（base64、メタデータ付き）                  |
-| `read_url`       | URLからリモートPDFを取得して処理                    |
-| `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数）  |
+## Features
 
-### Tier 2: 構造解析 ✅ (v0.1.0)
+**15 tools** organized into three tiers:
 
-| ツール                | 説明                                         |
-| --------------------- | -------------------------------------------- |
-| `inspect_structure`   | オブジェクトツリー・カタログ辞書の解析       |
-| `inspect_tags`        | Tagged PDF のタグツリー可視化                |
-| `inspect_fonts`       | フォント一覧（埋め込み/サブセット/Type判定） |
-| `inspect_annotations` | 注釈一覧（タイプ別分類）                     |
-| `inspect_signatures`  | 電子署名フィールドの構造解析                 |
+### Tier 1: Basic Operations
 
-### Tier 3: 検証・分析 ✅ (v0.2.0)
+| Tool             | Description                                              |
+| ---------------- | -------------------------------------------------------- |
+| `get_page_count` | Lightweight page count retrieval                         |
+| `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
+| `read_text`      | Text extraction with Y-coordinate reading order          |
+| `search_text`    | Full-text search with surrounding context                |
+| `read_images`    | Image extraction as base64 with metadata                 |
+| `read_url`       | Fetch and process remote PDFs from URLs                  |
+| `summarize`      | Quick overview report (metadata + text + image count)    |
 
-| ツール              | 説明                                           |
-| ------------------- | ---------------------------------------------- |
-| `validate_tagged`   | PDF/UA タグ構造の検証（8項目チェック）         |
-| `validate_metadata` | メタデータの仕様適合チェック（10項目チェック） |
-| `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+### Tier 2: Structure Inspection
 
-## セットアップ
+| Tool                  | Description                                      |
+| --------------------- | ------------------------------------------------ |
+| `inspect_structure`   | Object tree and catalog dictionary analysis      |
+| `inspect_tags`        | Tagged PDF structure tree visualization          |
+| `inspect_fonts`       | Font inventory (embedded/subset/type detection)  |
+| `inspect_annotations` | Annotation listing (categorized by subtype)      |
+| `inspect_signatures`  | Digital signature field structure analysis        |
+
+### Tier 3: Validation & Analysis
+
+| Tool                | Description                                          |
+| ------------------- | ---------------------------------------------------- |
+| `validate_tagged`   | PDF/UA tag structure validation (8 checks)           |
+| `validate_metadata` | Metadata conformance checking (10 checks)            |
+| `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+## Installation
+
+### npx (recommended)
+
+```bash
+npx @shuji-bonji/pdf-reader-mcp
+```
 
 ### Claude Desktop
 
-`claude_desktop_config.json` に追加:
+Add to your `claude_desktop_config.json`:
 
 ```json
 {
-	"mcpServers": {
-		"pdf-reader-mcp": {
-			"command": "node",
-			"args": ["/path/to/pdf-reader-mcp/dist/index.js"]
-		}
-	}
+  "mcpServers": {
+    "pdf-reader-mcp": {
+      "command": "npx",
+      "args": ["-y", "@shuji-bonji/pdf-reader-mcp"]
+    }
+  }
 }
 ```
 
 ### Claude Code
 
 ```bash
-claude mcp add pdf-reader-mcp node /path/to/pdf-reader-mcp/dist/index.js
+claude mcp add pdf-reader-mcp -- npx -y @shuji-bonji/pdf-reader-mcp
 ```
 
-### 開発用
+### From Source
 
 ```bash
 git clone https://github.com/shuji-bonji/pdf-reader-mcp.git
@@ -68,16 +82,16 @@ npm install
 npm run build
 ```
 
-## 使用例
+## Usage Examples
 
-### ページ数の取得
+### Get Page Count
 
 ```
 get_page_count({ file_path: "/path/to/document.pdf" })
 → 42
 ```
 
-### テキスト検索
+### Search Text
 
 ```
 search_text({
@@ -89,7 +103,7 @@ search_text({
 → Found 5 matches (page 3, 7, 12, 15, 18)
 ```
 
-### PDF概要
+### Summarize
 
 ```
 summarize({ file_path: "/path/to/document.pdf" })
@@ -100,7 +114,7 @@ summarize({ file_path: "/path/to/document.pdf" })
   | Images | 15 |
 ```
 
-### PDF/UA タグ検証
+### Validate Tagged Structure (PDF/UA)
 
 ```
 validate_tagged({ file_path: "/path/to/document.pdf" })
@@ -110,7 +124,7 @@ validate_tagged({ file_path: "/path/to/document.pdf" })
   ❌ [TAG-005] Document has 3 image(s) but no Figure tags
 ```
 
-### メタデータ検証
+### Validate Metadata
 
 ```
 validate_metadata({ file_path: "/path/to/document.pdf" })
@@ -119,7 +133,7 @@ validate_metadata({ file_path: "/path/to/document.pdf" })
   ✅ [META-006] PDF version: 2.0
 ```
 
-### 構造比較
+### Compare Structure
 
 ```
 compare_structure({
@@ -131,54 +145,62 @@ compare_structure({
   | Tagged      | true | true | ✅ |
 ```
 
-## 技術スタック
+## Tech Stack
 
 - **TypeScript** + MCP TypeScript SDK
-- **pdfjs-dist** (Mozilla) — テキスト/画像抽出
-- **pdf-lib** (Tier 2〜) — 低レベル構造解析
-- **Vitest** — テスト
-- **Zod** — 入力バリデーション
+- **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
+- **pdf-lib** — low-level object structure analysis
+- **Vitest** — unit + E2E testing (185 tests)
+- **Biome** — linting + formatting
+- **Zod** — input validation
 
-## テスト
+## Testing
 
 ```bash
-npm test          # テスト実行
-npm run test:watch  # ウォッチモード
+npm test              # Run all tests (unit + E2E)
+npm run test:e2e      # E2E tests only (146 tests)
+npm run test:watch    # Watch mode
 ```
 
-## アーキテクチャ
+## Architecture
 
 ```
 pdf-reader-mcp/
 ├── src/
-│   ├── index.ts           # MCP Server エントリーポイント
-│   ├── constants.ts       # 定数
-│   ├── types.ts           # 型定義
+│   ├── index.ts              # MCP Server entry point
+│   ├── constants.ts          # Shared constants
+│   ├── types.ts              # Type definitions
 │   ├── tools/
-│   │   ├── tier1/         # 基本ツール（7ツール）
-│   │   ├── tier2/         # 構造解析（5ツール）
-│   │   ├── tier3/         # 検証・分析（3ツール）
-│   │   └── index.ts       # ツール登録の集約
-│   ├── services/          # PDF ライブラリラッパー
-│   │   ├── pdfjs-service.ts      # pdfjs-dist ラッパー
-│   │   ├── pdflib-service.ts     # pdf-lib ラッパー
-│   │   ├── validation-service.ts # 検証・比較ロジック
-│   │   └── url-fetcher.ts        # URL取得
-│   ├── schemas/           # Zod バリデーションスキーマ
-│   └── utils/             # ユーティリティ
+│   │   ├── tier1/            # Basic tools (7)
+│   │   ├── tier2/            # Structure inspection (5)
+│   │   ├── tier3/            # Validation & analysis (3)
+│   │   └── index.ts          # Tool registration
+│   ├── services/
+│   │   ├── pdfjs-service.ts        # pdfjs-dist wrapper (parallel page processing)
+│   │   ├── pdflib-service.ts       # pdf-lib wrapper
+│   │   ├── validation-service.ts   # Validation & comparison logic
+│   │   └── url-fetcher.ts          # URL fetching
+│   ├── schemas/              # Zod validation schemas
+│   └── utils/
+│       ├── pdf-helpers.ts    # PDF utilities (page range parsing, file I/O)
+│       ├── batch-processor.ts # Batch processing for large PDFs
+│       ├── formatter.ts      # Output formatting
+│       └── error-handler.ts  # Error handling
 └── tests/
+    ├── tier1/                # Unit tests
+    └── e2e/                  # E2E tests (9 suites, 146 tests)
 ```
 
-## pdf-spec-mcp との連携
+## Pairing with pdf-spec-mcp
 
-pdf-spec-mcp は PDF 仕様（ISO 32000-2 等）の知識を提供する MCP サーバーです。両方を有効にすることで、LLM は以下のようなワークフローを実行できます:
+[pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) provides PDF specification knowledge (ISO 32000-2, etc.). With both servers enabled, an LLM can perform specification-aware workflows:
 
-1. `summarize` で PDF の概要を把握
-2. `inspect_tags` でタグ構造を確認
-3. pdf-spec-mcp の `get_requirements` で PDF/UA 要件を取得
-4. `validate_tagged` で適合性を検証
-5. `compare_structure` で修正前後の構造差分を確認
+1. `summarize` — get a PDF overview
+2. `inspect_tags` — examine the tag structure
+3. pdf-spec-mcp `get_requirements` — fetch PDF/UA requirements
+4. `validate_tagged` — check conformance
+5. `compare_structure` — diff before/after fixes
 
-## ライセンス
+## License
 
 MIT

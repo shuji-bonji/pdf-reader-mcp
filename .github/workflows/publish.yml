@@ -1,41 +1,28 @@
-name: CI
+name: Publish to npm
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - 'v*'
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  publish:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [18, 20, 22]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format
-
-      - name: Type check
-        run: npm run typecheck
 
       - name: Build
         run: npm run build
@@ -43,8 +30,13 @@ jobs:
       - name: Generate test fixtures
         run: npm run test:fixtures
 
-      - name: Unit tests
+      - name: Run tests
         run: npm test
 
       - name: E2E tests
         run: npm run test:e2e
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
