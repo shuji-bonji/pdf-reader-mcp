@@ -32,8 +32,9 @@ describe('parsePageRange', () => {
     expect(parsePageRange('5,3,5,1', 10)).toEqual([1, 3, 5]);
   });
 
-  it('should clamp range to total pages', () => {
-    expect(parsePageRange('1-100', 5)).toEqual([1, 2, 3, 4, 5]);
+  it('should throw for out-of-bounds range', () => {
+    expect(() => parsePageRange('1-100', 5)).toThrow(PdfReaderError);
+    expect(() => parsePageRange('0-3', 5)).toThrow(PdfReaderError);
   });
 
   it('should throw for invalid page number', () => {

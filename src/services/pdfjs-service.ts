@@ -5,13 +5,25 @@
  */
 
 import {
+  OPS,
   getDocument,
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api.js';
 import { DEFAULT_SEARCH_CONTEXT } from '../constants.js';
-import type { ExtractedImage, PageText, PdfMetadata, SearchMatch } from '../types.js';
+import { detectEncryption } from './pdflib-service.js';
+import type {
+  AnnotationInfo,
+  AnnotationsAnalysis,
+  ExtractedImage,
+  ImageExtractionResult,
+  PageText,
+  PdfMetadata,
+  SearchMatch,
+  TagNode,
+  TagsAnalysis,
+} from '../types.js';
 import { getFileSize, parsePageRange, readPdfFile } from '../utils/pdf-helpers.js';
 
 /**
@@ -68,7 +80,7 @@ export async function getMetadata(filePath: string): Promise<PdfMetadata> {
       pageCount: doc.numPages,
       pdfVersion: asStringOrNull(info.PDFFormatVersion),
       isLinearized: info.IsLinearized === true,
-      isEncrypted: false, // TODO: Tier 2 で暗号化チェックを実装
+      isEncrypted: await detectEncryption(filePath),
       isTagged,
       hasSignatures,
       fileSize,
@@ -79,23 +91,34 @@ export async function getMetadata(filePath: string): Promise<PdfMetadata> {
 }
 
 /**
+ * Extract text from a pre-loaded PDFDocumentProxy.
+ * Does NOT destroy the document — caller is responsible for lifecycle.
+ */
+export async function extractTextFromDoc(
+  doc: PDFDocumentProxy,
+  pages?: string,
+): Promise<PageText[]> {
+  const pageNumbers =
+    parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+
+  const results: PageText[] = [];
+  for (const pageNum of pageNumbers) {
+    const page = await doc.getPage(pageNum);
+    const text = await extractPageText(page);
+    results.push({ page: pageNum, text });
+  }
+
+  return results;
+}
+
+/**
  * Extract text from specified pages (1-based).
  */
 export async function extractText(filePath: string, pages?: string): Promise<PageText[]> {
   const doc = await loadDocument(filePath);
 
   try {
-    const pageNumbers =
-      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
-
-    const results: PageText[] = [];
-    for (const pageNum of pageNumbers) {
-      const page = await doc.getPage(pageNum);
-      const text = await extractPageText(page);
-      results.push({ page: pageNum, text });
-    }
-
-    return results;
+    return await extractTextFromDoc(doc, pages);
   } finally {
     await doc.destroy();
   }
@@ -173,9 +196,8 @@ export async function countImages(filePath: string, pages?: string): Promise<num
     for (const pageNum of pageNumbers) {
       const page = await doc.getPage(pageNum);
       const opList = await page.getOperatorList();
-      // OPS.paintImageXObject = 85, OPS.paintJpegXObject = 82
       for (const op of opList.fnArray) {
-        if (op === 85 || op === 82) {
+        if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
           total++;
         }
       }
@@ -189,8 +211,12 @@ export async function countImages(filePath: string, pages?: string): Promise<num
 
 /**
  * Extract images from specified pages as base64.
+ * Returns both extracted images and counts of detected/skipped images.
  */
-export async function extractImages(filePath: string, pages?: string): Promise<ExtractedImage[]> {
+export async function extractImages(
+  filePath: string,
+  pages?: string,
+): Promise<ImageExtractionResult> {
   const doc = await loadDocument(filePath);
 
   try {
@@ -198,6 +224,7 @@ export async function extractImages(filePath: string, pages?: string): Promise<E
       parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
 
     const images: ExtractedImage[] = [];
+    let detectedCount = 0;
 
     for (const pageNum of pageNumbers) {
       const page = await doc.getPage(pageNum);
@@ -206,8 +233,8 @@ export async function extractImages(filePath: string, pages?: string): Promise<E
       let imageIndex = 0;
       for (let i = 0; i < opList.fnArray.length; i++) {
         const op = opList.fnArray[i];
-        // OPS.paintImageXObject = 85
-        if (op === 85) {
+        if (op === OPS.paintImageXObject) {
+          detectedCount++;
           try {
             const imgName = opList.argsArray[i][0] as string;
             const objs = page.objs;
@@ -219,7 +246,6 @@ export async function extractImages(filePath: string, pages?: string): Promise<E
             } | null;
 
             if (imgData?.data) {
-              // Convert raw pixel data to base64
               const base64 = Buffer.from(imgData.data).toString('base64');
               const colorSpace =
                 imgData.kind === 1 ? 'RGB' : imgData.kind === 2 ? 'RGBA' : 'Grayscale';
@@ -242,7 +268,12 @@ export async function extractImages(filePath: string, pages?: string): Promise<E
       }
     }
 
-    return images;
+    return {
+      images,
+      detectedCount,
+      extractedCount: images.length,
+      skippedCount: detectedCount - images.length,
+    };
   } finally {
     await doc.destroy();
   }
@@ -332,4 +363,201 @@ async function checkSignatures(doc: PDFDocumentProxy): Promise<boolean> {
 function asStringOrNull(value: unknown): string | null {
   if (typeof value === 'string' && value.length > 0) return value;
   return null;
+}
+
+// ─── Tier 2: Structure analysis functions ────────────────
+
+/**
+ * Analyze Tagged PDF structure tree.
+ */
+export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
+  const doc = await loadDocument(filePath);
+
+  try {
+    // Check if tagged
+    const markInfo = await getMarkInfo(doc);
+    const isTagged = markInfo?.Marked === true;
+
+    if (!isTagged) {
+      return {
+        isTagged: false,
+        rootTag: null,
+        maxDepth: 0,
+        totalElements: 0,
+        roleCounts: {},
+      };
+    }
+
+    // Collect structure trees from all pages
+    const roleCounts: Record<string, number> = {};
+    let totalElements = 0;
+    let maxDepth = 0;
+    const rootChildren: TagNode[] = [];
+
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      try {
+        const tree = await page.getStructTree();
+        if (tree) {
+          const node = buildTagNode(tree, roleCounts, 1);
+          totalElements += countTagElements(node);
+          maxDepth = Math.max(maxDepth, getTagDepth(node));
+          rootChildren.push(node);
+        }
+      } catch {
+        // Some pages may not have structure tree
+      }
+    }
+
+    const rootTag: TagNode | null =
+      rootChildren.length > 0
+        ? { role: 'StructTreeRoot', children: rootChildren, contentCount: 0 }
+        : null;
+
+    if (rootTag) {
+      maxDepth += 1; // Account for the root level
+    }
+
+    return {
+      isTagged,
+      rootTag,
+      maxDepth,
+      totalElements,
+      roleCounts,
+    };
+  } finally {
+    await doc.destroy();
+  }
+}
+
+/**
+ * Analyze annotations across all pages.
+ */
+export async function analyzeAnnotations(
+  filePath: string,
+  pages?: string,
+): Promise<AnnotationsAnalysis> {
+  const doc = await loadDocument(filePath);
+
+  try {
+    const pageNumbers =
+      parsePageRange(pages, doc.numPages) ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
+
+    const annotations: AnnotationInfo[] = [];
+    const bySubtype: Record<string, number> = {};
+    const byPage: Record<number, number> = {};
+    let hasLinks = false;
+    let hasForms = false;
+    let hasMarkup = false;
+
+    const markupSubtypes = new Set([
+      'Text',
+      'FreeText',
+      'Line',
+      'Square',
+      'Circle',
+      'Polygon',
+      'PolyLine',
+      'Highlight',
+      'Underline',
+      'Squiggly',
+      'StrikeOut',
+      'Stamp',
+      'Caret',
+      'Ink',
+      'Popup',
+      'Redact',
+    ]);
+
+    for (const pageNum of pageNumbers) {
+      const page = await doc.getPage(pageNum);
+      const annots = await page.getAnnotations();
+
+      for (const annot of annots) {
+        const subtype: string = annot.subtype ?? 'Unknown';
+
+        bySubtype[subtype] = (bySubtype[subtype] ?? 0) + 1;
+        byPage[pageNum] = (byPage[pageNum] ?? 0) + 1;
+
+        if (subtype === 'Link') hasLinks = true;
+        if (subtype === 'Widget') hasForms = true;
+        if (markupSubtypes.has(subtype)) hasMarkup = true;
+
+        annotations.push({
+          subtype,
+          page: pageNum,
+          rect: annot.rect ?? null,
+          contents: asStringOrNull(annot.contentsObj?.str) ?? asStringOrNull(annot.contents),
+          author: asStringOrNull(annot.titleObj?.str) ?? null,
+          modificationDate: asStringOrNull(annot.modificationDate) ?? null,
+          hasAppearance: annot.hasAppearance === true,
+        });
+      }
+    }
+
+    return {
+      totalAnnotations: annotations.length,
+      bySubtype,
+      byPage,
+      annotations,
+      hasLinks,
+      hasForms,
+      hasMarkup,
+    };
+  } finally {
+    await doc.destroy();
+  }
+}
+
+// ─── Tag tree helpers ────────────────────────────────────
+
+interface StructTreeNodeLike {
+  role?: string;
+  children?: Array<StructTreeNodeLike | StructTreeContentLike>;
+}
+
+interface StructTreeContentLike {
+  type: string;
+  id?: string;
+}
+
+function buildTagNode(
+  node: StructTreeNodeLike,
+  roleCounts: Record<string, number>,
+  depth: number,
+): TagNode {
+  const role = node.role ?? 'Unknown';
+  roleCounts[role] = (roleCounts[role] ?? 0) + 1;
+
+  const children: TagNode[] = [];
+  let contentCount = 0;
+
+  if (node.children) {
+    for (const child of node.children) {
+      if ('role' in child) {
+        children.push(buildTagNode(child as StructTreeNodeLike, roleCounts, depth + 1));
+      } else {
+        contentCount++;
+      }
+    }
+  }
+
+  return { role, children, contentCount };
+}
+
+function countTagElements(node: TagNode): number {
+  let count = 1;
+  for (const child of node.children) {
+    count += countTagElements(child);
+  }
+  return count;
+}
+
+function getTagDepth(node: TagNode): number {
+  if (node.children.length === 0) return 1;
+  let max = 0;
+  for (const child of node.children) {
+    max = Math.max(max, getTagDepth(child));
+  }
+  return max + 1;
 }

@@ -79,7 +79,7 @@ async function main() {
   // List tools
   const toolsResp = await send('tools/list', {});
   const toolCount = toolsResp.result.tools.length;
-  record('server', `registered ${toolCount} tools`, toolCount === 7, `expected 7`);
+  record('server', `registered ${toolCount} tools`, toolCount === 12, `expected 12`);
 
   // ─── 1. get_page_count ─────────────────────────
   console.log('\n━━━ 1. get_page_count ━━━');

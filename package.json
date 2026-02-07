@@ -42,13 +42,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.9.155",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
     "@types/node": "^22.10.0",
-    "pdf-lib": "^1.17.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"

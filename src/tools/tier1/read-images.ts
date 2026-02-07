@@ -38,16 +38,28 @@ Examples:
     },
     async (params: ReadImagesInput) => {
       try {
-        const images = await extractImages(params.file_path, params.pages);
+        const result = await extractImages(params.file_path, params.pages);
 
-        if (images.length === 0) {
+        if (result.extractedCount === 0) {
+          if (result.skippedCount > 0) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text:
+                    `${result.detectedCount} image(s) detected in the PDF, ` +
+                    'but none could be extracted. ' +
+                    'The images may use an encoding format that is not directly accessible.',
+                },
+              ],
+            };
+          }
           return {
             content: [{ type: 'text' as const, text: 'No images found in the specified pages.' }],
           };
         }
 
-        // Return summary text + image metadata (base64 data is large, so provide summary)
-        const summary = images.map((img) => ({
+        const summary = result.images.map((img) => ({
           page: img.page,
           index: img.index,
           width: img.width,
@@ -56,7 +68,11 @@ Examples:
           dataLength: img.dataBase64.length,
         }));
 
-        const text = `Found ${images.length} image(s).\n\n${JSON.stringify(summary, null, 2)}`;
+        let text = `Found ${result.extractedCount} image(s).`;
+        if (result.skippedCount > 0) {
+          text += ` (${result.skippedCount} additional image(s) could not be extracted)`;
+        }
+        text += `\n\n${JSON.stringify(summary, null, 2)}`;
 
         return {
           content: [{ type: 'text' as const, text }],

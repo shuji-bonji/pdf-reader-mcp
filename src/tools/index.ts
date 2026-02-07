@@ -12,6 +12,12 @@ import { registerReadText } from './tier1/read-text.js';
 import { registerReadUrl } from './tier1/read-url.js';
 import { registerSearchText } from './tier1/search-text.js';
 import { registerSummarize } from './tier1/summarize.js';
+// Tier 2: Structure analysis
+import { registerInspectAnnotations } from './tier2/inspect-annotations.js';
+import { registerInspectFonts } from './tier2/inspect-fonts.js';
+import { registerInspectSignatures } from './tier2/inspect-signatures.js';
+import { registerInspectStructure } from './tier2/inspect-structure.js';
+import { registerInspectTags } from './tier2/inspect-tags.js';
 
 /**
  * Register all tools with the MCP server.
@@ -26,12 +32,12 @@ export function registerAllTools(server: McpServer): void {
   registerReadUrl(server);
   registerSummarize(server);
 
-  // Tier 2: Structure analysis (future)
-  // registerInspectStructure(server);
-  // registerInspectTags(server);
-  // registerInspectFonts(server);
-  // registerInspectAnnotations(server);
-  // registerInspectSignatures(server);
+  // Tier 2: Structure analysis
+  registerInspectStructure(server);
+  registerInspectTags(server);
+  registerInspectFonts(server);
+  registerInspectAnnotations(server);
+  registerInspectSignatures(server);
 
   // Tier 3: Validation & analysis (future)
   // registerValidateTagged(server);

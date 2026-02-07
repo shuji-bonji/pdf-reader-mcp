@@ -3,15 +3,12 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { TextItem } from 'pdfjs-dist/types/src/display/api.js';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadUrlInput, ReadUrlSchema } from '../../schemas/tier1.js';
-import { loadDocumentFromData } from '../../services/pdfjs-service.js';
+import { extractTextFromDoc, loadDocumentFromData } from '../../services/pdfjs-service.js';
 import { fetchPdfFromUrl } from '../../services/url-fetcher.js';
-import type { PageText } from '../../types.js';
 import { handleError } from '../../utils/error-handler.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
-import { parsePageRange } from '../../utils/pdf-helpers.js';
 
 export function registerReadUrl(server: McpServer): void {
   server.registerTool(
@@ -47,44 +44,7 @@ Examples:
         const doc = await loadDocumentFromData(data);
 
         try {
-          const pageNumbers =
-            parsePageRange(params.pages, doc.numPages) ??
-            Array.from({ length: doc.numPages }, (_, i) => i + 1);
-
-          const results: PageText[] = [];
-          for (const pageNum of pageNumbers) {
-            const page = await doc.getPage(pageNum);
-            const content = await page.getTextContent();
-            const items = content.items.filter((item): item is TextItem => 'str' in item);
-
-            // Y-coordinate-based sorting
-            items.sort((a, b) => {
-              const yDiff = (b.transform[5] ?? 0) - (a.transform[5] ?? 0);
-              if (Math.abs(yDiff) > 2) return yDiff;
-              return (a.transform[4] ?? 0) - (b.transform[4] ?? 0);
-            });
-
-            const lines: string[] = [];
-            let currentLine: string[] = [];
-            let lastY = items[0]?.transform[5] ?? 0;
-
-            for (const item of items) {
-              const y = item.transform[5] ?? 0;
-              if (Math.abs(y - lastY) > 2) {
-                if (currentLine.length > 0) {
-                  lines.push(currentLine.join(' '));
-                  currentLine = [];
-                }
-              }
-              currentLine.push(item.str);
-              lastY = y;
-            }
-            if (currentLine.length > 0) {
-              lines.push(currentLine.join(' '));
-            }
-
-            results.push({ page: pageNum, text: lines.join('\n') });
-          }
+          const results = await extractTextFromDoc(doc, params.pages);
 
           let text: string;
           if (params.response_format === ResponseFormat.JSON) {

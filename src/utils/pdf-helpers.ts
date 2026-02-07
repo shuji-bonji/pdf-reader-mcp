@@ -47,13 +47,20 @@ export function parsePageRange(pages: string | undefined, totalPages: number): n
     const trimmed = part.trim();
     if (trimmed.includes('-')) {
       const [startStr, endStr] = trimmed.split('-');
-      const start = Math.max(1, parseInt(startStr, 10));
-      const end = Math.min(totalPages, parseInt(endStr, 10));
+      const start = parseInt(startStr, 10);
+      const end = parseInt(endStr, 10);
       if (Number.isNaN(start) || Number.isNaN(end)) {
         throw new PdfReaderError(
           `Invalid page range: "${trimmed}"`,
           'INVALID_PAGE_RANGE',
           'Use format like "1-5", "3", or "1,3,5-7".',
+        );
+      }
+      if (start < 1 || end > totalPages) {
+        throw new PdfReaderError(
+          `Page range "${trimmed}" is out of bounds (document has ${totalPages} pages)`,
+          'INVALID_PAGE_RANGE',
+          `Specify pages between 1 and ${totalPages}.`,
         );
       }
       for (let i = start; i <= end; i++) {
