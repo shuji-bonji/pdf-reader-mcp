@@ -1,4 +1,5 @@
 #!/usr/bin/env npx tsx
+
 /**
  * Comprehensive Tier 1 verification script.
  * Tests all 7 tools via the MCP stdio protocol.
@@ -6,9 +7,9 @@
  * Usage: npx tsx tests/verify-all-tools.ts
  */
 
+import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { resolve } from 'node:path';
 
 const SIMPLE_PDF = resolve(import.meta.dirname, 'fixtures/simple.pdf');
 const EMPTY_PDF = resolve(import.meta.dirname, 'fixtures/empty.pdf');

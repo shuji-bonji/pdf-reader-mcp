@@ -1,4 +1,4 @@
-# pdf-reader-mcp
+# PDF Reader MCP Server
 
 PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー。
 
@@ -8,31 +8,31 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ### Tier 1: 基本機能 ✅ (v0.1.0)
 
-| ツール | 説明 |
-|---|---|
-| `get_page_count` | ページ数の軽量取得 |
-| `get_metadata` | メタデータ抽出（タイトル、著者、PDF版、タグ有無等） |
-| `read_text` | テキスト抽出（Y座標ベースの読み順保持） |
-| `search_text` | 全文検索（前後コンテキスト付き） |
-| `read_images` | 画像抽出（base64、メタデータ付き） |
-| `read_url` | URLからリモートPDFを取得して処理 |
-| `summarize` | 全体概要レポート（メタデータ + テキスト + 画像数） |
+| ツール           | 説明                                                |
+| ---------------- | --------------------------------------------------- |
+| `get_page_count` | ページ数の軽量取得                                  |
+| `get_metadata`   | メタデータ抽出（タイトル、著者、PDF版、タグ有無等） |
+| `read_text`      | テキスト抽出（Y座標ベースの読み順保持）             |
+| `search_text`    | 全文検索（前後コンテキスト付き）                    |
+| `read_images`    | 画像抽出（base64、メタデータ付き）                  |
+| `read_url`       | URLからリモートPDFを取得して処理                    |
+| `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数）  |
 
 ### Tier 2: 構造解析 ✅ (v0.1.0)
 
-| ツール | 説明 |
-|---|---|
-| `inspect_structure` | オブジェクトツリー・カタログ辞書の解析 |
-| `inspect_tags` | Tagged PDF のタグツリー可視化 |
-| `inspect_fonts` | フォント一覧（埋め込み/サブセット/Type判定） |
-| `inspect_annotations` | 注釈一覧（タイプ別分類） |
-| `inspect_signatures` | 電子署名フィールドの構造解析 |
+| ツール                | 説明                                         |
+| --------------------- | -------------------------------------------- |
+| `inspect_structure`   | オブジェクトツリー・カタログ辞書の解析       |
+| `inspect_tags`        | Tagged PDF のタグツリー可視化                |
+| `inspect_fonts`       | フォント一覧（埋め込み/サブセット/Type判定） |
+| `inspect_annotations` | 注釈一覧（タイプ別分類）                     |
+| `inspect_signatures`  | 電子署名フィールドの構造解析                 |
 
 ### Tier 3: 検証・分析 ✅ (v0.2.0)
 
-| ツール | 説明 |
-|---|---|
-| `validate_tagged` | PDF/UA タグ構造の検証（8項目チェック） |
+| ツール              | 説明                                           |
+| ------------------- | ---------------------------------------------- |
+| `validate_tagged`   | PDF/UA タグ構造の検証（8項目チェック）         |
 | `validate_metadata` | メタデータの仕様適合チェック（10項目チェック） |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
 
@@ -44,12 +44,12 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ```json
 {
-  "mcpServers": {
-    "pdf-reader-mcp": {
-      "command": "node",
-      "args": ["/path/to/pdf-reader-mcp/dist/index.js"]
-    }
-  }
+	"mcpServers": {
+		"pdf-reader-mcp": {
+			"command": "node",
+			"args": ["/path/to/pdf-reader-mcp/dist/index.js"]
+		}
+	}
 }
 ```
 

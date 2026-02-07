@@ -1,0 +1,60 @@
+{
+  "version": "0.2.0",
+  "entries": [
+    {
+      "operation": "getMetadata",
+      "durationMs": 200,
+      "timestamp": "2026-02-07T18:22:59.639Z"
+    },
+    {
+      "operation": "extractText-3pages",
+      "durationMs": 14,
+      "timestamp": "2026-02-07T18:22:59.654Z"
+    },
+    {
+      "operation": "searchText",
+      "durationMs": 8,
+      "timestamp": "2026-02-07T18:22:59.662Z"
+    },
+    {
+      "operation": "analyzeStructure",
+      "durationMs": 4,
+      "timestamp": "2026-02-07T18:22:59.666Z"
+    },
+    {
+      "operation": "analyzeFonts",
+      "durationMs": 2,
+      "timestamp": "2026-02-07T18:22:59.668Z"
+    },
+    {
+      "operation": "validateTagged",
+      "durationMs": 11,
+      "timestamp": "2026-02-07T18:22:59.679Z"
+    },
+    {
+      "operation": "validateMetadata",
+      "durationMs": 15,
+      "timestamp": "2026-02-07T18:22:59.694Z"
+    },
+    {
+      "operation": "compareStructure",
+      "durationMs": 14,
+      "timestamp": "2026-02-07T18:22:59.709Z"
+    },
+    {
+      "operation": "getMetadata-all-7",
+      "durationMs": 35,
+      "timestamp": "2026-02-07T18:22:59.744Z"
+    },
+    {
+      "operation": "countImages",
+      "durationMs": 10,
+      "timestamp": "2026-02-07T18:22:59.754Z"
+    },
+    {
+      "operation": "analyzeSignatures",
+      "durationMs": 6,
+      "timestamp": "2026-02-07T18:22:59.760Z"
+    }
+  ]
+}

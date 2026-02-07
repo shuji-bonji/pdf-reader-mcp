@@ -22,6 +22,9 @@
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config tests/e2e/vitest.config.ts",
+    "test:e2e:watch": "vitest --config tests/e2e/vitest.config.ts",
+    "test:fixtures": "tsx tests/fixtures/create-test-pdf.ts && tsx tests/fixtures/create-e2e-fixtures.ts",
     "lint": "biome lint ./src ./tests",
     "lint:fix": "biome lint --fix ./src ./tests",
     "format": "biome format ./src ./tests",
@@ -61,6 +64,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",
+    "@esbuild/linux-arm64": "^0.27.3",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
