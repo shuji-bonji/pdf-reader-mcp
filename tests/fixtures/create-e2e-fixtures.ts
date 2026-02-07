@@ -3,10 +3,11 @@
  * Run with: npx tsx tests/fixtures/create-e2e-fixtures.ts
  *
  * Creates:
- *  - tagged.pdf      : Tagged PDF with structure tree (Document/P/H1)
- *  - multi-font.pdf  : PDF using multiple font families
- *  - no-metadata.pdf : PDF with no metadata set
- *  - corrupted.pdf   : Invalid file (non-PDF bytes)
+ *  - comprehensive_1.pdf : 4-page PDF with text and embedded images
+ *  - tagged.pdf          : Tagged PDF with structure tree (Document/P/H1)
+ *  - multi-font.pdf      : PDF using multiple font families
+ *  - no-metadata.pdf     : PDF with no metadata set
+ *  - corrupted.pdf       : Invalid file (non-PDF bytes)
  */
 
 import { writeFile } from 'node:fs/promises';
@@ -236,6 +237,121 @@ async function createNoMetadataPdf(): Promise<void> {
 }
 
 /**
+ * Create a comprehensive 4-page PDF with text and embedded images.
+ *
+ * Used by: image extraction tests, summarize tests, performance tests.
+ * Requirements: 4 pages, text, title, images (detectedCount > 0), no annotations.
+ */
+async function createComprehensivePdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  // Valid minimal 1x1 red pixel PNG (generated with correct CRC32 and zlib compression)
+  const pngBytes = Buffer.from(
+    '89504e470d0a1a0a' + // PNG signature
+      '0000000d49484452' + // IHDR chunk length=13
+      '00000001' + // width: 1
+      '00000001' + // height: 1
+      '0802000000' + // bit depth 8, color type 2 (RGB), compression 0, filter 0, interlace 0
+      '907753de' + // IHDR CRC
+      '0000000c' + // IDAT chunk length=12
+      '49444154' + // "IDAT"
+      '789c63f8cfc0000003010100' + // zlib-compressed pixel data (filter=0, R=255, G=0, B=0)
+      'c9fe92ef' + // IDAT CRC
+      '00000000' + // IEND chunk length=0
+      '49454e44' + // "IEND"
+      'ae426082', // IEND CRC
+    'hex',
+  );
+  const pngImage = await doc.embedPng(pngBytes);
+
+  // Page 1: Title page with image
+  const page1 = doc.addPage([595, 842]);
+  page1.drawText('Comprehensive Test PDF', {
+    x: 50,
+    y: 780,
+    size: 28,
+    font: fontBold,
+    color: rgb(0, 0, 0),
+  });
+  page1.drawText('A multi-page document with text and images.', {
+    x: 50,
+    y: 740,
+    size: 12,
+    font,
+  });
+  page1.drawImage(pngImage, { x: 50, y: 600, width: 100, height: 100 });
+
+  // Page 2: Content page
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText('Chapter 1: Introduction', {
+    x: 50,
+    y: 780,
+    size: 20,
+    font: fontBold,
+    color: rgb(0, 0, 0),
+  });
+  page2.drawText('This chapter covers the basics of PDF structure.', {
+    x: 50,
+    y: 740,
+    size: 12,
+    font,
+  });
+  page2.drawText('PDF documents consist of objects, cross-reference tables, and trailers.', {
+    x: 50,
+    y: 720,
+    size: 12,
+    font,
+  });
+
+  // Page 3: Content page with image
+  const page3 = doc.addPage([595, 842]);
+  page3.drawText('Chapter 2: Advanced Topics', {
+    x: 50,
+    y: 780,
+    size: 20,
+    font: fontBold,
+    color: rgb(0, 0, 0),
+  });
+  page3.drawText('Tagged PDF, accessibility, and digital signatures.', {
+    x: 50,
+    y: 740,
+    size: 12,
+    font,
+  });
+  page3.drawImage(pngImage, { x: 200, y: 500, width: 150, height: 150 });
+
+  // Page 4: Summary
+  const page4 = doc.addPage([595, 842]);
+  page4.drawText('Summary', {
+    x: 50,
+    y: 780,
+    size: 20,
+    font: fontBold,
+    color: rgb(0, 0, 0),
+  });
+  page4.drawText('This comprehensive test PDF covers multiple scenarios.', {
+    x: 50,
+    y: 740,
+    size: 12,
+    font,
+  });
+
+  // Set metadata
+  doc.setTitle('Comprehensive Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E test fixture - comprehensive PDF with images');
+  doc.setKeywords(['comprehensive', 'images', 'multi-page']);
+  doc.setCreator('pdf-lib');
+  doc.setProducer('pdf-reader-mcp test suite');
+
+  const bytes = await doc.save();
+  await writeFile(`${FIXTURES_DIR}/comprehensive_1.pdf`, bytes);
+  console.log('Created: comprehensive_1.pdf (4 pages, text + images)');
+}
+
+/**
  * Create a corrupted "PDF" file (non-PDF bytes).
  */
 async function createCorruptedPdf(): Promise<void> {
@@ -245,6 +361,7 @@ async function createCorruptedPdf(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await createComprehensivePdf();
   await createTaggedPdf();
   await createMultiFontPdf();
   await createNoMetadataPdf();
