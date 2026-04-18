@@ -8,7 +8,7 @@
 
 An MCP (Model Context Protocol) server specialized in **deciphering PDF internal structures**.
 
-While typical PDF MCP servers are thin wrappers for text extraction, this project focuses on **reading and analyzing the internal structure** of PDF documents. Pair it with [pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) for specification-aware structural analysis and validation.
+While typical PDF MCP servers are thin wrappers for text extraction, this project focuses on **reading and analyzing the internal structure** of PDF documents. Pair it with [pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) for specification-aware structural analysis and validation.
 
 ## Features
 
@@ -193,7 +193,7 @@ pdf-reader-mcp/
 
 ## Pairing with pdf-spec-mcp
 
-[pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) provides PDF specification knowledge (ISO 32000-2, etc.). With both servers enabled, an LLM can perform specification-aware workflows:
+[pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) provides PDF specification knowledge (ISO 32000-2, etc.). With both servers enabled, an LLM can perform specification-aware workflows:
 
 1. `summarize` — get a PDF overview
 2. `inspect_tags` — examine the tag structure

@@ -8,7 +8,7 @@
 
 PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー。
 
-既存の pdf-reader-mcp がテキスト抽出の薄いラッパーに留まるのに対し、本プロジェクトは **PDF の内部構造を読み解く** ことに焦点を当てています。[pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) と組み合わせることで、仕様知識に基づいた構造解析・検証が可能になります。
+既存の pdf-reader-mcp がテキスト抽出の薄いラッパーに留まるのに対し、本プロジェクトは **PDF の内部構造を読み解く** ことに焦点を当てています。[pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) と組み合わせることで、仕様知識に基づいた構造解析・検証が可能になります。
 
 ## 機能
 
@@ -193,7 +193,7 @@ pdf-reader-mcp/
 
 ## pdf-spec-mcp との連携
 
-[pdf-spec-mcp](https://github.com/nicholasgriffintn/pdf-spec-mcp) は PDF 仕様（ISO 32000-2 等）の知識を提供する MCP サーバーです。両方を有効にすることで、LLM は以下のような仕様知識ベースのワークフローを実行できます:
+[pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) は PDF 仕様（ISO 32000-2 等）の知識を提供する MCP サーバーです。両方を有効にすることで、LLM は以下のような仕様知識ベースのワークフローを実行できます:
 
 1. `summarize` で PDF の概要を把握
 2. `inspect_tags` でタグ構造を確認
