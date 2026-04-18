@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-18
+
+### Changed
+
+- **CI/CD**: Migrated npm publish workflow to [Trusted Publishing (OIDC)](https://docs.npmjs.com/trusted-publishers). `NPM_TOKEN` is no longer required; provenance attestations are generated automatically.
+- **Publish workflow**: Split into `test` / `build` / `publish` jobs with tag-vs-`package.json` version consistency check.
+- **`package.json`**: Added `publishConfig.access: "public"`, `publishConfig.provenance: true`, and `prepublishOnly: "npm run build"` for publish safety.
+- **README**: Synchronized `README.ja.md` with `README.md` (`npx`-based installation steps). Corrected test counts (unit: 39, E2E: 118, total: 157).
+
 ## [0.2.0] - 2026-02-08
 
 ### Added
@@ -40,5 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Y-coordinate-based text extraction preserving natural reading order
 - Unit tests for core utilities and pdfjs-service
 
+[0.2.1]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/shuji-bonji/pdf-reader-mcp/releases/tag/v0.1.0

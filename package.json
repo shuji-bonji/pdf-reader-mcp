@@ -1,6 +1,6 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",
   "main": "dist/index.js",
@@ -33,7 +33,12 @@
     "format:fix": "biome format --write ./src ./tests",
     "check": "biome check ./src ./tests",
     "check:fix": "biome check --fix ./src ./tests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "engines": {
     "node": ">=18"
