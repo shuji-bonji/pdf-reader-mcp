@@ -74,11 +74,6 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      # Trusted Publishing requires npm CLI >= 11.5.1.
-      # Node 22 ships with npm 10.x, so upgrade explicitly.
-      - name: Upgrade npm to latest
-        run: npm install -g npm@latest
-
       - name: Install dependencies
         run: npm ci
 
@@ -95,5 +90,12 @@ jobs:
           fi
           echo "Version verified: $PACKAGE_VERSION"
 
-      - name: Publish to npm (Trusted Publishing, provenance auto)
-        run: npm publish
+      # Trusted Publisher + provenance つき publish。
+      # Node 同梱の npm 10.x は OIDC 連携が不完全で 404 になるため、
+      # npx で最新の npm（11.x 以降）を明示的に使う。
+      # `npm install -g npm@latest` はインストール先の @npmcli/arborist が
+      # 壊れて MODULE_NOT_FOUND になる既知の問題があるため採用しない。
+      # id-token: write 権限があり、かつ npmjs.com 側で Trusted Publisher が
+      # 設定されていれば NPM_TOKEN は不要。
+      - name: Publish to npm
+        run: npx npm@latest publish --provenance --access public
