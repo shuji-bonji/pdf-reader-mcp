@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 140,
-      "timestamp": "2026-02-07T19:28:46.552Z"
+      "durationMs": 70,
+      "timestamp": "2026-04-18T13:12:35.366Z"
     },
     {
       "operation": "extractText-3pages",
-      "durationMs": 13,
-      "timestamp": "2026-02-07T19:28:46.567Z"
+      "durationMs": 11,
+      "timestamp": "2026-04-18T13:12:35.378Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 29,
-      "timestamp": "2026-02-07T19:28:46.596Z"
+      "durationMs": 4,
+      "timestamp": "2026-04-18T13:12:35.382Z"
     },
     {
       "operation": "analyzeStructure",
-      "durationMs": 15,
-      "timestamp": "2026-02-07T19:28:46.612Z"
+      "durationMs": 2,
+      "timestamp": "2026-04-18T13:12:35.384Z"
     },
     {
       "operation": "analyzeFonts",
-      "durationMs": 2,
-      "timestamp": "2026-02-07T19:28:46.615Z"
+      "durationMs": 1,
+      "timestamp": "2026-04-18T13:12:35.385Z"
     },
     {
       "operation": "validateTagged",
-      "durationMs": 11,
-      "timestamp": "2026-02-07T19:28:46.626Z"
+      "durationMs": 5,
+      "timestamp": "2026-04-18T13:12:35.390Z"
     },
     {
       "operation": "validateMetadata",
-      "durationMs": 15,
-      "timestamp": "2026-02-07T19:28:46.641Z"
+      "durationMs": 3,
+      "timestamp": "2026-04-18T13:12:35.394Z"
     },
     {
       "operation": "compareStructure",
-      "durationMs": 16,
-      "timestamp": "2026-02-07T19:28:46.657Z"
+      "durationMs": 8,
+      "timestamp": "2026-04-18T13:12:35.402Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 16,
-      "timestamp": "2026-02-07T19:28:46.673Z"
+      "durationMs": 27,
+      "timestamp": "2026-04-18T13:12:35.430Z"
     },
     {
       "operation": "countImages",
       "durationMs": 6,
-      "timestamp": "2026-02-07T19:28:46.680Z"
+      "timestamp": "2026-04-18T13:12:35.436Z"
     },
     {
       "operation": "analyzeSignatures",
       "durationMs": 3,
-      "timestamp": "2026-02-07T19:28:46.683Z"
+      "timestamp": "2026-04-18T13:12:35.440Z"
     }
   ]
 }

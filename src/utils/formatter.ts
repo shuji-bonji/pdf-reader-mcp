@@ -14,8 +14,8 @@ import type {
   SignaturesAnalysis,
   StructureAnalysis,
   StructureComparison,
-  TagNode,
   TaggedValidation,
+  TagNode,
   TagsAnalysis,
 } from '../types.js';
 

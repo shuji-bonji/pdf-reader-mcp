@@ -5,14 +5,13 @@
  */
 
 import {
-  OPS,
   getDocument,
+  OPS,
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { TextItem } from 'pdfjs-dist/types/src/display/api.js';
 import { DEFAULT_SEARCH_CONTEXT } from '../constants.js';
-import { detectEncryption } from './pdflib-service.js';
 import type {
   AnnotationInfo,
   AnnotationsAnalysis,
@@ -25,6 +24,7 @@ import type {
   TagsAnalysis,
 } from '../types.js';
 import { getFileSize, readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
+import { detectEncryption } from './pdflib-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).

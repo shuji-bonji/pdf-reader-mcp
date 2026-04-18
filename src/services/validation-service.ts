@@ -15,12 +15,12 @@ import type {
 } from '../types.js';
 import { formatFileSize } from '../utils/formatter.js';
 import {
-  getMetadata,
-  loadDocument,
   analyzeTagsFromDoc,
   countImagesFromDoc,
+  getMetadata,
+  loadDocument,
 } from './pdfjs-service.js';
-import { analyzeStructure, analyzeFontsWithPdfLib } from './pdflib-service.js';
+import { analyzeFontsWithPdfLib, analyzeStructure } from './pdflib-service.js';
 
 // ─── validate_tagged ─────────────────────────────────────
 

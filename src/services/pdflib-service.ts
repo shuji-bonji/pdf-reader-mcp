@@ -5,16 +5,17 @@
  * Runs alongside pdfjs-service.ts (which handles text/image extraction).
  */
 
+import { open } from 'node:fs/promises';
 import {
   PDFArray,
   PDFDict,
   PDFDocument,
+  PDFHexString,
   PDFName,
   PDFNumber,
   PDFRef,
   PDFStream,
   PDFString,
-  PDFHexString,
 } from 'pdf-lib';
 import type {
   CatalogEntry,
@@ -25,7 +26,6 @@ import type {
   SignaturesAnalysis,
   StructureAnalysis,
 } from '../types.js';
-import { open } from 'node:fs/promises';
 import { readPdfFile } from '../utils/pdf-helpers.js';
 
 /**

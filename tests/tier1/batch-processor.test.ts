@@ -2,7 +2,7 @@
  * Unit tests for batch-processor utility.
  */
 import { describe, expect, it } from 'vitest';
-import { processInBatches, processAndReduce } from '../../src/utils/batch-processor.js';
+import { processAndReduce, processInBatches } from '../../src/utils/batch-processor.js';
 
 describe('processInBatches', () => {
   it('processes all items and preserves order', async () => {
