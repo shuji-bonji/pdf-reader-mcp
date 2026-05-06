@@ -44,6 +44,26 @@ export const SplitColumnsSchema = z
       '<Table> markup should use extract_tables instead.',
   );
 
+/**
+ * `compact_whitespace` — Issue #4: collapse runs of ASCII / fullwidth
+ * whitespace down to a single ASCII space, and trim each line.
+ *
+ * Default `false` keeps the existing extraction byte-for-byte. When set to
+ * `true`, every run of `\s` plus `　` is replaced with one ASCII space
+ * and trailing/leading whitespace is removed line by line. This typically
+ * cuts 20–40% of token consumption for Japanese form-style PDFs without
+ * losing any content. Inter-column blank-line separators (from
+ * `split_columns`) are preserved.
+ */
+export const CompactWhitespaceSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    'When true, collapse runs of whitespace (incl. fullwidth space U+3000) ' +
+      'to a single ASCII space and trim each line. Reduces token consumption ' +
+      'on Japanese form-style PDFs. Default: false (no whitespace normalization).',
+  );
+
 /** read_text */
 export const ReadTextSchema = z
   .object({
@@ -51,6 +71,7 @@ export const ReadTextSchema = z
     pages: PagesSchema,
     response_format: ResponseFormatSchema,
     split_columns: SplitColumnsSchema,
+    compact_whitespace: CompactWhitespaceSchema,
   })
   .strict();
 
@@ -97,6 +118,7 @@ export const ReadUrlSchema = z
     pages: PagesSchema,
     response_format: ResponseFormatSchema,
     split_columns: SplitColumnsSchema,
+    compact_whitespace: CompactWhitespaceSchema,
   })
   .strict();
 

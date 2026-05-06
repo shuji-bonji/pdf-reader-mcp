@@ -152,6 +152,58 @@ describe('02 - read_text', () => {
     expect(pages[0].text).toContain('Hello');
     expect(pages[0].text).toContain('PDF');
   });
+
+  // ─── Issue #4: compact_whitespace ───────────────────────────────
+
+  // RT-CW-1: regression — compact_whitespace omitted yields existing output.
+  it('RT-CW-1: compact_whitespace omitted matches default behaviour', async () => {
+    const a = await extractText(FIXTURES.simple, '1');
+    const b = await extractText(FIXTURES.simple, '1', { compactWhitespace: false });
+    expect(b[0].text).toBe(a[0].text);
+  });
+
+  // RT-CW-2: compact_whitespace=true collapses runs of fullwidth + ASCII
+  //          whitespace down to one ASCII space and trims each line.
+  it('RT-CW-2: compact_whitespace=true collapses whitespace and trims lines', async () => {
+    // Construct a synthetic input by pulling the default text and verifying
+    // the compacted variant is shorter (whitespace was removed) and
+    // contains all the same content words.
+    const def = await extractText(FIXTURES.simple, '1');
+    const compact = await extractText(FIXTURES.simple, '1', { compactWhitespace: true });
+
+    // Same words preserved
+    for (const word of ['Hello', 'PDF', 'World', 'document']) {
+      expect(compact[0].text).toContain(word);
+    }
+    // No leading whitespace on any non-empty line
+    const lines = compact[0].text.split('\n');
+    for (const line of lines) {
+      if (line.length > 0) {
+        expect(line[0]).not.toMatch(/[\s　]/);
+        expect(line[line.length - 1]).not.toMatch(/[\s　]/);
+      }
+    }
+    // No runs of 2+ whitespace anywhere (after normalization)
+    expect(/[\s　]{2,}/.test(compact[0].text)).toBe(false);
+    // Length is monotonically non-increasing (cannot grow on real content)
+    expect(compact[0].text.length).toBeLessThanOrEqual(def[0].text.length);
+  });
+
+  // RT-CW-3: combines with split_columns — both options apply orthogonally.
+  it('RT-CW-3: compact_whitespace combines with split_columns', async () => {
+    const compact = await extractText(FIXTURES.twoColumn, undefined, {
+      splitColumns: 2,
+      compactWhitespace: true,
+    });
+    expect(compact).toHaveLength(1);
+    const text = compact[0].text;
+    // LEFT-* still precedes RIGHT-*
+    expect(text.indexOf('LEFT-1')).toBeLessThan(text.indexOf('RIGHT-1'));
+    // Inter-column blank-line separator survives the compaction
+    expect(text).toMatch(/LEFT-4\n\nRIGHT-1/);
+    // No 2+ whitespace runs other than that separator (which is \n\n)
+    expect(/[\s　]{2,}/g.test(text.replace(/\n\n/g, ''))).toBe(false);
+  });
 });
 
 // ========================================

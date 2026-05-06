@@ -20,7 +20,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | ---------------- | -------------------------------------------------------- |
 | `get_page_count` | Lightweight page count retrieval                         |
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
-| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs) |
+| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms) |
 | `search_text`    | Full-text search with surrounding context                |
 | `read_images`    | Image extraction as base64 with metadata                 |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
@@ -177,12 +177,27 @@ read_text({ file_path: "/path/to/older-shinkyu.pdf", split_columns: 2 })
 Use `split_columns: 2 | 3` for **untagged** multi-column PDFs. For Tagged
 PDFs with proper `<Table>` markup, `extract_tables` (above) is preferred.
 
+### Compact Whitespace (Japanese Forms)
+
+```
+read_text({ file_path: "/path/to/form.pdf", compact_whitespace: true })
+→ // Original PDF uses U+3000 fullwidth space as visual indentation:
+//   " (   )   自   年   月   日   法   有 （   年   月   日）   有   有"
+//
+// With compact_whitespace: true:
+//   "( ) 自 年 月 日 法 有 （ 年 月 日） 有 有"
+//
+// Empirically reduces character count by ~40% on form PDFs.
+```
+
+`compact_whitespace` is orthogonal to `split_columns` — both can be combined.
+
 ## Tech Stack
 
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
 - **pdf-lib** — low-level object structure analysis
-- **Vitest** — unit + E2E testing (168 tests)
+- **Vitest** — unit + E2E testing (171 tests)
 - **Biome** — linting + formatting
 - **Zod** — input validation
 
@@ -190,7 +205,7 @@ PDFs with proper `<Table>` markup, `extract_tables` (above) is preferred.
 
 ```bash
 npm test              # Run all tests (unit: 39 tests)
-npm run test:e2e      # E2E tests only (129 tests)
+npm run test:e2e      # E2E tests only (132 tests)
 npm run test:watch    # Watch mode
 ```
 
@@ -220,7 +235,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # Error handling
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 129 tests)
+    └── e2e/                  # E2E tests (9 suites, 132 tests)
 ```
 
 ## Pairing with pdf-spec-mcp

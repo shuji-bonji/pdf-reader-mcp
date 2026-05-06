@@ -7,10 +7,10 @@
  */
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
 import { extractTables } from '../../src/services/pdfjs-service.js';
-import { formatTablesMarkdown } from '../../src/utils/formatter.js';
+import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
 import type { TablesExtractionResult } from '../../src/types.js';
+import { formatTablesMarkdown } from '../../src/utils/formatter.js';
 import { A4_SIZE, EXPECTED_METADATA, FONT_FAMILIES } from './constants.js';
 import { ALL_FIXTURES, FIXTURES } from './setup.js';
 

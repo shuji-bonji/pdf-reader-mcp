@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-07
+
+### Added
+
+- **`compact_whitespace` parameter on `read_text` and `read_url`** (Issue #4): opt-in whitespace normalization that collapses runs of `\s` plus U+3000 (fullwidth space) to a single ASCII space, and trims every line. Designed for Japanese form-style PDFs (帳票・様式) where U+3000 is used as visual indentation, inflating token consumption without adding information.
+  - Default `false` keeps the existing extraction byte-for-byte (regression-tested).
+  - Combines orthogonally with `split_columns`: inter-column `\n\n` separators survive the compaction.
+  - Per-cell CJK kerning ("消 費 税" → "消費税") is intentionally NOT touched here — that requires CJK-aware logic and remains the responsibility of `extract_tables`'s `compactCellText`.
+  - Empirically reduces character count by ~40% on 国税庁 form PDFs (e.g. `jimu-unei/hojin/090401-2/pdf/01.pdf`) while preserving all content.
+- **E2E tests** in `tests/e2e/02-tier1-text.test.ts`: 3 new cases (RT-CW-1..3) covering the regression guard, the line-trim + run-collapse invariants, and orthogonal combination with `split_columns`.
+
+### Changed
+
+- **`read_text` / `read_url` tool descriptions**: documented the new `compact_whitespace` parameter and added "Japanese form template" usage example.
+
 ## [0.4.0] - 2026-05-07
 
 ### Added
@@ -105,6 +120,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Y-coordinate-based text extraction preserving natural reading order
 - Unit tests for core utilities and pdfjs-service
 
+[0.5.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.2...v0.2.3

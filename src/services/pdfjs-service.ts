@@ -107,13 +107,17 @@ export async function getMetadataFromDoc(
 /**
  * Options for text extraction.
  *
- * `splitColumns` controls Issue #3 column-aware reordering. When `>= 2`,
- * text items are bucketed into N equal-width columns by X-coordinate and
- * concatenated left-to-right. `1` (default / undefined) preserves the
- * existing single-column Y-sort behaviour.
+ * - `splitColumns` controls Issue #3 column-aware reordering. When `>= 2`,
+ *   text items are bucketed into N equal-width columns by X-coordinate and
+ *   concatenated left-to-right. `1` (default / undefined) preserves the
+ *   existing single-column Y-sort behaviour.
+ * - `compactWhitespace` controls Issue #4 whitespace normalization. When
+ *   `true`, runs of `\s` plus U+3000 collapse to one ASCII space and each
+ *   line is trimmed. Default `false` preserves original spacing.
  */
 export interface ExtractTextOptions {
   splitColumns?: number;
+  compactWhitespace?: boolean;
 }
 
 /**
@@ -375,19 +379,22 @@ async function extractPageText(
       buckets[colIdx].push(item);
     }
 
-    const columnTexts = buckets.map((bucket) => itemsToText(bucket));
+    const columnTexts = buckets.map((bucket) => itemsToText(bucket, options));
     return columnTexts.filter((s) => s.length > 0).join('\n\n');
   }
 
-  return itemsToText(items);
+  return itemsToText(items, options);
 }
 
 /**
  * Reorder a flat list of TextItems by Y descending, then X ascending,
  * grouping into lines by Y proximity. Extracted from `extractPageText` so
  * the column-aware path can reuse the same line-grouping logic per bucket.
+ *
+ * If `options.compactWhitespace` is true, the assembled text passes through
+ * `compactRuns` as a final step.
  */
-function itemsToText(items: TextItem[]): string {
+function itemsToText(items: TextItem[], options: ExtractTextOptions = {}): string {
   if (items.length === 0) return '';
 
   // Sort by Y descending (top to bottom), then X ascending (left to right)
@@ -420,7 +427,25 @@ function itemsToText(items: TextItem[]): string {
     lines.push(currentLine.join(' '));
   }
 
-  return lines.join('\n');
+  const text = lines.join('\n');
+  return options.compactWhitespace ? compactRuns(text) : text;
+}
+
+/**
+ * Issue #4: collapse whitespace runs (incl. fullwidth U+3000) to one ASCII
+ * space, trim each line, and drop lines that become empty after trimming.
+ *
+ * Newlines are preserved so paragraph / line structure stays readable.
+ * Per-cell kerning whitespace ("消 費 税" → "消費税") is intentionally NOT
+ * touched here — that requires CJK-aware logic and lives in
+ * `extract_tables`'s `compactCellText`.
+ */
+function compactRuns(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => line.replace(/[\s　]+/g, ' ').trim())
+    .filter((line) => line.length > 0)
+    .join('\n');
 }
 
 /**
