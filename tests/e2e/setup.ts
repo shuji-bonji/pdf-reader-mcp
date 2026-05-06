@@ -23,6 +23,8 @@ export const FIXTURES = {
   multiFont: resolve(FIXTURES_DIR, 'multi-font.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
+  /** Linearized variant of simple.pdf (Issue #1 regression). */
+  linearized: resolve(FIXTURES_DIR, 'linearized.pdf'),
 } as const;
 
 // ========================================

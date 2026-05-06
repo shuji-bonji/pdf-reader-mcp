@@ -150,7 +150,7 @@ compare_structure({
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
 - **pdf-lib** — low-level object structure analysis
-- **Vitest** — unit + E2E testing (157 tests)
+- **Vitest** — unit + E2E testing (159 tests)
 - **Biome** — linting + formatting
 - **Zod** — input validation
 
@@ -158,7 +158,7 @@ compare_structure({
 
 ```bash
 npm test              # Run all tests (unit: 39 tests)
-npm run test:e2e      # E2E tests only (118 tests)
+npm run test:e2e      # E2E tests only (120 tests)
 npm run test:watch    # Watch mode
 ```
 
@@ -188,7 +188,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # Error handling
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 118 tests)
+    └── e2e/                  # E2E tests (9 suites, 120 tests)
 ```
 
 ## Pairing with pdf-spec-mcp

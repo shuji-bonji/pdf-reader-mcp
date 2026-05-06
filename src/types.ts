@@ -103,6 +103,13 @@ export interface StructureAnalysis {
   objectStats: ObjectStats;
   isEncrypted: boolean;
   pdfVersion: string | null;
+  /**
+   * Optional human-readable note describing partial / fallback results.
+   * Set when the PDF could not be fully analyzed via pdf-lib alone (e.g.
+   * Linearized PDFs whose cross-reference cannot be fully resolved) and
+   * the page count was obtained via pdfjs-dist instead.
+   */
+  note?: string;
 }
 
 /** Tag tree node */
@@ -138,6 +145,12 @@ export interface FontsAnalysis {
   embeddedCount: number;
   subsetCount: number;
   pagesScanned: number;
+  /**
+   * Optional human-readable note describing partial / fallback results.
+   * Set when fonts could not be enumerated via pdf-lib (e.g. Linearized PDFs
+   * whose page tree cannot be fully resolved).
+   */
+  note?: string;
 }
 
 /** Annotation information */

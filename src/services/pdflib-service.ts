@@ -29,15 +29,57 @@ import type {
 import { readPdfFile } from '../utils/pdf-helpers.js';
 
 /**
+ * pdf-lib emits parser diagnostics via `console.log` (not `console.warn`),
+ * which on stdio MCP servers pollutes the JSON-RPC stream. Wrap any pdf-lib
+ * call site with this to silence those warnings without losing real errors.
+ */
+async function withSuppressedPdfLibLogs<T>(fn: () => Promise<T>): Promise<T> {
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = originalLog;
+  }
+}
+
+/**
  * Load a PDF document with pdf-lib.
+ *
+ * Uses `throwOnInvalidObject: false` so that Linearized PDFs (whose hint
+ * streams cannot be resolved by pdf-lib) still load instead of throwing.
+ * The actual page-tree access may still throw — see `trySilently` below.
  */
 export async function loadWithPdfLib(filePath: string): Promise<PDFDocument> {
   const data = await readPdfFile(filePath);
-  const doc = await PDFDocument.load(data, {
-    ignoreEncryption: true,
-    updateMetadata: false,
-  });
-  return doc;
+  return withSuppressedPdfLibLogs(() =>
+    PDFDocument.load(data, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+      throwOnInvalidObject: false,
+    }),
+  );
+}
+
+/**
+ * Try `fn()`, swallowing pdf-lib parse errors and pdf-lib's own
+ * `console.log` chatter. Returns `undefined` on failure.
+ *
+ * Used to make best-effort calls against documents whose cross-reference
+ * tables are partially unresolvable (Linearized PDFs are the typical case —
+ * pdf-lib cannot follow `/Linearized` hint streams, so `getPages()` and
+ * similar accessors throw `Expected instance of PDFDict, but got undefined`).
+ */
+function trySilently<T>(fn: () => T): T | undefined {
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    return fn();
+  } catch {
+    return undefined;
+  } finally {
+    console.log = originalLog;
+  }
 }
 
 /**
@@ -46,10 +88,12 @@ export async function loadWithPdfLib(filePath: string): Promise<PDFDocument> {
 export async function detectEncryption(filePath: string): Promise<boolean> {
   try {
     const data = await readPdfFile(filePath);
-    const doc = await PDFDocument.load(data, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-    });
+    const doc = await withSuppressedPdfLibLogs(() =>
+      PDFDocument.load(data, {
+        ignoreEncryption: true,
+        updateMetadata: false,
+      }),
+    );
     return doc.isEncrypted;
   } catch {
     return false;
@@ -58,28 +102,46 @@ export async function detectEncryption(filePath: string): Promise<boolean> {
 
 /**
  * Analyze PDF internal structure (catalog, page tree, objects).
+ *
+ * Linearized PDFs (typical of public-sector publishers) confuse pdf-lib's
+ * cross-reference resolver, so `getPages()` and `getPageCount()` throw
+ * `Expected instance of PDFDict, but got instance of undefined`. We catch
+ * those failures, fall back to pdfjs-dist for the page count, and attach
+ * a `note` describing the partial result. The catalog walk and object
+ * enumeration still work in this state, so the user gets meaningful output
+ * instead of a hard error.
  */
 export async function analyzeStructure(filePath: string): Promise<StructureAnalysis> {
+  return withSuppressedPdfLibLogs(() => analyzeStructureImpl(filePath));
+}
+
+async function analyzeStructureImpl(filePath: string): Promise<StructureAnalysis> {
   const doc = await loadWithPdfLib(filePath);
   const catalog = doc.catalog;
   const context = doc.context;
 
-  // Extract catalog entries
+  // Extract catalog entries (best-effort: tolerate per-entry failures)
   const catalogEntries: CatalogEntry[] = [];
-  for (const [key, value] of catalog.entries()) {
-    catalogEntries.push({
-      key: key.decodeText(),
-      type: value.constructor.name,
-      value: summarizeObject(value),
-    });
+  try {
+    for (const [key, value] of catalog.entries()) {
+      catalogEntries.push({
+        key: key.decodeText(),
+        type: value.constructor.name,
+        value: summarizeObject(value),
+      });
+    }
+  } catch {
+    // catalog.entries() should rarely throw, but keep the partial list
   }
 
-  // Page tree info
-  const pages = doc.getPages();
+  // Page tree info (best-effort — fall back to pdfjs-dist for Linearized PDFs)
+  let totalPages = trySilently(() => doc.getPageCount()) ?? 0;
+  const pages = trySilently(() => doc.getPages()) ?? [];
   const maxSamples = Math.min(pages.length, 5);
   const mediaBoxSamples: PageTreeInfo['mediaBoxSamples'] = [];
   for (let i = 0; i < maxSamples; i++) {
-    const box = pages[i].getMediaBox();
+    const box = trySilently(() => pages[i].getMediaBox());
+    if (!box) continue;
     mediaBoxSamples.push({
       page: i + 1,
       width: Math.round(box.width * 100) / 100,
@@ -87,16 +149,36 @@ export async function analyzeStructure(filePath: string): Promise<StructureAnaly
     });
   }
 
+  let note: string | undefined;
+  if (totalPages === 0 && pages.length === 0) {
+    // pdf-lib couldn't traverse the page tree — try pdfjs-dist as fallback.
+    try {
+      const { loadDocument } = await import('./pdfjs-service.js');
+      const pdfjsDoc = await loadDocument(filePath);
+      try {
+        totalPages = pdfjsDoc.numPages;
+        note =
+          'pdf-lib could not fully resolve the page tree (typical of Linearized PDFs); ' +
+          'totalPages was obtained via pdfjs-dist. mediaBox samples are unavailable.';
+      } finally {
+        await pdfjsDoc.destroy();
+      }
+    } catch {
+      // Even pdfjs failed — keep totalPages = 0
+      note = 'Page tree could not be resolved by either pdf-lib or pdfjs-dist.';
+    }
+  }
+
   const pageTree: PageTreeInfo = {
-    totalPages: doc.getPageCount(),
+    totalPages,
     mediaBoxSamples,
   };
 
-  // Object statistics
-  const allObjects = context.enumerateIndirectObjects();
+  // Object statistics (best-effort)
   const byType: Record<string, number> = {};
   let streamCount = 0;
-
+  let totalObjects = 0;
+  const allObjects = trySilently(() => context.enumerateIndirectObjects()) ?? [];
   for (const [_ref, obj] of allObjects) {
     const typeName = obj.constructor.name;
     byType[typeName] = (byType[typeName] ?? 0) + 1;
@@ -104,16 +186,17 @@ export async function analyzeStructure(filePath: string): Promise<StructureAnaly
       streamCount++;
     }
   }
+  totalObjects = allObjects.length;
 
   const objectStats: ObjectStats = {
-    totalObjects: allObjects.length,
+    totalObjects,
     streamCount,
     byType,
   };
 
   // PDF version: prefer catalog /Version, fallback to file header %PDF-x.y
   let pdfVersion: string | null = null;
-  const versionEntry = catalog.lookupMaybe(PDFName.of('Version'), PDFName);
+  const versionEntry = trySilently(() => catalog.lookupMaybe(PDFName.of('Version'), PDFName));
   if (versionEntry) {
     pdfVersion = versionEntry.decodeText();
   } else {
@@ -133,37 +216,62 @@ export async function analyzeStructure(filePath: string): Promise<StructureAnaly
     }
   }
 
-  return {
+  const result: StructureAnalysis = {
     catalog: catalogEntries,
     pageTree,
     objectStats,
     isEncrypted: doc.isEncrypted,
     pdfVersion,
   };
+  if (note) result.note = note;
+  return result;
 }
 
 /** Font analysis result including font map and total pages scanned */
 export interface FontAnalysisResult {
   fontMap: Map<string, FontInfo>;
   pagesScanned: number;
+  /**
+   * Optional human-readable note describing partial / fallback results.
+   * Set when the page tree could not be enumerated (Linearized PDFs).
+   */
+  note?: string;
 }
 
 /**
  * Analyze fonts across all pages using pdf-lib's low-level access.
  * Returns font map and total pages scanned.
+ *
+ * Linearized PDFs cannot have their page tree enumerated by pdf-lib — instead
+ * of throwing, we return an empty font map with `note` describing the limitation,
+ * so that the caller can still produce a useful response.
  */
 export async function analyzeFontsWithPdfLib(filePath: string): Promise<FontAnalysisResult> {
+  return withSuppressedPdfLibLogs(() => analyzeFontsWithPdfLibImpl(filePath));
+}
+
+async function analyzeFontsWithPdfLibImpl(filePath: string): Promise<FontAnalysisResult> {
   const doc = await loadWithPdfLib(filePath);
   const fontMap = new Map<string, FontInfo>();
-  const pages = doc.getPages();
+  const pages = trySilently(() => doc.getPages()) ?? [];
+
+  if (pages.length === 0) {
+    return {
+      fontMap,
+      pagesScanned: 0,
+      note:
+        'pdf-lib could not enumerate the page tree (typical of Linearized PDFs); ' +
+        'fonts could not be analyzed. Consider regenerating the PDF without linearization.',
+    };
+  }
 
   for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
     const pageNum = pageIdx + 1;
     const pageNode = pages[pageIdx].node;
-    const resources = pageNode.Resources();
+    const resources = trySilently(() => pageNode.Resources());
     if (!resources) continue;
 
-    const fontDict = resources.lookupMaybe(PDFName.of('Font'), PDFDict);
+    const fontDict = trySilently(() => resources.lookupMaybe(PDFName.of('Font'), PDFDict));
     if (!fontDict) continue;
 
     for (const [fontNameObj, fontRefOrDict] of fontDict.entries()) {
@@ -238,6 +346,10 @@ export async function analyzeFontsWithPdfLib(filePath: string): Promise<FontAnal
  * Analyze digital signature fields.
  */
 export async function analyzeSignatures(filePath: string): Promise<SignaturesAnalysis> {
+  return withSuppressedPdfLibLogs(() => analyzeSignaturesImpl(filePath));
+}
+
+async function analyzeSignaturesImpl(filePath: string): Promise<SignaturesAnalysis> {
   const doc = await loadWithPdfLib(filePath);
   const fields: SignatureFieldInfo[] = [];
 

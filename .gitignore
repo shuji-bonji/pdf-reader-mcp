@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 **/.DS_Store
 tests/fixtures/*.pdf
+# Development-only reproduction scripts (Issue #1 etc.)
+/repro-*

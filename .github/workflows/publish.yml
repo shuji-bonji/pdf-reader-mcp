@@ -21,6 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # qpdf is used by tests/fixtures/create-test-pdf.ts to generate
+      # `linearized.pdf`, the regression fixture for Issue #1.
+      - name: Install qpdf
+        run: sudo apt-get update && sudo apt-get install -y qpdf
+
       - name: Lint
         run: npm run lint
 

@@ -180,6 +180,10 @@ export function formatStructureMarkdown(analysis: StructureAnalysis): string {
     lines.push(`- **Catalog Version**: ${analysis.pdfVersion}`);
   }
 
+  if (analysis.note) {
+    lines.push('', '## Note', '', `> ${analysis.note}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -227,6 +231,9 @@ export function formatFontsMarkdown(analysis: FontsAnalysis): string {
 
   if (analysis.fonts.length === 0) {
     lines.push('', 'No fonts found in this document.');
+    if (analysis.note) {
+      lines.push('', '## Note', '', `> ${analysis.note}`);
+    }
     return lines.join('\n');
   }
 
@@ -238,6 +245,10 @@ export function formatFontsMarkdown(analysis: FontsAnalysis): string {
     lines.push(
       `| ${f.name} | ${f.type} | ${f.encoding ?? '-'} | ${f.isEmbedded ? 'Yes' : 'No'} | ${f.isSubset ? 'Yes' : 'No'} | ${pages} |`,
     );
+  }
+
+  if (analysis.note) {
+    lines.push('', '## Note', '', `> ${analysis.note}`);
   }
 
   return lines.join('\n');

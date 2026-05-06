@@ -47,6 +47,7 @@ Examples:
           embeddedCount: fonts.filter((f) => f.isEmbedded).length,
           subsetCount: fonts.filter((f) => f.isSubset).length,
           pagesScanned: result.pagesScanned,
+          ...(result.note ? { note: result.note } : {}),
         };
 
         const raw =
