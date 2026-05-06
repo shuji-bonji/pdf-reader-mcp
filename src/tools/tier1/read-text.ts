@@ -18,18 +18,21 @@ export function registerReadText(server: McpServer): void {
 
 Text is extracted page by page, sorted by vertical position (top to bottom) then horizontal position (left to right), providing natural reading order.
 
+For **untagged** multi-column PDFs (e.g. older 新旧対照表 PDFs that lack a structure tree), pass \`split_columns: 2\` or \`3\` to bucket items by X-coordinate left-to-right. Tagged PDFs with proper \`<Table>\` markup should use the \`extract_tables\` tool instead.
+
 Args:
   - file_path (string): Absolute path to a local PDF file
   - pages (string, optional): Page range to extract. Format: "1-5", "3", or "1,3,5-7". Omit for all pages.
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
+  - split_columns (1 | 2 | 3, optional): Column-aware reordering for untagged multi-column PDFs. Default 1 = existing Y-sort.
 
 Returns:
-  Extracted text organized by page number.
+  Extracted text organized by page number. With \`split_columns >= 2\`, columns are separated by a blank line so a downstream LLM can tell them apart.
 
 Examples:
   - Extract all text: { file_path: "/path/to/doc.pdf" }
   - Extract pages 1-3: { file_path: "/path/to/doc.pdf", pages: "1-3" }
-  - Extract specific pages: { file_path: "/path/to/doc.pdf", pages: "1,5,10" }`,
+  - Untagged 新旧対照表: { file_path: "/path/to/older-shinkyu.pdf", split_columns: 2 }`,
       inputSchema: ReadTextSchema,
       annotations: {
         readOnlyHint: true,
@@ -40,7 +43,9 @@ Examples:
     },
     async (params: ReadTextInput) => {
       try {
-        const pages = await extractText(params.file_path, params.pages);
+        const pages = await extractText(params.file_path, params.pages, {
+          splitColumns: params.split_columns,
+        });
 
         let text: string;
         if (params.response_format === ResponseFormat.JSON) {

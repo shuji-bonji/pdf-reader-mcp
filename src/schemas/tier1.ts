@@ -21,12 +21,36 @@ export const GetMetadataSchema = z
   })
   .strict();
 
+/**
+ * `split_columns` — Issue #3: column-aware extraction for untagged
+ * multi-column PDFs.
+ *
+ * Acts as an opt-in override for the default reading-order strategy. When
+ * `>= 2`, items are bucketed by X-coordinate into N equal-width columns and
+ * the buckets are concatenated left-to-right. `1` (default) preserves the
+ * existing Y-sort behaviour. Tagged PDFs with proper `<Table>` markup should
+ * use `extract_tables` instead — `split_columns` is for untagged cases.
+ */
+export const SplitColumnsSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(3)
+  .optional()
+  .describe(
+    'Number of columns to use when reordering text. 1 (default) = existing Y-sort. ' +
+      '2 or 3 = bucket by X-coordinate left-to-right. Use for untagged 新旧対照表 / ' +
+      'two-column PDFs where Y-sort would interleave columns. Tagged PDFs with proper ' +
+      '<Table> markup should use extract_tables instead.',
+  );
+
 /** read_text */
 export const ReadTextSchema = z
   .object({
     file_path: FilePathSchema,
     pages: PagesSchema,
     response_format: ResponseFormatSchema,
+    split_columns: SplitColumnsSchema,
   })
   .strict();
 
@@ -72,6 +96,7 @@ export const ReadUrlSchema = z
     url: UrlSchema,
     pages: PagesSchema,
     response_format: ResponseFormatSchema,
+    split_columns: SplitColumnsSchema,
   })
   .strict();
 

@@ -19,17 +19,20 @@ export function registerReadUrl(server: McpServer): void {
 
 Downloads the PDF from the specified URL, then extracts text with Y-coordinate-based reading order. Supports HTTP and HTTPS. Maximum file size: 50MB. Timeout: 30 seconds.
 
+Like \`read_text\`, accepts \`split_columns: 2 | 3\` for **untagged** multi-column PDFs. Tagged PDFs should use \`extract_tables\` instead.
+
 Args:
   - url (string): URL pointing to a PDF file (HTTP or HTTPS)
   - pages (string, optional): Page range to extract. Format: "1-5", "3", or "1,3,5-7". Omit for all pages.
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
+  - split_columns (1 | 2 | 3, optional): Column-aware reordering. Default 1 = existing Y-sort.
 
 Returns:
   Extracted text organized by page number, same format as read_text.
 
 Examples:
   - Read remote PDF: { url: "https://example.com/document.pdf" }
-  - Read specific pages: { url: "https://example.com/doc.pdf", pages: "1-3" }`,
+  - Untagged 2-column PDF: { url: "https://...", split_columns: 2 }`,
       inputSchema: ReadUrlSchema,
       annotations: {
         readOnlyHint: true,
@@ -44,7 +47,9 @@ Examples:
         const doc = await loadDocumentFromData(data);
 
         try {
-          const results = await extractTextFromDoc(doc, params.pages);
+          const results = await extractTextFromDoc(doc, params.pages, {
+            splitColumns: params.split_columns,
+          });
 
           let text: string;
           if (params.response_format === ResponseFormat.JSON) {

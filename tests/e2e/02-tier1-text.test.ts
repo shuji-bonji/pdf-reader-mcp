@@ -94,6 +94,64 @@ describe('02 - read_text', () => {
       expect(pages[1].text).toContain(kw);
     }
   });
+
+  // ─── Issue #3: split_columns (untagged multi-column reordering) ───
+
+  // RT-SC-1: default (no splitColumns) interleaves both columns on the same line.
+  // This is the *baseline* behaviour the new flag is meant to fix.
+  it('RT-SC-1: untagged 2-column PDF without split_columns interleaves columns', async () => {
+    const pages = await extractText(FIXTURES.twoColumn);
+    expect(pages).toHaveLength(1);
+    const text = pages[0].text;
+    // Both LEFT-N and RIGHT-N appear, but the first physical line contains
+    // BOTH "LEFT-1" and "RIGHT-1" — this is the failure mode for downstream
+    // LLM column comprehension.
+    expect(text).toContain('LEFT-1');
+    expect(text).toContain('RIGHT-1');
+    const firstLine = text.split('\n')[0];
+    expect(firstLine).toContain('LEFT-1');
+    expect(firstLine).toContain('RIGHT-1');
+  });
+
+  // RT-SC-2: split_columns: 2 produces "left column then right column" with
+  //          a blank-line separator. LEFT-* must all appear before RIGHT-*.
+  it('RT-SC-2: split_columns=2 emits left column first, then right column', async () => {
+    const pages = await extractText(FIXTURES.twoColumn, undefined, { splitColumns: 2 });
+    expect(pages).toHaveLength(1);
+    const text = pages[0].text;
+
+    // Every LEFT-* index must precede every RIGHT-* index.
+    for (let i = 1; i <= 4; i++) {
+      for (let j = 1; j <= 4; j++) {
+        const leftIdx = text.indexOf(`LEFT-${i}`);
+        const rightIdx = text.indexOf(`RIGHT-${j}`);
+        expect(leftIdx).toBeGreaterThanOrEqual(0);
+        expect(rightIdx).toBeGreaterThanOrEqual(0);
+        expect(leftIdx).toBeLessThan(rightIdx);
+      }
+    }
+    // Blank-line separator between columns
+    expect(text).toMatch(/LEFT-4[\s]*\n\n[\s]*RIGHT-1/);
+  });
+
+  // RT-SC-3: split_columns=1 keeps existing behaviour (regression guard).
+  it('RT-SC-3: split_columns=1 matches default behaviour', async () => {
+    const a = await extractText(FIXTURES.twoColumn);
+    const b = await extractText(FIXTURES.twoColumn, undefined, { splitColumns: 1 });
+    expect(b[0].text).toBe(a[0].text);
+  });
+
+  // RT-SC-4: split_columns must not destroy single-column extraction
+  //          (apply 2 to a 1-column doc — text is still recoverable).
+  it('RT-SC-4: split_columns=2 on a single-column PDF preserves all content', async () => {
+    const pages = await extractText(FIXTURES.simple, '1', { splitColumns: 2 });
+    expect(pages).toHaveLength(1);
+    // simple.pdf page 1 contains "Hello PDF World" — should still appear
+    // (text might be split across the two synthetic columns, but every
+    // word is preserved).
+    expect(pages[0].text).toContain('Hello');
+    expect(pages[0].text).toContain('PDF');
+  });
 });
 
 // ========================================

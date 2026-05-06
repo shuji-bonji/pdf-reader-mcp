@@ -81,6 +81,45 @@ async function createEmptyPdf(): Promise<void> {
 }
 
 /**
+ * Untagged 2-column PDF for Issue #3 (`split_columns`) regression.
+ *
+ * Layout: A4 portrait, two columns sharing the page horizontally. Each
+ * column has 4 lines stacked top-to-bottom. Y-coordinates are paired
+ * across columns so that **plain Y-sort interleaves the columns**, while
+ * `split_columns: 2` should restore left-then-right reading order.
+ *
+ *   LEFT-1                         RIGHT-1
+ *   LEFT-2                         RIGHT-2
+ *   LEFT-3                         RIGHT-3
+ *   LEFT-4                         RIGHT-4
+ *
+ * No StructTree is added — this PDF is intentionally untagged to model
+ * older 新旧対照表 PDFs that lack accessibility metadata.
+ */
+async function createTwoColumnPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595, 842]); // A4
+  const opts = { size: 14, font, color: rgb(0, 0, 0) };
+
+  // 4 horizontally-paired lines in 2 columns.
+  const ys = [780, 740, 700, 660];
+  for (let i = 0; i < ys.length; i++) {
+    page.drawText(`LEFT-${i + 1}`, { x: 80, y: ys[i], ...opts });
+    page.drawText(`RIGHT-${i + 1}`, { x: 360, y: ys[i], ...opts });
+  }
+
+  doc.setTitle('Two-Column Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('Issue #3 split_columns regression fixture');
+  doc.setCreator('pdf-lib');
+
+  const bytes = await doc.save();
+  await writeFile(`${FIXTURES_DIR}/two-column.pdf`, bytes);
+  console.log('Created: two-column.pdf (1 page, untagged 2 columns)');
+}
+
+/**
  * Create a PDF with annotations and form fields for Tier 2 testing.
  * Features: link annotations, text annotations, form fields (text + signature).
  */
@@ -239,6 +278,7 @@ async function main(): Promise<void> {
   await createSimplePdf();
   await createEmptyPdf();
   await createAnnotatedPdf();
+  await createTwoColumnPdf();
   await createLinearizedPdf();
   console.log('All test fixtures created.');
 }

@@ -20,7 +20,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | ---------------- | -------------------------------------------------------- |
 | `get_page_count` | Lightweight page count retrieval                         |
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
-| `read_text`      | Text extraction with Y-coordinate reading order          |
+| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs) |
 | `search_text`    | Full-text search with surrounding context                |
 | `read_images`    | Image extraction as base64 with metadata                 |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
@@ -160,15 +160,29 @@ extract_tables({ file_path: "/path/to/kaisei-tsutatsu.pdf", pages: "1" })
   | …第２条第 16 項《定義》… | …第２条第 15 項《定義》… |
 ```
 
-Untagged PDFs return an empty result with a `note` recommending column-aware
-fallback (see roadmap Issue #3).
+Untagged PDFs return an empty result with a `note` recommending the
+column-aware fallback below.
+
+### Read Untagged Multi-Column PDF
+
+```
+read_text({ file_path: "/path/to/older-shinkyu.pdf", split_columns: 2 })
+→ // Plain Y-sort would interleave columns:
+//   "改正後セル1   改正前セル1\n 改正後セル2   改正前セル2..."
+//
+// With split_columns: 2 the left column is emitted first, then the right:
+//   "改正後セル1\n改正後セル2\n…\n\n改正前セル1\n改正前セル2\n…"
+```
+
+Use `split_columns: 2 | 3` for **untagged** multi-column PDFs. For Tagged
+PDFs with proper `<Table>` markup, `extract_tables` (above) is preferred.
 
 ## Tech Stack
 
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
 - **pdf-lib** — low-level object structure analysis
-- **Vitest** — unit + E2E testing (164 tests)
+- **Vitest** — unit + E2E testing (168 tests)
 - **Biome** — linting + formatting
 - **Zod** — input validation
 
@@ -176,7 +190,7 @@ fallback (see roadmap Issue #3).
 
 ```bash
 npm test              # Run all tests (unit: 39 tests)
-npm run test:e2e      # E2E tests only (125 tests)
+npm run test:e2e      # E2E tests only (129 tests)
 npm run test:watch    # Watch mode
 ```
 
@@ -206,7 +220,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # Error handling
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 125 tests)
+    └── e2e/                  # E2E tests (9 suites, 129 tests)
 ```
 
 ## Pairing with pdf-spec-mcp

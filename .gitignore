@@ -3,5 +3,6 @@ dist/
 *.tsbuildinfo
 **/.DS_Store
 tests/fixtures/*.pdf
-# Development-only reproduction scripts (Issue #1 etc.)
+# Development-only reproduction / fixture-generation scripts (Issue #1, #2, #3 etc.)
 /repro-*
+/gen-*.mjs

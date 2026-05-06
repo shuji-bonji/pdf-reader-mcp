@@ -25,6 +25,8 @@ export const FIXTURES = {
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */
   linearized: resolve(FIXTURES_DIR, 'linearized.pdf'),
+  /** Untagged 2-column layout (Issue #3 regression for split_columns). */
+  twoColumn: resolve(FIXTURES_DIR, 'two-column.pdf'),
 } as const;
 
 // ========================================

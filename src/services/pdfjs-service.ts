@@ -105,12 +105,25 @@ export async function getMetadataFromDoc(
 }
 
 /**
+ * Options for text extraction.
+ *
+ * `splitColumns` controls Issue #3 column-aware reordering. When `>= 2`,
+ * text items are bucketed into N equal-width columns by X-coordinate and
+ * concatenated left-to-right. `1` (default / undefined) preserves the
+ * existing single-column Y-sort behaviour.
+ */
+export interface ExtractTextOptions {
+  splitColumns?: number;
+}
+
+/**
  * Extract text from a pre-loaded PDFDocumentProxy.
  * Does NOT destroy the document — caller is responsible for lifecycle.
  */
 export async function extractTextFromDoc(
   doc: PDFDocumentProxy,
   pages?: string,
+  options: ExtractTextOptions = {},
 ): Promise<PageText[]> {
   const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
@@ -118,7 +131,7 @@ export async function extractTextFromDoc(
   const results = await Promise.all(
     pageNumbers.map(async (pageNum) => {
       const page = await doc.getPage(pageNum);
-      const text = await extractPageText(page);
+      const text = await extractPageText(page, options);
       return { page: pageNum, text };
     }),
   );
@@ -129,11 +142,15 @@ export async function extractTextFromDoc(
 /**
  * Extract text from specified pages (1-based).
  */
-export async function extractText(filePath: string, pages?: string): Promise<PageText[]> {
+export async function extractText(
+  filePath: string,
+  pages?: string,
+  options: ExtractTextOptions = {},
+): Promise<PageText[]> {
   const doc = await loadDocument(filePath);
 
   try {
-    return await extractTextFromDoc(doc, pages);
+    return await extractTextFromDoc(doc, pages, options);
   } finally {
     await doc.destroy();
   }
@@ -322,8 +339,19 @@ export async function extractImages(
 
 /**
  * Extract text from a single page with Y-coordinate-based line ordering.
+ *
+ * Issue #3 (v0.4.0): when `options.splitColumns >= 2`, text items are first
+ * partitioned into N equal-width X buckets, and each bucket is reordered
+ * independently. The result is `bucket[0] (leftmost) → bucket[N-1]
+ * (rightmost)`, with `\n\n` separators between buckets so a downstream LLM
+ * can tell columns apart. Use this for **untagged** multi-column PDFs
+ * (typical of older 新旧対照表 PDFs); Tagged PDFs with proper `<Table>`
+ * markup should use `extract_tables` instead.
  */
-async function extractPageText(page: PDFPageProxy): Promise<string> {
+async function extractPageText(
+  page: PDFPageProxy,
+  options: ExtractTextOptions = {},
+): Promise<string> {
   const content = await page.getTextContent();
   const items = content.items.filter(
     (item): item is TextItem => 'str' in item && item.str !== undefined,
@@ -331,8 +359,39 @@ async function extractPageText(page: PDFPageProxy): Promise<string> {
 
   if (items.length === 0) return '';
 
+  const splitColumns = options.splitColumns ?? 1;
+
+  if (splitColumns >= 2) {
+    // pdfjs-dist returns each page's `view` as [x1, y1, x2, y2] in user space.
+    // For most documents the X range starts at 0, so x2 = page width.
+    const view = page.view;
+    const pageWidth = view[2] - view[0];
+    const colWidth = pageWidth / splitColumns;
+
+    const buckets: TextItem[][] = Array.from({ length: splitColumns }, () => []);
+    for (const item of items) {
+      const x = item.transform[4] - view[0];
+      const colIdx = Math.min(Math.max(0, Math.floor(x / colWidth)), splitColumns - 1);
+      buckets[colIdx].push(item);
+    }
+
+    const columnTexts = buckets.map((bucket) => itemsToText(bucket));
+    return columnTexts.filter((s) => s.length > 0).join('\n\n');
+  }
+
+  return itemsToText(items);
+}
+
+/**
+ * Reorder a flat list of TextItems by Y descending, then X ascending,
+ * grouping into lines by Y proximity. Extracted from `extractPageText` so
+ * the column-aware path can reuse the same line-grouping logic per bucket.
+ */
+function itemsToText(items: TextItem[]): string {
+  if (items.length === 0) return '';
+
   // Sort by Y descending (top to bottom), then X ascending (left to right)
-  items.sort((a, b) => {
+  const sorted = [...items].sort((a, b) => {
     const ay = a.transform[5];
     const by = b.transform[5];
     const yDiff = by - ay;
@@ -343,12 +402,11 @@ async function extractPageText(page: PDFPageProxy): Promise<string> {
   // Group into lines based on Y-coordinate proximity
   const lines: string[] = [];
   let currentLine: string[] = [];
-  let lastY = items[0].transform[5];
+  let lastY = sorted[0].transform[5];
 
-  for (const item of items) {
+  for (const item of sorted) {
     const y = item.transform[5];
     if (Math.abs(y - lastY) > 2) {
-      // New line
       if (currentLine.length > 0) {
         lines.push(currentLine.join(' '));
         currentLine = [];

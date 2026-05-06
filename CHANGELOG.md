@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-07
+
+### Added
+
+- **`split_columns` parameter on `read_text` and `read_url`** (Issue #3): opt-in column-aware reordering for **untagged** multi-column PDFs. When `split_columns: 2` (or `3`) is passed, text items are first bucketed by X-coordinate into N equal-width columns, then each bucket is Y-sorted independently and concatenated left-to-right with a blank-line separator. Designed for older 新旧対照表 PDFs and similar two-column documents that lack a structure tree (Tagged PDFs with proper `<Table>` markup should use `extract_tables` instead).
+  - `splitColumns: 1` (default / undefined) is unchanged — existing single-column Y-sort behaviour is preserved as a regression-tested baseline.
+  - `extractText` / `extractTextFromDoc` now accept an `ExtractTextOptions` object with `splitColumns?: number`. Internally, line-grouping logic is factored out into `itemsToText` so the column path reuses the same Y-sort.
+- **Test fixture `tests/fixtures/two-column.pdf`**: 1-page A4 untagged PDF with `LEFT-1..4` and `RIGHT-1..4` placed at paired Y-coordinates so plain Y-sort interleaves them — the regression target for `split_columns`.
+- **E2E tests** in `tests/e2e/02-tier1-text.test.ts`: 4 new cases (RT-SC-1..4) covering the failure mode without `split_columns`, the success mode with `split_columns: 2`, the `split_columns: 1` regression guard, and a sanity check that `split_columns: 2` on a single-column PDF preserves all content.
+
+### Changed
+
+- **`read_text` / `read_url` tool descriptions**: documented the new `split_columns` parameter with guidance to prefer `extract_tables` for Tagged PDFs.
+
 ## [0.3.0] - 2026-05-06
 
 ### Added
@@ -91,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Y-coordinate-based text extraction preserving natural reading order
 - Unit tests for core utilities and pdfjs-service
 
+[0.4.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.1...v0.2.2
