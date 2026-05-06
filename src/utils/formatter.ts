@@ -5,6 +5,7 @@
 import { CHARACTER_LIMIT } from '../constants.js';
 import type {
   AnnotationsAnalysis,
+  ExtractedTable,
   FontsAnalysis,
   MetadataValidation,
   PageText,
@@ -14,6 +15,7 @@ import type {
   SignaturesAnalysis,
   StructureAnalysis,
   StructureComparison,
+  TablesExtractionResult,
   TaggedValidation,
   TagNode,
   TagsAnalysis,
@@ -478,4 +480,66 @@ export function formatCompareStructureMarkdown(result: StructureComparison): str
   lines.push('', '---', '', `**Summary**: ${result.summary}`);
 
   return lines.join('\n');
+}
+
+/**
+ * Format a `TablesExtractionResult` as Markdown. Each extracted table is
+ * rendered as a GitHub-flavoured Markdown table preceded by a `## Page N — Table M`
+ * heading. When no header rows are present, an empty header row is synthesised
+ * because Markdown requires one.
+ */
+export function formatTablesMarkdown(result: TablesExtractionResult): string {
+  const lines: string[] = ['# Extracted Tables', ''];
+  lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
+  lines.push(`- **Pages Scanned**: ${result.pagesScanned}`);
+  lines.push(`- **Tables Found**: ${result.totalTables}`);
+
+  if (result.note) {
+    lines.push('', '## Note', '', `> ${result.note}`);
+  }
+
+  if (result.tables.length === 0) {
+    lines.push('', 'No tables were extracted.');
+    return lines.join('\n');
+  }
+
+  for (const table of result.tables) {
+    lines.push('', `## Page ${table.page} — Table ${table.index}`, '');
+    lines.push(renderTableAsMarkdown(table));
+  }
+
+  return lines.join('\n');
+}
+
+function renderTableAsMarkdown(table: ExtractedTable): string {
+  const allRows = [...table.headerRows, ...table.bodyRows, ...table.footerRows];
+  if (allRows.length === 0) return '_(empty table)_';
+
+  // Column count = max cell count across all rows. Short rows are padded.
+  const columnCount = allRows.reduce((m, r) => Math.max(m, r.cells.length), 0);
+  if (columnCount === 0) return '_(empty table)_';
+
+  const header =
+    table.headerRows.length > 0
+      ? table.headerRows[0]
+      : { cells: Array.from({ length: columnCount }, () => ({ text: '', isHeader: true })) };
+
+  const lines: string[] = [];
+  lines.push(`| ${padCells(header.cells, columnCount).join(' | ')} |`);
+  lines.push(`| ${Array.from({ length: columnCount }, () => '---').join(' | ')} |`);
+
+  // Additional header rows beyond the first are rendered as body rows
+  // (Markdown only supports a single header row).
+  const remainingHeader = table.headerRows.slice(1);
+  for (const row of [...remainingHeader, ...table.bodyRows, ...table.footerRows]) {
+    lines.push(`| ${padCells(row.cells, columnCount).join(' | ')} |`);
+  }
+
+  return lines.join('\n');
+}
+
+function padCells(cells: { text: string }[], n: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) out.push(cells[i]?.text ?? '');
+  return out;
 }

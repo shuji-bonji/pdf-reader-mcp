@@ -12,7 +12,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**15 tools** organized into three tiers:
+**16 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -28,13 +28,14 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ### Tier 2: Structure Inspection
 
-| Tool                  | Description                                      |
-| --------------------- | ------------------------------------------------ |
-| `inspect_structure`   | Object tree and catalog dictionary analysis      |
-| `inspect_tags`        | Tagged PDF structure tree visualization          |
-| `inspect_fonts`       | Font inventory (embedded/subset/type detection)  |
-| `inspect_annotations` | Annotation listing (categorized by subtype)      |
-| `inspect_signatures`  | Digital signature field structure analysis        |
+| Tool                  | Description                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `inspect_structure`   | Object tree and catalog dictionary analysis                         |
+| `inspect_tags`        | Tagged PDF structure tree visualization                             |
+| `inspect_fonts`       | Font inventory (embedded/subset/type detection)                     |
+| `inspect_annotations` | Annotation listing (categorized by subtype)                         |
+| `inspect_signatures`  | Digital signature field structure analysis                          |
+| `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns)   |
 
 ### Tier 3: Validation & Analysis
 
@@ -145,12 +146,29 @@ compare_structure({
   | Tagged      | true | true | ✅ |
 ```
 
+### Extract Tables (Tagged PDF)
+
+```
+extract_tables({ file_path: "/path/to/kaisei-tsutatsu.pdf", pages: "1" })
+→ # Extracted Tables
+  - **Tagged**: Yes / **Pages Scanned**: 1 / **Tables Found**: 1
+
+  ## Page 1 — Table 1
+
+  | 改正後 | 改正前 |
+  | --- | --- |
+  | …第２条第 16 項《定義》… | …第２条第 15 項《定義》… |
+```
+
+Untagged PDFs return an empty result with a `note` recommending column-aware
+fallback (see roadmap Issue #3).
+
 ## Tech Stack
 
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
 - **pdf-lib** — low-level object structure analysis
-- **Vitest** — unit + E2E testing (159 tests)
+- **Vitest** — unit + E2E testing (164 tests)
 - **Biome** — linting + formatting
 - **Zod** — input validation
 
@@ -158,7 +176,7 @@ compare_structure({
 
 ```bash
 npm test              # Run all tests (unit: 39 tests)
-npm run test:e2e      # E2E tests only (120 tests)
+npm run test:e2e      # E2E tests only (125 tests)
 npm run test:watch    # Watch mode
 ```
 
@@ -172,7 +190,7 @@ pdf-reader-mcp/
 │   ├── types.ts              # Type definitions
 │   ├── tools/
 │   │   ├── tier1/            # Basic tools (7)
-│   │   ├── tier2/            # Structure inspection (5)
+│   │   ├── tier2/            # Structure inspection (6)
 │   │   ├── tier3/            # Validation & analysis (3)
 │   │   └── index.ts          # Tool registration
 │   ├── services/
@@ -188,7 +206,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # Error handling
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 120 tests)
+    └── e2e/                  # E2E tests (9 suites, 125 tests)
 ```
 
 ## Pairing with pdf-spec-mcp

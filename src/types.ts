@@ -153,6 +153,51 @@ export interface FontsAnalysis {
   note?: string;
 }
 
+/** A single cell within an extracted table row. */
+export interface TableCell {
+  /** Concatenated text content of the cell (whitespace compacted). */
+  text: string;
+  /** True when the cell came from a `TH` element (header), false for `TD`. */
+  isHeader: boolean;
+}
+
+/** A table row composed of one or more cells. */
+export interface TableRow {
+  cells: TableCell[];
+}
+
+/** A single table extracted from a Tagged PDF's structure tree. */
+export interface ExtractedTable {
+  /** 1-based page number where the table appears. */
+  page: number;
+  /** 1-based index of the table within the page (1 = first table on the page). */
+  index: number;
+  /** Rows from `<THead>`. Empty if the table has no explicit header section. */
+  headerRows: TableRow[];
+  /** Rows from `<TBody>` (or directly under `<Table>` when no `<TBody>` exists). */
+  bodyRows: TableRow[];
+  /** Rows from `<TFoot>`. Rare; usually empty. */
+  footerRows: TableRow[];
+}
+
+/** Output of `extract_tables`. */
+export interface TablesExtractionResult {
+  /** Whether the PDF claims to be tagged (`/MarkInfo /Marked true`). */
+  isTagged: boolean;
+  /** All tables extracted from the requested pages. */
+  tables: ExtractedTable[];
+  /** Total number of tables across `pagesScanned`. */
+  totalTables: number;
+  /** Number of pages traversed (subject to the `pages` filter). */
+  pagesScanned: number;
+  /**
+   * Optional human-readable note. Set when no tables could be extracted
+   * because the PDF is not tagged (in that case callers should fall back to
+   * the planned column-aware extraction).
+   */
+  note?: string;
+}
+
 /** Annotation information */
 export interface AnnotationInfo {
   subtype: string;

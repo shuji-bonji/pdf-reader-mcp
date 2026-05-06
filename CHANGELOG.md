@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-06
+
+### Added
+
+- **`extract_tables` (Tier 2)**: New tool that walks a Tagged PDF's structure tree and emits every `<Table>` subtree as a Markdown table or a JSON document. Designed for documents whose meaning depends on multi-column layout — e.g. 国税庁 新旧対照表 (kaisei tsutatsu) PDFs where reading-order extraction merges 改正後 / 改正前 columns into ambiguous text. Internals:
+  - `extractTables(filePath, pages?)` / `extractTablesFromDoc(doc, pages?)` in `services/pdfjs-service.ts`. Walks the StructTree, identifies `<Table>` → `<THead> | <TBody> | <TFoot>` → `<TR>` → `<TH> | <TD>`, then resolves cell text by mapping each leaf node's marked-content `id` (e.g. `p715R_mc4`) to the corresponding `beginMarkedContentProps` boundary in `getTextContent({ includeMarkedContent: true })`.
+  - Cell text post-processing: collapses whitespace runs (incl. U+3000), folds per-character kerning runs ("消 費 税 法" → "消費税法") while preserving natural inter-word spacing ("事業者 法人番号"), escapes Markdown table delimiters.
+  - Untagged PDFs return `isTagged: false`, an empty `tables` array, and a `note` recommending column-aware extraction (planned in Issue #3) as the fallback.
+  - colspan / rowspan and nested tables are skipped in this initial release; cells appear in source order.
+- **Types**: `TableCell`, `TableRow`, `ExtractedTable`, `TablesExtractionResult` in `types.ts`.
+- **Schema**: `ExtractTablesSchema` in `schemas/tier2.ts` (file_path + pages + response_format).
+- **Markdown formatter**: `formatTablesMarkdown` in `utils/formatter.ts` renders results as `# Extracted Tables` summary block followed by `## Page N — Table M` GFM tables.
+- **E2E tests**: 5 new tests in `tests/e2e/04-tier2-structure.test.ts` covering untagged → note path, tagged-but-empty path, formatter shape, and pages filter.
+
+### Changed
+
+- **Tool count**: 15 → 16 tools (Tier 2 now has 6).
+- README / README.ja.md tool tables and architecture diagram updated accordingly.
+
 ## [0.2.3] - 2026-05-06
 
 ### Fixed
@@ -72,6 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Y-coordinate-based text extraction preserving natural reading order
 - Unit tests for core utilities and pdfjs-service
 
+[0.3.0]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/shuji-bonji/pdf-reader-mcp/compare/v0.2.0...v0.2.1

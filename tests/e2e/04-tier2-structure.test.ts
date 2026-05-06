@@ -3,10 +3,14 @@
  *
  * IS-1〜IS-5: inspect_structure (analyzeStructure)
  * IF-1〜IF-4: inspect_fonts (analyzeFontsWithPdfLib)
+ * ET-1〜:    extract_tables (extractTables)
  */
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
+import { extractTables } from '../../src/services/pdfjs-service.js';
+import { formatTablesMarkdown } from '../../src/utils/formatter.js';
+import type { TablesExtractionResult } from '../../src/types.js';
 import { A4_SIZE, EXPECTED_METADATA, FONT_FAMILIES } from './constants.js';
 import { ALL_FIXTURES, FIXTURES } from './setup.js';
 
@@ -174,6 +178,84 @@ describe('04 - inspect_fonts', () => {
 
 const linearizedAvailable = existsSync(FIXTURES.linearized);
 const describeIfLinearized = linearizedAvailable ? describe : describe.skip;
+
+// ========================================
+// extract_tables (Issue #2)
+// ========================================
+
+describe('04 - extract_tables', () => {
+  // ET-1: Untagged PDF returns isTagged: false + note + empty tables
+  it('ET-1: untagged simple.pdf returns isTagged=false with a note', async () => {
+    const result = await extractTables(FIXTURES.simple);
+    expect(result.isTagged).toBe(false);
+    expect(result.tables).toEqual([]);
+    expect(result.totalTables).toBe(0);
+    expect(typeof result.note).toBe('string');
+    expect(result.note ?? '').toMatch(/not tagged/i);
+  });
+
+  // ET-2: Tagged PDF without tables — must NOT return a note (we only set
+  // it for the untagged branch).
+  it('ET-2: tagged.pdf (no tables) returns isTagged=true with no note', async () => {
+    const result = await extractTables(FIXTURES.tagged);
+    expect(result.isTagged).toBe(true);
+    expect(result.totalTables).toBe(0);
+    expect(result.note).toBeUndefined();
+    expect(result.pagesScanned).toBe(EXPECTED_METADATA.tagged.pageCount);
+  });
+
+  // ET-3: Markdown formatter renders an "untagged" result with the note.
+  it('ET-3: formatTablesMarkdown renders the untagged note', async () => {
+    const result = await extractTables(FIXTURES.simple);
+    const md = formatTablesMarkdown(result);
+    expect(md).toContain('# Extracted Tables');
+    expect(md).toContain('**Tagged**: No');
+    expect(md).toContain('## Note');
+  });
+
+  // ET-4: Markdown formatter handcrafted — verify table rendering shape.
+  it('ET-4: formatTablesMarkdown emits GFM tables with header + body', () => {
+    const fake: TablesExtractionResult = {
+      isTagged: true,
+      pagesScanned: 1,
+      totalTables: 1,
+      tables: [
+        {
+          page: 1,
+          index: 1,
+          headerRows: [
+            {
+              cells: [
+                { text: '改正後', isHeader: true },
+                { text: '改正前', isHeader: true },
+              ],
+            },
+          ],
+          bodyRows: [
+            {
+              cells: [
+                { text: 'A1', isHeader: false },
+                { text: 'B1', isHeader: false },
+              ],
+            },
+          ],
+          footerRows: [],
+        },
+      ],
+    };
+    const md = formatTablesMarkdown(fake);
+    expect(md).toContain('## Page 1 — Table 1');
+    expect(md).toContain('| 改正後 | 改正前 |');
+    expect(md).toContain('| --- | --- |');
+    expect(md).toContain('| A1 | B1 |');
+  });
+
+  // ET-5: pages filter is honoured.
+  it('ET-5: pages parameter filters scanned pages', async () => {
+    const result = await extractTables(FIXTURES.tagged, '1');
+    expect(result.pagesScanned).toBe(1);
+  });
+});
 
 describeIfLinearized('04 - Linearized PDF (Issue #1 regression)', () => {
   it('analyzeStructure does not throw on a linearized PDF', async () => {

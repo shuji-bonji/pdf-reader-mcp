@@ -46,9 +46,19 @@ export const InspectSignaturesSchema = z
   })
   .strict();
 
+/** extract_tables — Tagged PDF Table → Markdown */
+export const ExtractTablesSchema = z
+  .object({
+    file_path: FilePathSchema,
+    pages: PagesSchema,
+    response_format: ResponseFormatSchema,
+  })
+  .strict();
+
 // Export inferred types
 export type InspectStructureInput = z.infer<typeof InspectStructureSchema>;
 export type InspectTagsInput = z.infer<typeof InspectTagsSchema>;
 export type InspectFontsInput = z.infer<typeof InspectFontsSchema>;
 export type InspectAnnotationsInput = z.infer<typeof InspectAnnotationsSchema>;
 export type InspectSignaturesInput = z.infer<typeof InspectSignaturesSchema>;
+export type ExtractTablesInput = z.infer<typeof ExtractTablesSchema>;
