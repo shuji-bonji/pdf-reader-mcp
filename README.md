@@ -238,6 +238,51 @@ pdf-reader-mcp/
     └── e2e/                  # E2E tests (9 suites, 132 tests)
 ```
 
+## Error Contract (houki-hub family)
+
+Since **v0.6.0**, this MCP returns structured errors that follow the **houki-hub family error contract**, sharing a unified `code` vocabulary across the family. Combined with `houki-egov-mcp` / `houki-nta-mcp`, an LLM or Skill layer can interpret errors with consistent logic.
+
+- [`docs/ERROR-CODES.md`](https://github.com/shuji-bonji/houki-research-skill/blob/main/docs/ERROR-CODES.md) — error code vocabulary (houki-research-skill)
+- [`docs/ERROR-HANDLING.md`](https://github.com/shuji-bonji/houki-research-skill/blob/main/docs/ERROR-HANDLING.md) — handling policy / next_actions templates
+
+Implementation is **independent** — no dependency on `houki-abbreviations` or other family packages. The reference implementation is [`houki-egov-mcp/src/errors.ts`](https://github.com/shuji-bonji/houki-egov-mcp/blob/main/src/errors.ts); pdf-reader-mcp's local definition is in [`src/errors.ts`](./src/errors.ts).
+
+On error, every tool returns `isError: true` and the JSON-stringified `LawServiceError` in `content[0].text`:
+
+```json
+{
+  "error": "The file does not appear to be a valid PDF.",
+  "code": "INVALID_PDF",
+  "hint": "ファイルが破損していないか確認してください。",
+  "next_actions": [
+    {
+      "action": "inspect_structure",
+      "reason": "PDF が壊れている可能性があります。Catalog / Pages 等の構造を確認してください"
+    }
+  ],
+  "detail": { "cause": "Invalid PDF structure" }
+}
+```
+
+### Codes used by pdf-reader-mcp
+
+| code | 用途 |
+|---|---|
+| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 |
+| `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) |
+| `INVALID_PDF` | PDF として不正・破損 |
+| `ENCRYPTED_PDF` | 暗号化 PDF (現状未対応) |
+| `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 |
+| `FILE_TOO_LARGE` | 50MB 上限超過 (pdf-reader 固有) |
+| `SOURCE_API_ERROR` | URL fetch の HTTP エラー (4xx/5xx) |
+| `SOURCE_TIMEOUT` | リモート取得タイムアウト |
+| `SOURCE_UNAVAILABLE` | DNS / 接続失敗 |
+| `INTERNAL_ERROR` | パーミッション拒否を含むその他バグ |
+
+### Migration note (v0.5.x → v0.6.0)
+
+旧 v0.5.x までは `content[0].text` に `Error: ...\n\nSuggestion: ...` という人間可読文字列を入れていました。v0.6.0 では同じ場所に **JSON 文字列** が入ります。LLM 側でテキスト解釈に依存していた場合は、`JSON.parse(content[0].text)` での解釈に切り替えてください。`isError: true` フラグで構造化エラーかどうかを判定できます。
+
 ## Pairing with pdf-spec-mcp
 
 [pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) provides PDF specification knowledge (ISO 32000-2, etc.). With both servers enabled, an LLM can perform specification-aware workflows:

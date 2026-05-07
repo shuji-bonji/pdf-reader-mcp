@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type GetMetadataInput, GetMetadataSchema } from '../../schemas/tier1.js';
 import { getMetadata } from '../../services/pdfjs-service.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatMetadataMarkdown } from '../../utils/formatter.js';
 
 export function registerGetMetadata(server: McpServer): void {
@@ -48,8 +48,10 @@ Examples:
           content: [{ type: 'text' as const, text }],
         };
       } catch (error) {
+        const err = handleStructuredError(error);
         return {
-          content: [{ type: 'text' as const, text: handleError(error) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
         };
       }
     },

@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectStructureInput, InspectStructureSchema } from '../../schemas/tier2.js';
 import { analyzeStructure } from '../../services/pdflib-service.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatStructureMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerInspectStructure(server: McpServer): void {
@@ -47,7 +47,11 @@ Examples:
         const { text } = truncateIfNeeded(raw);
         return { content: [{ type: 'text' as const, text }] };
       } catch (error) {
-        return { content: [{ type: 'text' as const, text: handleError(error) }] };
+        const err = handleStructuredError(error);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
+        };
       }
     },
   );

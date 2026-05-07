@@ -7,7 +7,7 @@ import { ResponseFormat } from '../../constants.js';
 import { type InspectFontsInput, InspectFontsSchema } from '../../schemas/tier2.js';
 import { analyzeFontsWithPdfLib } from '../../services/pdflib-service.js';
 import type { FontsAnalysis } from '../../types.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatFontsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerInspectFonts(server: McpServer): void {
@@ -58,7 +58,11 @@ Examples:
         const { text } = truncateIfNeeded(raw);
         return { content: [{ type: 'text' as const, text }] };
       } catch (error) {
-        return { content: [{ type: 'text' as const, text: handleError(error) }] };
+        const err = handleStructuredError(error);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
+        };
       }
     },
   );

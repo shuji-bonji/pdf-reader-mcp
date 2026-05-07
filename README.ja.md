@@ -238,6 +238,51 @@ pdf-reader-mcp/
     └── e2e/                  # E2E tests (9 suites, 132 tests)
 ```
 
+## エラー応答 (houki-hub family contract)
+
+**v0.6.0** より、本 MCP のエラー応答は **houki-hub family 共通契約**に従う構造化レスポンスを返します。`code` 文字列は family 全体で統一された語彙を使用するため、`houki-egov-mcp` / `houki-nta-mcp` と併用しても LLM・Skill 層は一貫したロジックで解釈できます。
+
+- [`docs/ERROR-CODES.md`](https://github.com/shuji-bonji/houki-research-skill/blob/main/docs/ERROR-CODES.md) — エラーコード語彙の正典 (houki-research-skill)
+- [`docs/ERROR-HANDLING.md`](https://github.com/shuji-bonji/houki-research-skill/blob/main/docs/ERROR-HANDLING.md) — 解釈ポリシー / next_actions テンプレ
+
+実装は **完全に独立** しており、`houki-abbreviations` 等の family パッケージに依存しません。リファレンス実装は [`houki-egov-mcp/src/errors.ts`](https://github.com/shuji-bonji/houki-egov-mcp/blob/main/src/errors.ts)、本 MCP のローカル定義は [`src/errors.ts`](./src/errors.ts) を参照してください。
+
+エラー時は全 tool が `isError: true` を立て、`content[0].text` に `LawServiceError` を JSON 文字列化したものを入れて返します:
+
+```json
+{
+  "error": "The file does not appear to be a valid PDF.",
+  "code": "INVALID_PDF",
+  "hint": "ファイルが破損していないか確認してください。",
+  "next_actions": [
+    {
+      "action": "inspect_structure",
+      "reason": "PDF が壊れている可能性があります。Catalog / Pages 等の構造を確認してください"
+    }
+  ],
+  "detail": { "cause": "Invalid PDF structure" }
+}
+```
+
+### 本 MCP で使用するコード
+
+| code | 用途 |
+|---|---|
+| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 |
+| `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) |
+| `INVALID_PDF` | PDF として不正・破損 |
+| `ENCRYPTED_PDF` | 暗号化 PDF (現状未対応) |
+| `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 |
+| `FILE_TOO_LARGE` | 50MB 上限超過 (pdf-reader 固有) |
+| `SOURCE_API_ERROR` | URL fetch の HTTP エラー (4xx/5xx) |
+| `SOURCE_TIMEOUT` | リモート取得タイムアウト |
+| `SOURCE_UNAVAILABLE` | DNS / 接続失敗 |
+| `INTERNAL_ERROR` | パーミッション拒否を含むその他バグ |
+
+### 移行ノート (v0.5.x → v0.6.0)
+
+旧 v0.5.x までは `content[0].text` に `Error: ...\n\nSuggestion: ...` という人間可読な文字列を入れていました。v0.6.0 では同じ場所に **JSON 文字列** が入ります。LLM 側でテキスト解釈に依存していた場合は `JSON.parse(content[0].text)` での解釈に切り替えてください。`isError: true` フラグで構造化エラーかどうかを判定できます。
+
 ## pdf-spec-mcp との連携
 
 [pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) は PDF 仕様（ISO 32000-2 等）の知識を提供する MCP サーバーです。両方を有効にすることで、LLM は以下のような仕様知識ベースのワークフローを実行できます:

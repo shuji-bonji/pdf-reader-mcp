@@ -7,7 +7,7 @@ import { ResponseFormat } from '../../constants.js';
 import { type SearchTextInput, SearchTextSchema } from '../../schemas/tier1.js';
 import { searchText } from '../../services/pdfjs-service.js';
 import type { SearchResult } from '../../types.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSearchResultMarkdown } from '../../utils/formatter.js';
 
 export function registerSearchText(server: McpServer): void {
@@ -69,8 +69,10 @@ Examples:
           content: [{ type: 'text' as const, text }],
         };
       } catch (error) {
+        const err = handleStructuredError(error);
         return {
-          content: [{ type: 'text' as const, text: handleError(error) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
         };
       }
     },

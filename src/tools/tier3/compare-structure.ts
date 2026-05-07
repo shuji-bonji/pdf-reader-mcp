@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type CompareStructureInput, CompareStructureSchema } from '../../schemas/tier3.js';
 import { compareStructure } from '../../services/validation-service.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatCompareStructureMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerCompareStructure(server: McpServer): void {
@@ -48,7 +48,11 @@ Examples:
         const { text } = truncateIfNeeded(raw);
         return { content: [{ type: 'text' as const, text }] };
       } catch (error) {
-        return { content: [{ type: 'text' as const, text: handleError(error) }] };
+        const err = handleStructuredError(error);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
+        };
       }
     },
   );

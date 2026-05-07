@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-07
+
+### Added
+
+- **houki-hub family-compatible 構造化エラー応答** (Issue #9): すべての tool がエラー時に `LawServiceError` を JSON 文字列化したものを `content[0].text` に入れ、`isError: true` を立てて返すように変更しました。`code` 文字列は houki-hub family (houki-egov-mcp / houki-nta-mcp) と語彙を共有するため、LLM や Skill 層が一貫した解釈ロジックでエラーを処理できます。
+  - 新規 `src/errors.ts`: `LawErrorCode` / `LawServiceError` / `makeError` / `isLawServiceError` / `NEXT_ACTIONS` を定義 (houki-egov-mcp の `src/errors.ts` をリファレンスとし、`houki-abbreviations` 等への依存はなし)。
+  - 新規 `handleStructuredError(error)`: `unknown` を `LawServiceError` に正規化。`PdfReaderError` の legacy `code` を family 語彙にマッピング、汎用 `Error` のメッセージから `DOC_NOT_FOUND` / `INVALID_PDF` / `ENCRYPTED_PDF` / `FILE_TOO_LARGE` / `SOURCE_*` を推定。
+  - 採用 `code` 一覧: `INVALID_ARGUMENT` / `DOC_NOT_FOUND` / `INVALID_PDF` / `ENCRYPTED_PDF` / `UNSUPPORTED_PDF_FEATURE` / `FILE_TOO_LARGE` / `SOURCE_API_ERROR` / `SOURCE_TIMEOUT` / `SOURCE_UNAVAILABLE` / `INTERNAL_ERROR`。
+  - `PdfReaderError` を拡張: 直接 `familyCode` / `nextActions` / `retryable` / `detail` を渡せる第 4〜7 引数を追加 (既存呼び出しは変更なし、後方互換)。
+- **`tests/tier1/errors.test.ts`**: makeError / isLawServiceError / NEXT_ACTIONS / handleStructuredError の単体テストを追加 (28 ケース)。
+
+### Changed
+
+- **全 16 tool のエラーパス**: tier1 (7) / tier2 (6) / tier3 (3) すべてが `handleStructuredError(error)` を呼び、JSON 文字列 + `isError: true` を返す形に統一。`content[0].text` は人間可読文字列ではなく **JSON** になります。
+- **README.md / README.ja.md** の Error Contract セクション: 「方針」記述を「v0.6.0 で実装済み」に更新し、`code` 一覧テーブル / 移行ノート (v0.5.x → v0.6.0) を追記。
+- **`handleError(error)` (deprecated)**: 後方互換のため引き続き人間可読な文字列を返しますが、内部実装は `formatStructuredErrorForHumans(handleStructuredError(error))` に置き換わりました。新規 tool では `handleStructuredError()` を直接利用してください。
+
+### Migration
+
+LLM クライアントや Skill 層で `content[0].text` を文字列として解釈していた場合、v0.6.0 以降は `JSON.parse(content[0].text)` で `LawServiceError` として解釈してください。`isError: true` フラグで構造化エラーかどうかを判定できます。詳細は README の「Error Contract (houki-hub family)」セクションを参照。
+
 ## [0.5.0] - 2026-05-07
 
 ### Added

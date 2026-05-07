@@ -7,7 +7,7 @@ import { ResponseFormat } from '../../constants.js';
 import { type ReadUrlInput, ReadUrlSchema } from '../../schemas/tier1.js';
 import { extractTextFromDoc, loadDocumentFromData } from '../../services/pdfjs-service.js';
 import { fetchPdfFromUrl } from '../../services/url-fetcher.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerReadUrl(server: McpServer): void {
@@ -69,8 +69,10 @@ Examples:
           await doc.destroy();
         }
       } catch (error) {
+        const err = handleStructuredError(error);
         return {
-          content: [{ type: 'text' as const, text: handleError(error) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
         };
       }
     },

@@ -12,7 +12,7 @@ import {
   loadDocument,
 } from '../../services/pdfjs-service.js';
 import type { PdfSummary } from '../../types.js';
-import { handleError } from '../../utils/error-handler.js';
+import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSummaryMarkdown } from '../../utils/formatter.js';
 
 export function registerSummarize(server: McpServer): void {
@@ -77,8 +77,10 @@ Examples:
           await doc.destroy();
         }
       } catch (error) {
+        const err = handleStructuredError(error);
         return {
-          content: [{ type: 'text' as const, text: handleError(error) }],
+          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          isError: true,
         };
       }
     },
