@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-05-08
+
+### Added
+
+- **`read_url` の同時実行数制限 (concurrency limit)** — module-level の shared limiter を `src/services/url-fetcher.ts` に導入。LLM が複数 `read_url` を並列に呼んでも、リモートホストへの過剰負荷とレート制限の発火を防ぎます。
+  - 新規 `src/utils/concurrency.ts`: 軽量な FIFO ベース limit ヘルパー (`createLimit`)。houki-egov-mcp v0.2.1 の同名実装を移植 (外部依存なし、約 30 行)。
+  - 既定 4 並列。環境変数 `PDF_READER_CONCURRENCY` で上書き可。
+  - `fetchPdfFromUrl(url)` は内部で limit を経由するように変更。limit を経由しない素の実装は `fetchPdfFromUrlUnlimited(url)` として再エクスポート (テスト・特殊用途用)。
+- **`tests/tier1/concurrency.test.ts`**: limit が cap を超えないこと、戻り値・順序を保つこと、エラー伝播の単体テスト 5 件。
+
+### Changed
+
+- **`SERVER_VERSION` 定数を `0.6.0` → `0.6.1` へ同期**。`User-Agent` ヘッダで送信される値もこれに追従。
+
 ## [0.6.0] - 2026-05-07
 
 ### Added

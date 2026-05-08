@@ -1,14 +1,34 @@
 /**
  * Remote PDF fetcher service.
+ *
+ * v0.6.1+ では module-level の shared limiter で同時 fetch 数を制限する。
+ * 上限は `PDF_READER_CONCURRENCY` 環境変数で上書き可能（既定 4）。
+ *
+ * テスト用に制限なしで呼びたい場合は `fetchPdfFromUrlUnlimited()` を使う。
  */
 
-import { MAX_FILE_SIZE, SERVER_NAME, SERVER_VERSION } from '../constants.js';
+import { FETCH_CONCURRENCY, MAX_FILE_SIZE, SERVER_NAME, SERVER_VERSION } from '../constants.js';
+import { createLimit } from '../utils/concurrency.js';
 import { PdfReaderError } from '../utils/error-handler.js';
+
+/** module-level shared limiter — 全 read_url 呼び出しが同じ limiter を経由する */
+const fetchLimit = createLimit(FETCH_CONCURRENCY);
 
 /**
  * Fetch a PDF from a URL and return it as Uint8Array.
+ *
+ * 同時実行数は `FETCH_CONCURRENCY` で制限される。LLM が複数 `read_url` を
+ * 並列に呼んでも、リモートホストへの過剰負荷とレート制限を防ぐ。
  */
 export async function fetchPdfFromUrl(url: string): Promise<Uint8Array> {
+  return fetchLimit(() => fetchPdfFromUrlUnlimited(url));
+}
+
+/**
+ * Limit を経由しない素の fetch 実装。
+ * テスト用、または limit 経由がすでに保証されている呼び出し側用。
+ */
+export async function fetchPdfFromUrlUnlimited(url: string): Promise<Uint8Array> {
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(url);

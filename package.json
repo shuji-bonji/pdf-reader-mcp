@@ -1,6 +1,6 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",
   "main": "dist/index.js",
