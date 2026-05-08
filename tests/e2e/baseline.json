@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 59,
-      "timestamp": "2026-05-08T03:44:55.404Z"
+      "durationMs": 103,
+      "timestamp": "2026-05-08T20:24:45.558Z"
     },
     {
       "operation": "extractText-3pages",
-      "durationMs": 10,
-      "timestamp": "2026-05-08T03:44:55.415Z"
+      "durationMs": 13,
+      "timestamp": "2026-05-08T20:24:45.573Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 3,
-      "timestamp": "2026-05-08T03:44:55.418Z"
+      "durationMs": 4,
+      "timestamp": "2026-05-08T20:24:45.577Z"
     },
     {
       "operation": "analyzeStructure",
       "durationMs": 2,
-      "timestamp": "2026-05-08T03:44:55.421Z"
+      "timestamp": "2026-05-08T20:24:45.579Z"
     },
     {
       "operation": "analyzeFonts",
       "durationMs": 1,
-      "timestamp": "2026-05-08T03:44:55.422Z"
+      "timestamp": "2026-05-08T20:24:45.581Z"
     },
     {
       "operation": "validateTagged",
-      "durationMs": 4,
-      "timestamp": "2026-05-08T03:44:55.427Z"
+      "durationMs": 5,
+      "timestamp": "2026-05-08T20:24:45.586Z"
     },
     {
       "operation": "validateMetadata",
       "durationMs": 3,
-      "timestamp": "2026-05-08T03:44:55.430Z"
+      "timestamp": "2026-05-08T20:24:45.589Z"
     },
     {
       "operation": "compareStructure",
-      "durationMs": 7,
-      "timestamp": "2026-05-08T03:44:55.437Z"
+      "durationMs": 6,
+      "timestamp": "2026-05-08T20:24:45.596Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 19,
-      "timestamp": "2026-05-08T03:44:55.457Z"
+      "durationMs": 24,
+      "timestamp": "2026-05-08T20:24:45.620Z"
     },
     {
       "operation": "countImages",
       "durationMs": 6,
-      "timestamp": "2026-05-08T03:44:55.463Z"
+      "timestamp": "2026-05-08T20:24:45.626Z"
     },
     {
       "operation": "analyzeSignatures",
-      "durationMs": 11,
-      "timestamp": "2026-05-08T03:44:55.475Z"
+      "durationMs": 4,
+      "timestamp": "2026-05-08T20:24:45.630Z"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",
   "main": "dist/index.js",
@@ -20,7 +20,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/index.js",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
