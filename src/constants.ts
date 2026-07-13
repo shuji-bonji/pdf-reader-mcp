@@ -2,6 +2,11 @@
  * pdf-reader-mcp shared constants
  */
 
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json') as { version: string };
+
 /** Maximum response size in characters */
 export const CHARACTER_LIMIT = 25_000;
 
@@ -19,7 +24,9 @@ export const DEFAULT_SEARCH_CONTEXT = 80;
 
 /** Server info */
 export const SERVER_NAME = 'pdf-reader-mcp';
-export const SERVER_VERSION = '0.6.1';
+
+/** Sourced from package.json so it cannot drift out of sync on release. */
+export const SERVER_VERSION = packageJson.version;
 
 /**
  * Default concurrency cap for remote PDF fetches (`read_url`).

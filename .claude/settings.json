@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/bonji/.claude/skills/shuji-mcp-patterns/**)",
+      "Bash(npm run *)",
+      "Bash(timeout 3 node dist/index.js)",
+      "Bash(npm test *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

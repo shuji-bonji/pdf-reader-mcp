@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-07-14
+
+### Added
+
+- **Claude Code plugin 対応** — `.claude-plugin/plugin.json` を追加。Claude Code の plugin として直接インストールできるようになりました。`mcpServers` エントリは `npx -y @shuji-bonji/pdf-reader-mcp@latest` を起動します。shuji 製 MCP 群 (epsg-mcp / houki-egov-mcp / pdf-spec-mcp / pdf-verify-mcp 等) の plugin.json と同じ構造に揃えてあります。
+- **README に PDF family セクションを追加** (README.md / README.ja.md) — `pdf-spec-mcp` (仕様知識) / `pdf-reader-mcp` (構造の読取・検査) / `pdf-verify-mcp` (真正性検証) の役割分担を明示。`inspect_signatures` が署名の**構造**のみを検査し、**暗号学的**な署名検証・信頼/失効評価・PDF/A 準拠検証は `pdf-verify-mcp` の担当であることを追記しました。
+
+### Fixed
+
+- **`SERVER_VERSION` の version drift を解消**。0.6.2 リリース時に `src/constants.ts` の `SERVER_VERSION` が `0.6.1` のまま取り残されており、MCP handshake の `serverInfo.version` と `read_url` の `User-Agent` が実際のパッケージバージョンより古い値を報告していました。`createRequire` で `package.json` から動的に読むように変更し (shuji-mcp-patterns Pattern B: ESM での動的バージョン取得)、以後リリースのたびに手で同期する必要はありません。
+
 ## [0.6.2] - 2026-05-09
 
 ### Build

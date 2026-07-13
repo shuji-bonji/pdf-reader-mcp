@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 103,
-      "timestamp": "2026-05-08T20:24:45.558Z"
+      "durationMs": 70,
+      "timestamp": "2026-07-13T20:01:16.782Z"
     },
     {
       "operation": "extractText-3pages",
-      "durationMs": 13,
-      "timestamp": "2026-05-08T20:24:45.573Z"
+      "durationMs": 11,
+      "timestamp": "2026-07-13T20:01:16.795Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 4,
-      "timestamp": "2026-05-08T20:24:45.577Z"
+      "durationMs": 3,
+      "timestamp": "2026-07-13T20:01:16.798Z"
     },
     {
       "operation": "analyzeStructure",
       "durationMs": 2,
-      "timestamp": "2026-05-08T20:24:45.579Z"
+      "timestamp": "2026-07-13T20:01:16.800Z"
     },
     {
       "operation": "analyzeFonts",
       "durationMs": 1,
-      "timestamp": "2026-05-08T20:24:45.581Z"
+      "timestamp": "2026-07-13T20:01:16.801Z"
     },
     {
       "operation": "validateTagged",
-      "durationMs": 5,
-      "timestamp": "2026-05-08T20:24:45.586Z"
+      "durationMs": 4,
+      "timestamp": "2026-07-13T20:01:16.806Z"
     },
     {
       "operation": "validateMetadata",
-      "durationMs": 3,
-      "timestamp": "2026-05-08T20:24:45.589Z"
+      "durationMs": 4,
+      "timestamp": "2026-07-13T20:01:16.810Z"
     },
     {
       "operation": "compareStructure",
-      "durationMs": 6,
-      "timestamp": "2026-05-08T20:24:45.596Z"
+      "durationMs": 8,
+      "timestamp": "2026-07-13T20:01:16.818Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 24,
-      "timestamp": "2026-05-08T20:24:45.620Z"
+      "durationMs": 23,
+      "timestamp": "2026-07-13T20:01:16.841Z"
     },
     {
       "operation": "countImages",
       "durationMs": 6,
-      "timestamp": "2026-05-08T20:24:45.626Z"
+      "timestamp": "2026-07-13T20:01:16.847Z"
     },
     {
       "operation": "analyzeSignatures",
-      "durationMs": 4,
-      "timestamp": "2026-05-08T20:24:45.630Z"
+      "durationMs": 3,
+      "timestamp": "2026-07-13T20:01:16.850Z"
     }
   ]
 }

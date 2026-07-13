@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/plugin.schema.json",
+  "name": "pdf-reader-mcp",
+  "version": "0.6.3",
+  "description": "PDF 構造解析 MCP server。テキスト・画像・表の抽出、署名フィールド・フォント・注釈・タグ構造の inspect、PDF/UA タグ検証を提供。",
+  "author": {
+    "name": "shuji-bonji",
+    "email": "bonji@mikuro.jp",
+    "url": "https://github.com/shuji-bonji"
+  },
+  "homepage": "https://github.com/shuji-bonji/pdf-reader-mcp",
+  "repository": "https://github.com/shuji-bonji/pdf-reader-mcp",
+  "license": "MIT",
+  "keywords": [
+    "pdf",
+    "mcp",
+    "mcp-server",
+    "pdf-parser",
+    "accessibility",
+    "pdf-ua",
+    "signature"
+  ],
+  "mcpServers": {
+    "pdf-reader-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@shuji-bonji/pdf-reader-mcp@latest"
+      ]
+    }
+  }
+}

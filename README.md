@@ -10,6 +10,16 @@ An MCP (Model Context Protocol) server specialized in **deciphering PDF internal
 
 While typical PDF MCP servers are thin wrappers for text extraction, this project focuses on **reading and analyzing the internal structure** of PDF documents. Pair it with [pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) for specification-aware structural analysis and validation.
 
+### PDF family
+
+| Server | Role |
+|--------|------|
+| [pdf-spec-mcp](https://github.com/shuji-bonji/pdf-spec-mcp) | PDF specification knowledge (ISO 32000, PDF/A, PDF/UA) |
+| **pdf-reader-mcp** (this) | Read and inspect PDF internal structure — *what is in* a PDF |
+| [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) | Authenticity verification — *whether it is genuine*: cryptographic signature verification, tamper detection, PAdES level, PDF/A validation, encrypted-PDF decryption |
+
+`pdf-reader-mcp` inspects signature **structure** (`inspect_signatures`); for **cryptographic** signature verification, trust/revocation evaluation, and PDF/A conformance validation, use `pdf-verify-mcp`.
+
 ## Features
 
 **16 tools** organized into three tiers:
