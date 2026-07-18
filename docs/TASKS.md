@@ -118,6 +118,14 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
       順序未検査）→ **直さない（同上）**。どちらも `validate_tagged` の中で、verify が上位互換を提供済み。
       **`analyzeStructure` の `/Version` 無条件優先だけは別件として残る** — これは deprecate 対象外の
       `inspect_structure` の話。↓ D-8 に再掲
+      - **2026-07-18 追記（M-8 出荷後の再評価）: reader 側に残る作業は無い。**
+        観測（reader の責務）と判定（verify の責務）に分けると、**観測の半分は M-8 が吸収済み**:
+        - TAG-005 → M-8 が `alt` フィールドで Figure の代替テキストを**そのまま返す**。判定は verify の
+          `validate_conformance`（`/Alt`・`/ActualText` を検証済み）。
+        - TAG-004 → M-8 は**深さ優先の論理順**で要素を返すので、H1/H2/H3 の並びが直接見える。
+          「存在集合ゆえ出現順が見られない」という TAG-004 の弱点は M-8 が解消した。
+        残る「判定の半分」は verify の領分で、**verify #4（判定の所在）に依存する**。
+        独立して着手できる未実装の中間ピースは存在しない → **D-7 として新規に作るものは無い**。
 
 - [x] **D-8. Low: `analyzeStructure` が `/Version` をヘッダ版数と比較せず無条件優先**
       → **修正済み（2026-07-18・未リリース）**。`resolvePdfVersion()` に切り出し（export・単体テスト 8 件）。
@@ -249,6 +257,14 @@ verify は依存を軽く保つ設計（pdf-lib + pkijs のみ）のため、pdf
   インライン画像 `BI...ID...EI` はコンテンツストリーム解析が必要）
 
 これらは reader に残すのが合理的。
+
+> **2026-07-18 追記（M-8 出荷後）: この節は M-8 より前の記述。**
+> 「見出し順序の資産を reader に残す」という意図は、**M-8（`extract_structured_text`）が
+> `StructTreeRoot` を深さ優先で走査し、論理順の要素列を返すことで既に達成された**
+> （しかも pdfjs ではなく pd-lib で。テキスト解決のみ pdfjs）。
+> つまり B-2 が守りたかったものは M-8 が提供済みで、D-7（`validate_tagged` は直さない）とも矛盾しない。
+> 「画像と Figure タグの対応」は M-8 の範囲外（Figure の `alt` は返すが、Figure タグと実画像の
+> 対応付けは別）なので、**こちらは依然 reader の未使用資産**として残る（着手予定は無い）。
 
 ## C. 品質
 
