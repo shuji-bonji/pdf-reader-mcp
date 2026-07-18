@@ -6,8 +6,9 @@
  * SG-1〜SG-4: inspect_signatures (analyzeSignatures)
  */
 import { describe, expect, it } from 'vitest';
-import { analyzeAnnotations, analyzeTags } from '../../src/services/pdfjs-service.js';
+import { analyzeAnnotations } from '../../src/services/pdfjs-service.js';
 import { analyzeSignatures } from '../../src/services/pdflib-service.js';
+import { analyzeTags } from '../../src/services/struct-tree-service.js';
 import { ANNOTATION_EXPECTATIONS } from './constants.js';
 import { FIXTURES } from './setup.js';
 
@@ -15,12 +16,18 @@ import { FIXTURES } from './setup.js';
 // Tag structure (inspect_tags)
 // ========================================
 
+// C-1: inspect_tags は StructTreeRoot（pdf-lib）から木を組む。
+// 旧実装は page.getStructTree() をページ順に併合し、疑似 Root ノードの下に
+// ページごとの木を並べていたため、2 ページの文書で Root と Document を 2 つずつ
+// 返し、ページを跨ぐ要素を分裂させていた。「構造の報告は事実」であるためには
+// 報告する木が合成物であってはならない。
 describe('05 - inspect_tags', () => {
-  // IT-1: tagged.pdf
-  it('IT-1: tagged.pdf isTagged=true with non-null rootTag', async () => {
-    const result = await analyzeTags(FIXTURES.tagged);
+  // IT-1: 本物のタグ付き PDF は木を返す
+  it('IT-1: a real tagged PDF returns a non-null rootTag', async () => {
+    const result = await analyzeTags(FIXTURES.structured);
     expect(result.isTagged).toBe(true);
     expect(result.rootTag).not.toBeNull();
+    expect(result.rootTag?.role).toBe('StructTreeRoot');
   });
 
   // IT-2: simple.pdf (非タグ)
@@ -31,27 +38,34 @@ describe('05 - inspect_tags', () => {
     expect(result.totalElements).toBe(0);
   });
 
-  // IT-3: roleCounts
-  it('IT-3: tagged.pdf roleCounts has tag entries', async () => {
-    const result = await analyzeTags(FIXTURES.tagged);
-    expect(typeof result.roleCounts).toBe('object');
-    // MarkInfo を設定しているので isTagged=true
-    // pdfjs-dist がページ単位で構造ツリーを読めるかはライブラリ依存
-    if (result.totalElements > 0) {
-      expect(Object.keys(result.roleCounts).length).toBeGreaterThan(0);
-    }
+  // IT-3: C-1 の核心 — 2 ページの文書でも Document は 1 つ、疑似 Root は無い
+  it('IT-3: a two-page document has ONE Document and no pseudo Root node', async () => {
+    const result = await analyzeTags(FIXTURES.structured);
+    const top = result.rootTag?.children ?? [];
+
+    expect(top.filter((c) => c.role === 'Document')).toHaveLength(1);
+    expect(top.some((c) => c.role === 'Root')).toBe(false);
+    // roleCounts でも Document は 1 つ（ページごとに複製されていない）
+    expect(result.roleCounts.Document).toBe(1);
   });
 
-  // IT-4: maxDepth
-  it('IT-4: tagged.pdf maxDepth >= 0', async () => {
-    const result = await analyzeTags(FIXTURES.tagged);
-    expect(result.maxDepth).toBeGreaterThanOrEqual(0);
+  // IT-4: ページを跨ぐ要素が分裂していない
+  it('IT-4: a page-spanning list is ONE L with both LI', async () => {
+    const result = await analyzeTags(FIXTURES.structured);
+    // structured.pdf は L(LI×2) を 1〜2 ページに跨って持つ
+    expect(result.roleCounts.L).toBe(1);
+    expect(result.roleCounts.LI).toBe(2);
   });
 
-  // IT-5: totalElements
-  it('IT-5: tagged.pdf totalElements >= 0', async () => {
-    const result = await analyzeTags(FIXTURES.tagged);
-    expect(result.totalElements).toBeGreaterThanOrEqual(0);
+  // IT-5: roleCounts / maxDepth が実際の構造と一致
+  it('IT-5: roleCounts and maxDepth reflect the real tree', async () => {
+    const result = await analyzeTags(FIXTURES.structured);
+    // Document > Table > TR > TH の 4 階層 + StructTreeRoot = 5
+    expect(result.maxDepth).toBe(5);
+    expect(result.roleCounts.Table).toBe(1);
+    expect(result.roleCounts.TH).toBe(2);
+    expect(result.roleCounts.Figure).toBe(1);
+    expect(result.totalElements).toBeGreaterThan(0);
   });
 
   // IT-extra: 非タグPDFの一貫性

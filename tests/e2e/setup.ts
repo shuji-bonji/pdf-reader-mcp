@@ -33,6 +33,12 @@ export const FIXTURES = {
    * nothing at all, so the mapping was never reached).
    */
   imageKinds: resolve(FIXTURES_DIR, 'image-kinds.pdf'),
+  /**
+   * A REAL tagged PDF with page-spanning elements (M-8).
+   * `tagged.pdf` has a structure tree but no marked content, so nothing connects;
+   * this one does. Its P and L each span pages 1–2.
+   */
+  structured: resolve(FIXTURES_DIR, 'structured.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */
@@ -123,6 +129,15 @@ export const ALL_FIXTURES: FixtureExpectation[] = [
     path: FIXTURES.imageKinds,
     name: 'image-kinds.pdf',
     pageCount: 1,
+    hasText: true,
+    hasTitle: true,
+    hasAnnotations: false,
+    hasSignatureFields: false,
+  },
+  {
+    path: FIXTURES.structured,
+    name: 'structured.pdf',
+    pageCount: 2,
     hasText: true,
     hasTitle: true,
     hasAnnotations: false,

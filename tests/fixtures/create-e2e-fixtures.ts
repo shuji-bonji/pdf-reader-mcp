@@ -8,6 +8,7 @@
  *  - multi-font.pdf      : PDF using multiple font families
  *  - cid-font.pdf        : Type0 (composite/CID) fonts — embedded & not (High-1 regression)
  *  - image-kinds.pdf     : One image of each pdfjs ImageKind (High-2 / D-9 regression)
+ *  - structured.pdf      : REAL tagged PDF with page-spanning elements (M-8)
  *  - no-metadata.pdf     : PDF with no metadata set
  *  - corrupted.pdf       : Invalid file (non-PDF bytes)
  */
@@ -19,6 +20,8 @@ import {
   drawObject,
   PDFDocument,
   PDFName,
+  PDFOperator,
+  PDFOperatorNames,
   PDFString,
   popGraphicsState,
   pushGraphicsState,
@@ -659,6 +662,205 @@ async function createImageKindsPdf(): Promise<void> {
 }
 
 /**
+ * Create a REAL tagged PDF — the M-8 fixture.
+ *
+ * `tagged.pdf` (above) is NOT a real tagged PDF: it has a StructTreeRoot with
+ * StructElems, but the content stream carries no marked content, so nothing is
+ * connected. pdfjs reports `{"children":[],"role":"Root"}` and zero
+ * marked-content sequences for it. It cannot exercise anything that maps
+ * structure to text.
+ *
+ * This fixture is the real thing: `/Tag <</MCID n>> BDC … EMC` around each piece
+ * of content, a StructTreeRoot whose elements point back at those MCIDs, and a
+ * ParentTree (which pdfjs's `getStructTree()` requires).
+ *
+ * The point of the fixture is the two PAGE-SPANNING elements:
+ *
+ *  - **P** — one paragraph, half on page 1 and half on page 2 (two MCRs).
+ *  - **L** — one list, `LI` on page 1 and `LI` on page 2.
+ *
+ * ISO 32000-2 §14.8.2.5 NOTE 2 calls this out ("A logical object can extend over
+ * more than one PDF page"), and it is what separates a correct implementation
+ * from a plausible one: walking `page.getStructTree()` per page and merging —
+ * which is what `extract_tables` / `inspect_tags` do — reports these as TWO
+ * paragraphs and TWO lists, because pdfjs's per-page trees carry no element
+ * identity. Only a depth-first walk of the document's StructTreeRoot keeps them
+ * whole, which is exactly how §14.8.2.5 defines logical content order.
+ *
+ * Also included, one case each:
+ *  - `ActualText` on a P whose glyphs read "Dif`cult" → text must be "Difficult"
+ *  - `Alt` on a Figure with no text → must NOT leak into `text`
+ *  - `Lbl` + `LBody` under each LI → the bullet must not end up in `text`
+ *  - `Table` → TR → TH/TD (2 dimensions; the one shape `depth` cannot express)
+ */
+async function createStructuredPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const page1 = doc.addPage([595, 842]);
+  const page2 = doc.addPage([595, 842]);
+
+  /** Wrap a drawing call in `/Tag <</MCID n>> BDC … EMC`. */
+  const marked = (page: typeof page1, mcid: number, tag: string, draw: () => void): void => {
+    page.pushOperators(
+      PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [`/${tag}`, `<</MCID ${mcid}>>`]),
+    );
+    draw();
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
+  };
+
+  // ── Page 1 content (MCIDs are per-page and sequential) ──
+  marked(page1, 0, 'H1', () =>
+    page1.drawText('Quarterly Report', { x: 50, y: 780, size: 24, font: bold }),
+  );
+  marked(page1, 1, 'P', () =>
+    page1.drawText('This paragraph begins on page one', { x: 50, y: 740, size: 12, font }),
+  );
+  marked(page1, 2, 'TH', () => page1.drawText('Item', { x: 50, y: 700, size: 12, font: bold }));
+  marked(page1, 3, 'TH', () => page1.drawText('Amount', { x: 150, y: 700, size: 12, font: bold }));
+  marked(page1, 4, 'TD', () => page1.drawText('Sales', { x: 50, y: 680, size: 12, font }));
+  marked(page1, 5, 'TD', () => page1.drawText('100', { x: 150, y: 680, size: 12, font }));
+  marked(page1, 6, 'Lbl', () => page1.drawText('*', { x: 50, y: 640, size: 12, font }));
+  marked(page1, 7, 'LBody', () => page1.drawText('First item', { x: 65, y: 640, size: 12, font }));
+  // The glyphs spell a ligature substitute; ActualText says what it really is.
+  marked(page1, 8, 'P', () => page1.drawText('Dif`cult', { x: 50, y: 600, size: 12, font }));
+
+  // ── Page 2 content ──
+  marked(page2, 0, 'P', () =>
+    page2.drawText('and continues on page two.', { x: 50, y: 780, size: 12, font }),
+  );
+  marked(page2, 1, 'Lbl', () => page2.drawText('*', { x: 50, y: 740, size: 12, font }));
+  marked(page2, 2, 'LBody', () => page2.drawText('Second item', { x: 65, y: 740, size: 12, font }));
+  // A Figure with no text at all — only Alt describes it.
+  marked(page2, 3, 'Figure', () =>
+    page2.drawRectangle({ x: 50, y: 660, width: 60, height: 40, color: rgb(0.2, 0.4, 0.8) }),
+  );
+  marked(page2, 4, 'P', () =>
+    page2.drawText('Closing paragraph.', { x: 50, y: 620, size: 12, font }),
+  );
+
+  // ── Structure tree ──
+  doc.catalog.set(PDFName.of('MarkInfo'), context.obj({ Marked: true }));
+
+  const structRootRef = context.nextRef();
+  const docRef = context.nextRef();
+  const ref = () => context.nextRef();
+  const [
+    h1,
+    pSpan,
+    table,
+    tr1,
+    tr2,
+    th1,
+    th2,
+    td1,
+    td2,
+    list,
+    li1,
+    li2,
+    lbl1,
+    lbody1,
+    lbl2,
+    lbody2,
+    pActual,
+    figure,
+    pClose,
+  ] = Array.from({ length: 19 }, ref);
+
+  const p1Ref = page1.ref;
+  const p2Ref = page2.ref;
+
+  /** Build a StructElem dictionary. `Pg` is omitted when children carry their own. */
+  const elem = (
+    S: string,
+    parent: ReturnType<typeof ref>,
+    K?: unknown,
+    Pg?: ReturnType<typeof ref>,
+    extra: Record<string, unknown> = {},
+  ) => {
+    const d: Record<string, unknown> = { Type: 'StructElem', S, P: parent, ...extra };
+    if (Pg) d.Pg = Pg;
+    if (K !== undefined) d.K = K;
+    return context.obj(d);
+  };
+
+  context.assign(h1, elem('H1', docRef, 0, p1Ref));
+
+  // ★ The page-spanning paragraph: two MCRs, one per page, under ONE element.
+  context.assign(
+    pSpan,
+    elem('P', docRef, [
+      context.obj({ Type: 'MCR', Pg: p1Ref, MCID: 1 }),
+      context.obj({ Type: 'MCR', Pg: p2Ref, MCID: 0 }),
+    ]),
+  );
+
+  context.assign(th1, elem('TH', tr1, 2, p1Ref));
+  context.assign(th2, elem('TH', tr1, 3, p1Ref));
+  context.assign(td1, elem('TD', tr2, 4, p1Ref));
+  context.assign(td2, elem('TD', tr2, 5, p1Ref));
+  context.assign(tr1, elem('TR', table, [th1, th2]));
+  context.assign(tr2, elem('TR', table, [td1, td2]));
+  context.assign(table, elem('Table', docRef, [tr1, tr2]));
+
+  context.assign(lbl1, elem('Lbl', li1, 6, p1Ref));
+  context.assign(lbody1, elem('LBody', li1, 7, p1Ref));
+  context.assign(li1, elem('LI', list, [lbl1, lbody1]));
+  context.assign(lbl2, elem('Lbl', li2, 1, p2Ref));
+  context.assign(lbody2, elem('LBody', li2, 2, p2Ref));
+  context.assign(li2, elem('LI', list, [lbl2, lbody2]));
+  // ★ The page-spanning list: LI on page 1, LI on page 2, under ONE element.
+  context.assign(list, elem('L', docRef, [li1, li2]));
+
+  context.assign(pActual, elem('P', docRef, 8, p1Ref, { ActualText: PDFString.of('Difficult') }));
+  context.assign(
+    figure,
+    elem('Figure', docRef, 3, p2Ref, { Alt: PDFString.of('A bar chart of sales') }),
+  );
+  context.assign(pClose, elem('P', docRef, 4, p2Ref));
+
+  context.assign(
+    docRef,
+    elem('Document', structRootRef, [h1, pSpan, table, list, pActual, figure, pClose]),
+  );
+
+  // ParentTree: StructParents index → array indexed by MCID → owning StructElem.
+  // Required by pdfjs's getStructTree(). Note that `pSpan` appears in BOTH pages'
+  // arrays — that is what a page-spanning element looks like from the page side.
+  page1.node.set(PDFName.of('StructParents'), context.obj(0));
+  page2.node.set(PDFName.of('StructParents'), context.obj(1));
+  const parentTree = context.obj({
+    Nums: [
+      0,
+      [h1, pSpan, th1, th2, td1, td2, lbl1, lbody1, pActual],
+      1,
+      [pSpan, lbl2, lbody2, figure, pClose],
+    ],
+  });
+  context.assign(
+    structRootRef,
+    context.obj({
+      Type: 'StructTreeRoot',
+      K: [docRef],
+      ParentTree: context.register(parentTree),
+      ParentTreeNextKey: 2,
+    }),
+  );
+  doc.catalog.set(PDFName.of('StructTreeRoot'), structRootRef);
+
+  doc.setTitle('Structured Text Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E fixture - real tagged PDF with page-spanning elements (M-8)');
+  doc.setProducer('pdf-reader-mcp test suite');
+  doc.setLanguage('en-US');
+
+  await writeFile(`${FIXTURES_DIR}/structured.pdf`, await doc.save());
+  console.log('Created: structured.pdf (2 pages, real tags, page-spanning P and L)');
+}
+
+/**
  * Create a corrupted "PDF" file (non-PDF bytes).
  */
 async function createCorruptedPdf(): Promise<void> {
@@ -673,6 +875,7 @@ async function main(): Promise<void> {
   await createMultiFontPdf();
   await createCidFontPdf();
   await createImageKindsPdf();
+  await createStructuredPdf();
   await createNoMetadataPdf();
   await createCorruptedPdf();
   console.log('All E2E test fixtures created.');

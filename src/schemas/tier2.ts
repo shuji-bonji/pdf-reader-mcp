@@ -38,6 +38,24 @@ export const InspectAnnotationsSchema = z
   })
   .strict();
 
+/** extract_structured_text */
+export const ExtractStructuredTextSchema = z
+  .object({
+    file_path: FilePathSchema,
+    pages: PagesSchema.describe(
+      'Page range to process. Format: "1-5", "3", or "1,3,5-7". Omit for all pages. ' +
+        'An element that touches the range is returned whole, even if it continues outside it.',
+    ),
+    roles: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Structure types to include, e.g. ["H1","H2"] to extract an outline. Omit for all roles.',
+      ),
+    response_format: ResponseFormatSchema,
+  })
+  .strict();
+
 /** inspect_signatures */
 export const InspectSignaturesSchema = z
   .object({
@@ -62,3 +80,4 @@ export type InspectFontsInput = z.infer<typeof InspectFontsSchema>;
 export type InspectAnnotationsInput = z.infer<typeof InspectAnnotationsSchema>;
 export type InspectSignaturesInput = z.infer<typeof InspectSignaturesSchema>;
 export type ExtractTablesInput = z.infer<typeof ExtractTablesSchema>;
+export type ExtractStructuredTextInput = z.infer<typeof ExtractStructuredTextSchema>;

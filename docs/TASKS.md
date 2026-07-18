@@ -127,19 +127,23 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
 
 ## E. 新ツール
 
-- [ ] **D-5（M-8）. `extract_structured_text`（構造付きテキスト抽出）**
-      仕様: `Document-Note/mcps/PDFfamily/specs/08-structured-text-and-reflow.md`（**Draft v0.1・未実装**）。
-      **主対象は本サーバ**（pdf-spec ではない。起源が writer の B-7d = `edit_text` で、
-      「writer 単体でやるべきでない」と判断した根拠を出したのが pdf-spec だったため紛らわしい）。
-      **writer 側は追加作業ゼロ** — 再生成は create 系（実装済み）で足りる。
-      **これが入ると writer の B-7d（`edit_text`）が M-8 経路で成立する**（reader → Skill → writer）。
-      条文上の裏付け（writer の条文照合で確認済み）: §14.8.1 が "Automatic reflow of page contents" を
-      **Tagged PDF の意図された用途として明記**し、§14.8.2.5 が logical content order を
-      「構造木の深さ優先走査」で定義（shall）。**リフロー = 元レイアウトの再現ではなく
-      「論理順序を保った新規レイアウト」**なので元の折り返し規則は不要。
-      ただし**タグ無し文書では logical order を導出できず推測になる** — そこをどう扱うかが設計判断。
-      **着手時はまず specs/08 のレビューから**（ツール名・出力形・family 実装規約 `specs/06` への適合・
-      Skill 層との境界を決める）。`extract_tables` が MCID↔テキストの対応を既に解いている実績あり
+- [x] **D-5（M-8）. `extract_structured_text`（構造付きテキスト抽出）**
+      → **実装済み（2026-07-18・未リリース）**。仕様は **specs/08 v0.2**（v0.1 をレビューして改訂）。
+      レビュー: `docs/m8-spec-review-2026-07-18.md`。
+      **走査は `StructTreeRoot` 深さ優先**（`src/services/struct-tree-service.ts`）。
+      v0.1 の「`extract_tables` の一般化」は**採らなかった** — ページ単位併合では logical content
+      order を出せず、ページ跨ぎ要素が分裂する（実証済み）。構造は pdf-lib・テキストは pdfjs。
+      出力はフラット + `depth`（`Table` のみ `rows`）。`ActualText`/`Alt`/`Lbl` を分離。
+      **実装中に見つけた 3 つ**（すべてフィクスチャ/実機で発見）:
+      ① 既存 `tagged.pdf` は marked content が無い偽タグ付き → 本物 `structured.pdf` を新造。
+      ② ページ境界の空白落ち（pdfjs はページ先頭に EOL を出さない）。
+      ③ **日本語の CJK 空白混入**（実機の日本語 PDF で発覚）— 改行が MCID の境界に落ちるため、
+      単体テストが `\n` 直渡しで空振りしていた。`buildIdToTextMap` を raw 保持にして結合後に解決、
+      `extract_tables` と共通化。CJK レンジの穴（`。`U+3002 が漏れ）も同時修正
+- [x] **D-5 の副産物: `inspect_tags` の C-1 を解消**（specs/08 §3.5）
+      → **実装済み（2026-07-18・未リリース・破壊的変更 = 0.8.0 相当）**。
+      同じ walker に載せ替え、疑似 `Root` ノードを廃止。2 ページ文書で `Document` は 1 つ、
+      ページ跨ぎ要素はまるごと。`validate_tagged`（deprecated）用の `analyzeTagsFromDoc` は温存
 
 ## A. 運用系
 
@@ -248,11 +252,14 @@ verify は依存を軽く保つ設計（pdf-lib + pkijs のみ）のため、pdf
 
 ## C. 品質
 
-### C-1. `validate_tagged` の構造ツリー取得方法 — ✅ 決着（放置）
+### C-1. 構造ツリー取得方法（ページ単位併合の疑似ノード）— ✅ 修正済み（2026-07-18・M-8 と同時）
 
-ページごとの `page.getStructTree()` をマージする方式のため、`rootTag` は疑似ノード。
-「StructTreeRoot はあるがページに紐づかない」ケースを検出できない。
-→ **B-1 で deprecate を決定したので修正せず放置**（verify が catalog を直接見る）。2026-07-18
+ページごとの `page.getStructTree()` をマージする方式のため、`rootTag` は疑似ノードだった。
+2 ページの文書で `Root`・`Document` を 2 つずつ返し、ページ跨ぎ要素を分裂させていた。
+→ **当初は「`validate_tagged` を deprecate するので放置」と判断していたが、M-8 のレビューで
+`inspect_tags`（存続ツール）も同じ欠陥を持つと判明**（specs/08 §3.5）。M-8 の `StructTreeRoot`
+walker に載せ替えて解消。`inspect_tags` は `Document` 1 つ・ページ跨ぎ要素まるごとを返す。
+**`validate_tagged` 用の `analyzeTagsFromDoc`（pdfjs ページ単位）は deprecated なので温存**。
 
 ## 依存関係
 

@@ -15,6 +15,7 @@ import type {
   SignaturesAnalysis,
   StructureAnalysis,
   StructureComparison,
+  StructuredTextResult,
   TablesExtractionResult,
   TaggedValidation,
   TagNode,
@@ -216,6 +217,55 @@ export function formatTagsMarkdown(analysis: TagsAnalysis): string {
   // Tag tree (limited depth for readability)
   lines.push('', '## Structure Tree', '');
   renderTagTree(analysis.rootTag, lines, 0, 4);
+
+  return lines.join('\n');
+}
+
+/**
+ * Format structured text as Markdown.
+ *
+ * Rendered as an indented outline, which is what flat + `depth` already is —
+ * the indentation *is* the tree.
+ */
+export function formatStructuredTextMarkdown(result: StructuredTextResult): string {
+  const lines: string[] = ['# Structured Text', ''];
+
+  lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
+  if (result.lang) lines.push(`- **Language**: ${result.lang}`);
+
+  if (!result.isTagged) {
+    lines.push('', result.note ?? 'This PDF is not tagged.');
+    return lines.join('\n');
+  }
+
+  lines.push(`- **Elements**: ${result.elements.length}`);
+  lines.push('', '## Logical Content Order', '');
+
+  for (const element of result.elements) {
+    const indent = '  '.repeat(element.depth);
+    const parts: string[] = [`${indent}- **${element.role}**`];
+
+    if (element.pages.length > 1) parts.push(`(pages ${element.pages.join('–')})`);
+    else if (element.pages.length === 1) parts.push(`(page ${element.pages[0]})`);
+
+    if (element.label) parts.push(`\`${element.label}\``);
+    if (element.lang) parts.push(`[lang=${element.lang}]`);
+    if (element.text) parts.push(`— ${element.text}`);
+    if (element.alt) parts.push(`— *alt:* ${element.alt}`);
+
+    lines.push(parts.join(' '));
+
+    if (element.rows) {
+      lines.push('');
+      for (const [rowIndex, row] of element.rows.entries()) {
+        lines.push(`${indent}  | ${row.map((c) => c.text).join(' | ')} |`);
+        if (rowIndex === 0 && row.some((c) => c.isHeader)) {
+          lines.push(`${indent}  |${row.map(() => '---').join('|')}|`);
+        }
+      }
+      lines.push('');
+    }
+  }
 
   return lines.join('\n');
 }

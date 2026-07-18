@@ -126,6 +126,58 @@ export interface TagNode {
   contentCount: number;
 }
 
+/** A cell of a `Table` in structured text, mirroring `extract_tables`. */
+export interface StructuredTableCell {
+  text: string;
+  isHeader: boolean;
+}
+
+/**
+ * One element of the flattened logical content order (`extract_structured_text`).
+ *
+ * Flat + `depth` rather than nested: a depth-first pre-order plus depth encodes
+ * the tree exactly (it is an indented outline), so nothing is lost.
+ */
+export interface StructuredElement {
+  /** The structure type, `/S` (e.g. `H1`, `P`, `Table`). */
+  role: string;
+  /** Nesting depth in the structure tree; the top-level element is 0. */
+  depth: number;
+  /** Textual content, or `null` for containers and for content with no text. */
+  text: string | null;
+  /**
+   * `/Alt` — an alternate *description* of content that has no text
+   * (ISO 32000-2 §14.9.3), e.g. a Figure. Never the content itself, which is
+   * why it is not folded into `text`. Present only when the element has one.
+   */
+  alt?: string;
+  /** `/Lbl` text ("•", "1.") of a list item. Present only when the item has one. */
+  label?: string;
+  /** `/Lang` override for this element (§14.9.2). Present only when set. */
+  lang?: string;
+  /**
+   * Pages this element's content appears on.
+   *
+   * An array, not a number: §14.8.2.5 NOTE 2 — "A logical object can extend over
+   * more than one PDF page".
+   */
+  pages: number[];
+  /**
+   * Rows, for `Table` only. A table is two-dimensional and `depth` cannot express
+   * "row 2, column 3"; every other role is an outline and fits `depth`.
+   */
+  rows?: StructuredTableCell[][];
+}
+
+/** extract_structured_text output */
+export interface StructuredTextResult {
+  isTagged: boolean;
+  lang: string | null;
+  elements: StructuredElement[];
+  /** Why extraction is not possible, when `isTagged` is false. */
+  note?: string;
+}
+
 /** inspect_tags output */
 export interface TagsAnalysis {
   isTagged: boolean;

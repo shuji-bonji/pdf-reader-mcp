@@ -13,6 +13,7 @@ import { registerReadUrl } from './tier1/read-url.js';
 import { registerSearchText } from './tier1/search-text.js';
 import { registerSummarize } from './tier1/summarize.js';
 // Tier 2: Structure analysis
+import { registerExtractStructuredText } from './tier2/extract-structured-text.js';
 import { registerExtractTables } from './tier2/extract-tables.js';
 import { registerInspectAnnotations } from './tier2/inspect-annotations.js';
 import { registerInspectFonts } from './tier2/inspect-fonts.js';
@@ -44,6 +45,7 @@ export function registerAllTools(server: McpServer): void {
   registerInspectAnnotations(server);
   registerInspectSignatures(server);
   registerExtractTables(server);
+  registerExtractStructuredText(server);
 
   // Tier 3: Validation & analysis
   registerValidateTagged(server);

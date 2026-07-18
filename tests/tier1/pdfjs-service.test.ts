@@ -6,13 +6,16 @@ import { resolve } from 'node:path';
 import { ImageKind } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import {
+  buildIdToTextMap,
   countImages,
   describeImageKind,
   extractText,
   getMetadata,
   isMarkupAnnotation,
   loadDocument,
+  resolveLineBreaks,
   searchText,
+  type TextContentItemLike,
 } from '../../src/services/pdfjs-service.js';
 
 const SIMPLE_PDF = resolve(import.meta.dirname, '../fixtures/simple.pdf');
@@ -119,6 +122,118 @@ describe('isMarkupAnnotation', () => {
     // 型が増えたらこのテストごと見直す、という宣言
     expect(TABLE_171).toHaveLength(28);
     expect(TABLE_171.filter(([, m]) => m)).toHaveLength(18);
+  });
+});
+
+// M-8 / specs/08 §3.4: pdfjs marks line breaks of the ORIGINAL layout, and those
+// are not content. A line break between words is a word break (a space); between
+// two CJK characters it is nothing, because Japanese does not separate words with
+// spaces — ISO 32000-2 §14.8.2.6.2 guarantees whitespace only where it "would be
+// present to separate words in a pure text representation", and notes that "a word
+// is defined by script and context".
+//
+// Without this, a Japanese paragraph that wrapped mid-sentence extracted as
+// 「埋め草を大量 に含みます」 — the original wrap point welded into the content,
+// which contradicts the whole point of reflow (the new layout re-wraps).
+describe('resolveLineBreaks', () => {
+  it('turns a line break between words into a space', () => {
+    expect(resolveLineBreaks('This paragraph\nbegins here')).toBe('This paragraph begins here');
+  });
+
+  it('drops a line break between two CJK characters', () => {
+    expect(resolveLineBreaks('埋め草を大量\nに含みます')).toBe('埋め草を大量に含みます');
+    expect(resolveLineBreaks('段落を重ねて改ページを起\nこします')).toBe(
+      '段落を重ねて改ページを起こします',
+    );
+  });
+
+  it('keeps a space when only one side is CJK', () => {
+    // 和欧混植の境界は語区切りとして扱う
+    expect(resolveLineBreaks('日本語\nEnglish')).toBe('日本語 English');
+    expect(resolveLineBreaks('English\n日本語')).toBe('English 日本語');
+  });
+
+  it('handles hiragana, katakana, kanji and fullwidth forms', () => {
+    expect(resolveLineBreaks('ひらがな\nです')).toBe('ひらがなです');
+    expect(resolveLineBreaks('カタカナ\nテスト')).toBe('カタカナテスト');
+    expect(resolveLineBreaks('漢字\n試験')).toBe('漢字試験');
+    expect(resolveLineBreaks('数値\n１２３')).toBe('数値１２３');
+  });
+
+  // CJK Symbols and Punctuation は U+3000 から始まる。ひらがな (U+3040) を
+  // 起点にすると 。や 「 が漏れ、行頭に来うる 「 の直前に空白が入ってしまう。
+  it('covers CJK punctuation, which starts below the kana block', () => {
+    expect(resolveLineBreaks('です\n。')).toBe('です。');
+    expect(resolveLineBreaks('彼は\n「こんにちは」')).toBe('彼は「こんにちは」');
+  });
+
+  it('leaves text without line breaks alone', () => {
+    expect(resolveLineBreaks('no breaks here')).toBe('no breaks here');
+    expect(resolveLineBreaks('')).toBe('');
+  });
+});
+
+// M-8 regression: a line break can fall BETWEEN two marked-content sequences,
+// not inside one. A writer lays out a wrapping paragraph as one MCID per line,
+// and pdfjs emits each line as `beginMarkedContentProps(id)` → an empty item with
+// `hasEOL: true` → the line's text → `endMarkedContent`. So a paragraph's line
+// break is the boundary between id_n and id_{n+1}, with the break marker landing
+// at the START of id_{n+1}.
+//
+// buildIdToTextMap therefore must keep the `\n` markers RAW and leave resolution
+// to the caller, who joins the ids. Resolving per id turned the leading `\n` into
+// a space (nothing precedes it within that id), which then welded into the join:
+// 「…大 量に…」. The unit tests for resolveLineBreaks passed with literal `\n`
+// input and never caught this, because they didn't exercise the join.
+describe('buildIdToTextMap (marked-content boundaries)', () => {
+  /** Mimic pdfjs: a marked-content sequence for one wrapped line. */
+  const line = (id: string, text: string, leadingBreak: boolean): TextContentItemLike[] => [
+    { type: 'beginMarkedContentProps', id },
+    ...(leadingBreak ? [{ str: '', hasEOL: true } as TextContentItemLike] : []),
+    { str: text, hasEOL: false },
+    { type: 'endMarkedContent' },
+  ];
+
+  it('keeps line breaks raw so the caller can resolve them across ids', () => {
+    // Two lines of one paragraph, each its own MCID; the 2nd starts with hasEOL.
+    const items = [...line('mc0', '埋め草を大', false), ...line('mc1', '量に含みます', true)];
+    const map = buildIdToTextMap(items);
+
+    // Raw: the break marker is preserved at the start of the 2nd id.
+    expect(map.get('mc0')).toBe('埋め草を大');
+    expect(map.get('mc1')).toBe('\n量に含みます');
+  });
+
+  it('joining the ids and resolving yields no CJK gap (the real bug)', () => {
+    const items = [...line('mc0', '埋め草を大', false), ...line('mc1', '量に含みます', true)];
+    const map = buildIdToTextMap(items);
+
+    // What the caller (textOf / compactCellText) does: join then resolve.
+    const joined = (map.get('mc0') ?? '') + (map.get('mc1') ?? '');
+    expect(resolveLineBreaks(joined).trim()).toBe('埋め草を大量に含みます');
+  });
+
+  it('an English wrap keeps the word break as a space', () => {
+    const items = [...line('mc0', 'page one', false), ...line('mc1', 'and continues', true)];
+    const map = buildIdToTextMap(items);
+
+    const joined = (map.get('mc0') ?? '') + (map.get('mc1') ?? '');
+    expect(resolveLineBreaks(joined).trim()).toBe('page one and continues');
+  });
+
+  it('excludes Artifact marked content (page numbers, running heads)', () => {
+    const items: TextContentItemLike[] = [
+      { type: 'beginMarkedContentProps', id: 'mc0' },
+      { str: 'real content', hasEOL: false },
+      { type: 'endMarkedContent' },
+      { type: 'beginMarkedContent', tag: 'Artifact' },
+      { str: 'page 1', hasEOL: false },
+      { type: 'endMarkedContent' },
+    ];
+    const map = buildIdToTextMap(items);
+    expect(map.get('mc0')).toBe('real content');
+    // The artifact had no id and contributes to nothing.
+    expect([...map.values()].some((v) => v.includes('page 1'))).toBe(false);
   });
 });
 

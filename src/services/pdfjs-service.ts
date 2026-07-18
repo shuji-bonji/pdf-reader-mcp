@@ -647,17 +647,10 @@ export async function analyzeTagsFromDoc(doc: PDFDocumentProxy): Promise<TagsAna
   };
 }
 
-/**
- * Analyze Tagged PDF structure tree.
- */
-export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
-  const doc = await loadDocument(filePath);
-  try {
-    return await analyzeTagsFromDoc(doc);
-  } finally {
-    await doc.destroy();
-  }
-}
+// Note: inspect_tags no longer uses a pdfjs per-page walk. It builds its tree
+// from the document's StructTreeRoot (`analyzeTags` in struct-tree-service.ts)
+// so that page-spanning elements stay whole — see that file's C-1 note.
+// `analyzeTagsFromDoc` below is retained only for the deprecated validate_tagged.
 
 // ─── extract_tables ────────────────────────────────────────────────────────
 
@@ -754,7 +747,7 @@ interface StructNode {
 }
 
 /** A `getTextContent({ includeMarkedContent: true })` item. */
-interface TextContentItemLike {
+export interface TextContentItemLike {
   type?: string;
   id?: string | null;
   tag?: string;
@@ -770,8 +763,12 @@ interface TextContentItemLike {
  *
  * Items with `tag === 'Artifact'` are page-level artifacts (page numbers,
  * running headers, etc.) outside the structure tree, and are skipped.
+ *
+ * The text is kept RAW, with line breaks as `\n` markers (see the note where the
+ * map is built): line breaks often fall between marked-content sequences, so
+ * they can only be resolved once the sequences are joined by the caller.
  */
-function buildIdToTextMap(items: TextContentItemLike[]): Map<string, string> {
+export function buildIdToTextMap(items: TextContentItemLike[]): Map<string, string> {
   const map = new Map<string, string[]>();
   const stack: { id: string | null; isArtifact: boolean }[] = [];
 
@@ -790,7 +787,10 @@ function buildIdToTextMap(items: TextContentItemLike[]): Map<string, string> {
     if (t !== undefined) continue; // unknown marker
     // Text item
     if (stack.some((s) => s.isArtifact)) continue;
-    const str = item.hasEOL ? ' ' : (item.str ?? '');
+    // pdfjs emits line breaks as their own items (`str: ''`, `hasEOL: true`).
+    // Record them as `\n` and decide what they mean in `resolveLineBreaks`,
+    // where the surrounding characters are known.
+    const str = item.hasEOL ? LINE_BREAK : (item.str ?? '');
     if (!str) continue;
     for (const frame of stack) {
       if (frame.id) {
@@ -801,9 +801,93 @@ function buildIdToTextMap(items: TextContentItemLike[]): Map<string, string> {
     }
   }
 
+  // Keep the line-break markers; do NOT resolve them here. Each line of a
+  // paragraph is often its OWN marked-content sequence, so a line break falls
+  // *between* two ids, not inside one. resolveLineBreaks must therefore run
+  // after the ids are joined (in `textOf` / `compactCellText`), where it can see
+  // that the character ending one id and the one starting the next are both CJK.
+  // Resolving per id turned the break into a leading space and welded it into the
+  // joined text — 「…大 量に…」.
   const out = new Map<string, string>();
   for (const [id, parts] of map) out.set(id, parts.join(''));
   return out;
+}
+
+/**
+ * Placeholder for a line break, resolved by `resolveLineBreaks`.
+ *
+ * Exported because a page boundary inside one structure element is also a line
+ * break, and only the caller assembling across pages knows where those fall
+ * (pdfjs emits no EOL marker at the start of a page).
+ */
+export const LINE_BREAK = '\n';
+
+/**
+ * CJK code points — scripts that do not separate words with spaces.
+ *
+ *  - `U+3000–U+303F` CJK Symbols and Punctuation (、。「」etc.)
+ *  - `U+3040–U+30FF` Hiragana and Katakana
+ *  - `U+3400–U+9FFF` CJK Unified Ideographs (incl. Extension A)
+ *  - `U+FF00–U+FFEF` Halfwidth and Fullwidth Forms
+ *
+ * The punctuation block matters: it starts at U+3000, so a range beginning at
+ * U+3040 silently excludes 。and 「 — and a line can legitimately break before an
+ * opening bracket, which would then gain a space that was never in the document.
+ */
+const CJK_CHAR = '[\\u3000-\\u30ff\\u3400-\\u9fff\\uff00-\\uffef]';
+
+/** A line break with CJK on both sides — no space belongs there. */
+const CJK_LINE_BREAK = new RegExp(`(?<=${CJK_CHAR})${LINE_BREAK}(?=${CJK_CHAR})`, 'g');
+
+/**
+ * Turn the line breaks of the *original layout* into text.
+ *
+ * A line break between two words is a word break, so it becomes a space. A line
+ * break between two CJK characters is not: Japanese does not separate words with
+ * spaces, so the original wrap point would otherwise be welded into the content
+ * as a space that was never in the document.
+ *
+ * ISO 32000-2 §14.8.2.6.2 requires that "any white-space characters that **would
+ * be present to separate words in a pure text representation** shall be present"
+ * — for Japanese there are none, and the same clause notes that "a word is
+ * defined by **script and context**". So a space here would be ours, not the
+ * document's, and it contradicts the point of reflow: the new layout re-wraps,
+ * and the original wrap points are not content.
+ *
+ * Verified: a Japanese paragraph that wrapped mid-sentence used to extract as
+ * 「…埋め草を大量 に含みます」.
+ */
+export function resolveLineBreaks(text: string): string {
+  return text.replace(CJK_LINE_BREAK, '').replace(new RegExp(LINE_BREAK, 'g'), ' ');
+}
+
+/**
+ * Build the marked-content id → text map across the whole document.
+ *
+ * The per-page map is what `extract_tables` needs, because a table lives on one
+ * page. `extract_structured_text` needs the document-wide map instead: a single
+ * structure element can own content on several pages (ISO 32000-2 §14.8.2.5
+ * NOTE 2), so its text has to be assembled from more than one page's items.
+ *
+ * The ids are globally unique — pdfjs builds them from the page object number
+ * (`p7R_mc0`) — so merging the per-page maps is safe.
+ */
+export async function buildDocumentIdToTextMap(
+  doc: PDFDocumentProxy,
+): Promise<Map<string, string>> {
+  const perPage = await Promise.all(
+    Array.from({ length: doc.numPages }, async (_, i) => {
+      const page = await doc.getPage(i + 1);
+      const content = await page.getTextContent({ includeMarkedContent: true });
+      return buildIdToTextMap(content.items as TextContentItemLike[]);
+    }),
+  );
+
+  const merged = new Map<string, string>();
+  for (const map of perPage) {
+    for (const [id, text] of map) merged.set(id, text);
+  }
+  return merged;
 }
 
 /** Walk the StructTree and append every `<Table>` subtree as an ExtractedTable. */
@@ -892,6 +976,9 @@ function collectTextUnder(node: StructNode, idToText: Map<string, string>): stri
 
 /**
  * Normalise raw cell text:
+ *   0. Resolve line breaks (CJK-aware) — a break between two CJK characters is
+ *      not a space. Must precede step 1, which would otherwise turn the break
+ *      into a space that the step-2 fold cannot remove (it needs 2+ repeats).
  *   1. Collapse any whitespace run (`\s` + U+3000) to a single ASCII space.
  *   2. Fold per-character kerning runs between CJK characters
  *      (e.g. "消 費 税 法" → "消費税法") — but only when at least three
@@ -901,12 +988,15 @@ function collectTextUnder(node: StructNode, idToText: Map<string, string>): stri
  */
 function compactCellText(s: string): string {
   if (!s) return '';
+  // Step 0: CJK-aware line-break resolution (see resolveLineBreaks). idToText now
+  // keeps raw `\n` markers, so a cell wrapping mid-word no longer gains a space.
+  let t = resolveLineBreaks(s);
   // Step 1: collapse whitespace runs (incl. U+3000) to one ASCII space.
-  let t = s.replace(/[\s　]+/g, ' ').trim();
+  t = t.replace(/[\s　]+/g, ' ').trim();
   // Step 2: fold runs of `CJK + space` repeated at least twice followed by
   // a final CJK char. Anything shorter is treated as a real word boundary.
-  const cjk = '[\\u3040-\\u30ff\\u3400-\\u9fff\\uff00-\\uffef]';
-  const kerningRun = new RegExp(`(?:${cjk} ){2,}${cjk}`, 'g');
+  // Shares CJK_CHAR with resolveLineBreaks — one definition of "is this CJK".
+  const kerningRun = new RegExp(`(?:${CJK_CHAR} ){2,}${CJK_CHAR}`, 'g');
   t = t.replace(kerningRun, (m) => m.replace(/ /g, ''));
   // Step 3: escape Markdown table delimiters.
   return t.replace(/\|/g, '\\|').replace(/\n/g, ' ');

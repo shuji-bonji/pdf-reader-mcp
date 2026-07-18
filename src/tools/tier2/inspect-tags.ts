@@ -5,7 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectTagsInput, InspectTagsSchema } from '../../schemas/tier2.js';
-import { analyzeTags } from '../../services/pdfjs-service.js';
+import { analyzeTags } from '../../services/struct-tree-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatTagsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 

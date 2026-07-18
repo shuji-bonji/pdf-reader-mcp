@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-18
+
+### Added
+
+- **`extract_structured_text`（新ツール・M-8）** — タグ付き PDF のテキストを**論理コンテンツ順**で、各断片に構造タイプ（`H1` / `P` / `Table` …）のラベルを付けて返します。「H1 の文字列は何か」に答えるツールで、これは `read_text`（座標順のフラット）・`inspect_tags`（構造のみ・テキストなし）・`extract_tables`（表のみ）のいずれも返せませんでした。仕様: `Document-Note/mcps/PDFfamily/specs/08` v0.2 ／ レビュー: `docs/m8-spec-review-2026-07-18.md`。
+  - **走査はカタログの `StructTreeRoot` を深さ優先**で行います（ISO 32000-2 §14.8.2.5 の logical content order の定義そのもの）。**`page.getStructTree()` のページ単位併合ではありません** — §14.8.2.5 NOTE 2 が「A logical object can extend over more than one PDF page」と明示するとおり、併合方式は**ページを跨ぐ要素を分裂させる**（段落が改ページで 2 つに割れ、リフロー後の本文の途中に段落境界が生まれる）。構造は pdf-lib、テキストは pdfjs（MCR の `/Pg` + `/MCID` を pdfjs の marked-content id に変換）で解決します。
+  - 出力は**フラット + `depth`**（深さ優先 pre-order + depth で木を一意に復元。Markdown 化が単純ループになり、truncate がどこで切っても壊れない）。**`Table` のみ `rows`** を持ちます（2 次元は `depth` で表せないため）。
+  - **`ActualText` はグリフを置換**（§14.9.4「a replacement, not a description」）、**`Alt` は `alt` に分離**し本文に混ぜません（§14.9.3 = 内容ではなく説明）。**`Lbl`（箇条書き記号）は `label` に分離**。**Artifact は除外**（§14.8.2.5 NOTE 3）。
+  - **日本語対応**: pdfjs は元レイアウトの改行を出しますが、日本語は単語間に空白が無いため（§14.8.2.6.2「a word is defined by script and context」）、**CJK 文字間の改行を空白にしません**。writer が 1 行 1 marked-content で出力する PDF では改行が要素の**境界**に落ちるため、改行の解決は id を結合した後に行います。引数 `pages` / `roles` で絞り込め（範囲にかかる要素は丸ごと返す）、全体に truncate を適用します。タグ無し文書は推測せず `isTagged: false` と理由を返します。
+
+### Changed
+
+- **🔴 `inspect_tags` を `StructTreeRoot` 走査に変更** (C-1・破壊的変更)。従来は `page.getStructTree()` をページ順に併合し、**疑似 `StructTreeRoot` ノードの下にページごとの木を並べて**いました。そのため 2 ページの文書で **`Root` と `Document` を 2 つずつ**返し、ページを跨ぐ要素を分裂させていました。これは併合の産物であって文書の構造ではありません。family の境界ルールで `inspect_tags` を残す根拠は「**構造ツリーの報告は事実であり reader の責務**」ですが、**報告する木が合成物では「事実」になりません**。M-8 と同じ walker に載せ替え、`Document` は 1 つ・ページを跨ぐ要素はまるごと報告します。
+  - **出力が変わります**（疑似 `Root` が消え、`Document` が 1 つに、ページ跨ぎ要素が統合）。`inspect_tags` を消費する側は確認してください。
+  - 副次的に、`StructElem` はあるが marked content の無い文書（構造だけの PDF）でも構造木を返せるようになりました（旧 pdfjs 経由は空を返していました）。
+
 ## [0.7.0] - 2026-07-18
 
 > **仕様適合レビュー (`docs/spec-conformance-review-2026-07-17.md`) で挙がった逸脱の一括修正**。
