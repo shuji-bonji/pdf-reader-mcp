@@ -194,27 +194,13 @@ async function analyzeStructureImpl(filePath: string): Promise<StructureAnalysis
     byType,
   };
 
-  // PDF version: prefer catalog /Version, fallback to file header %PDF-x.y
-  let pdfVersion: string | null = null;
-  const versionEntry = trySilently(() => catalog.lookupMaybe(PDFName.of('Version'), PDFName));
-  if (versionEntry) {
-    pdfVersion = versionEntry.decodeText();
-  } else {
-    try {
-      // Read only the first 20 bytes for the PDF header instead of the entire file
-      const fh = await open(filePath, 'r');
-      try {
-        const buf = Buffer.alloc(20);
-        await fh.read(buf, 0, 20, 0);
-        const match = buf.toString('ascii').match(/%PDF-(\d+\.\d+)/);
-        if (match) pdfVersion = match[1];
-      } finally {
-        await fh.close();
-      }
-    } catch {
-      // Ignore header read errors
-    }
-  }
+  // PDF version: the LATER of the file header and the catalog's /Version.
+  // Table 29 does not let the catalog simply win — see resolvePdfVersion.
+  // The catalog entry "shall be a name object, not a number", hence PDFName.
+  const headerVersion = await readHeaderVersion(filePath);
+  const catalogVersion =
+    trySilently(() => catalog.lookupMaybe(PDFName.of('Version'), PDFName))?.decodeText() ?? null;
+  const pdfVersion = resolvePdfVersion(headerVersion, catalogVersion);
 
   const result: StructureAnalysis = {
     catalog: catalogEntries,
@@ -299,24 +285,18 @@ async function analyzeFontsWithPdfLibImpl(filePath: string): Promise<FontAnalysi
       const subtype = subtypeObj?.decodeText() ?? 'Unknown';
       const encoding = encodingObj instanceof PDFName ? encodingObj.decodeText() : null;
 
-      // Check if font is embedded (has FontDescriptor with FontFile/FontFile2/FontFile3)
-      let isEmbedded = false;
-      const descriptorRef = actualFont.get(PDFName.of('FontDescriptor'));
-      if (descriptorRef) {
-        let descriptor: PDFDict | undefined;
-        if (descriptorRef instanceof PDFRef) {
-          const resolved = doc.context.lookup(descriptorRef);
-          if (resolved instanceof PDFDict) descriptor = resolved;
-        } else if (descriptorRef instanceof PDFDict) {
-          descriptor = descriptorRef;
-        }
-        if (descriptor) {
-          isEmbedded =
-            descriptor.has(PDFName.of('FontFile')) ||
-            descriptor.has(PDFName.of('FontFile2')) ||
-            descriptor.has(PDFName.of('FontFile3'));
-        }
-      }
+      // Check if font is embedded (has FontDescriptor with FontFile/FontFile2/FontFile3).
+      //
+      // For Type 0 (composite) fonts the FontDescriptor is NOT on the font
+      // dictionary itself — ISO 32000-2 Table 119 has no such entry. It lives on
+      // the CIDFont dictionary in DescendantFonts, where Table 115 marks it
+      // "(Required; shall be an indirect reference)". §9.7.6.2 fixes the font
+      // number at 0 ("In PDF, the font number shall be 0"), and Table 119
+      // describes DescendantFonts as "a one-element array", so element 0 is the
+      // only descendant to inspect.
+      const descriptorHost =
+        subtype === 'Type0' ? resolveDescendantFont(doc, actualFont) : actualFont;
+      const isEmbedded = descriptorHost ? hasEmbeddedFontFile(doc, descriptorHost) : false;
 
       // Check if subset (name starts with 6 uppercase + '+')
       const isSubset = /^[A-Z]{6}\+/.test(baseFontName);
@@ -368,8 +348,10 @@ async function analyzeSignaturesImpl(filePath: string): Promise<SignaturesAnalys
     const allFields = acroForm.getAllFields();
 
     for (const [field, _ref] of allFields) {
+      // Signature fields only (ISO 32000-2 §12.7.5.5: FT shall be Sig).
+      // A field with no FT is inherited or malformed — either way, not ours.
       const ftName = field.dict.lookupMaybe(PDFName.of('FT'), PDFName);
-      if (!ftName || ftName.decodeText() !== 'Sig') continue;
+      if (ftName?.decodeText() !== 'Sig') continue;
 
       const fieldName = field.getFullyQualifiedName() ?? field.getPartialName() ?? '(unnamed)';
       const vObj = field.dict.get(PDFName.of('V'));
@@ -437,6 +419,114 @@ async function analyzeSignaturesImpl(filePath: string): Promise<SignaturesAnalys
 }
 
 // ─── Internal helpers ────────────────────────────────────
+
+/** A PDF version as written in a header or catalog: `major.minor`. */
+const PDF_VERSION_PATTERN = /^(\d+)\.(\d+)$/;
+
+/**
+ * Read the version from the file header (`%PDF-x.y`, ISO 32000-2 §7.5.2).
+ *
+ * Only the first 20 bytes are read — the header is at the very start, and the
+ * file may be large.
+ */
+async function readHeaderVersion(filePath: string): Promise<string | null> {
+  try {
+    const fh = await open(filePath, 'r');
+    try {
+      const buf = Buffer.alloc(20);
+      await fh.read(buf, 0, 20, 0);
+      return buf.toString('ascii').match(/%PDF-(\d+\.\d+)/)?.[1] ?? null;
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Compare `major.minor` versions. Returns > 0 if `a` is later than `b`. */
+function compareVersions(a: string, b: string): number {
+  const ma = a.match(PDF_VERSION_PATTERN);
+  const mb = b.match(PDF_VERSION_PATTERN);
+  if (!ma || !mb) return 0;
+  return Number(ma[1]) - Number(mb[1]) || Number(ma[2]) - Number(mb[2]);
+}
+
+/**
+ * Resolve the PDF version the document conforms to.
+ *
+ * ISO 32000-2 Table 29 (Version) makes the catalog entry conditional, not
+ * authoritative: it is the version "to which the document conforms … **if later
+ * than the version specified in the file's header**. If the header specifies a
+ * later version, or if this entry is absent, the document shall conform to the
+ * version specified in the header."
+ *
+ * So the answer is the later of the two. The previous code returned the catalog
+ * entry unconditionally whenever it existed, which reports the wrong version for
+ * a file whose header is newer — the exact case Table 29 calls out. (The entry
+ * exists so a version can be *raised* by an incremental update; see §7.5.6.)
+ *
+ * A malformed catalog entry cannot be shown to specify a later version, so the
+ * header wins by default.
+ *
+ * Exported for unit testing — the interesting cases (header newer, versions
+ * equal, catalog malformed) would each need a hand-built PDF otherwise.
+ */
+export function resolvePdfVersion(
+  headerVersion: string | null,
+  catalogVersion: string | null,
+): string | null {
+  if (!catalogVersion) return headerVersion;
+  if (!headerVersion) return PDF_VERSION_PATTERN.test(catalogVersion) ? catalogVersion : null;
+  return compareVersions(catalogVersion, headerVersion) > 0 ? catalogVersion : headerVersion;
+}
+
+/**
+ * Resolve a value that may be a direct object or an indirect reference to a PDFDict.
+ */
+function resolveDict(doc: PDFDocument, obj: unknown): PDFDict | undefined {
+  if (obj instanceof PDFDict) return obj;
+  if (obj instanceof PDFRef) {
+    const resolved = trySilently(() => doc.context.lookup(obj));
+    if (resolved instanceof PDFDict) return resolved;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve the CIDFont dictionary of a Type 0 (composite) font.
+ *
+ * ISO 32000-2 Table 119 defines DescendantFonts as "(Required) A one-element
+ * array specifying the CIDFont dictionary that is the descendant of this Type 0
+ * font", and §9.7.6.2 states "In PDF, the font number shall be 0" — so index 0
+ * is the only descendant. The array itself may also be an indirect reference.
+ *
+ * Returns `undefined` for malformed fonts (missing / empty DescendantFonts),
+ * which the caller reports as not embedded — the descriptor is unreachable, so
+ * embedding cannot be asserted.
+ */
+function resolveDescendantFont(doc: PDFDocument, type0Font: PDFDict): PDFDict | undefined {
+  const descendants = trySilently(() =>
+    type0Font.lookupMaybe(PDFName.of('DescendantFonts'), PDFArray),
+  );
+  if (!descendants || descendants.size() === 0) return undefined;
+  return resolveDict(doc, descendants.get(0));
+}
+
+/**
+ * Report whether a font dictionary's FontDescriptor carries an embedded font
+ * program. ISO 32000-2 §9.8.2 Table 121: FontFile (Type 1), FontFile2
+ * (TrueType), FontFile3 (Type 1C / CIDFontType0C / OpenType).
+ */
+function hasEmbeddedFontFile(doc: PDFDocument, fontDict: PDFDict): boolean {
+  const descriptor = resolveDict(doc, fontDict.get(PDFName.of('FontDescriptor')));
+  if (!descriptor) return false;
+  return (
+    descriptor.has(PDFName.of('FontFile')) ||
+    descriptor.has(PDFName.of('FontFile2')) ||
+    descriptor.has(PDFName.of('FontFile3'))
+  );
+}
 
 /**
  * Summarize a PDF object for display (truncated).

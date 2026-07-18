@@ -46,10 +46,16 @@ Examples:
               content: [
                 {
                   type: 'text' as const,
+                  // Don't guess at a cause. The previous wording blamed "an
+                  // encoding format that is not directly accessible", which was
+                  // reported even for ordinary images pdfjs decodes perfectly —
+                  // the real cause was a bug in this server, and the confident
+                  // explanation made it look like a property of the file.
                   text:
                     `${result.detectedCount} image(s) detected in the PDF, ` +
-                    'but none could be extracted. ' +
-                    'The images may use an encoding format that is not directly accessible.',
+                    'but none could be decoded. ' +
+                    'This can happen with image types pdf.js does not decode outside a ' +
+                    'rendering context (for example some masks and JPX/JBIG2 streams).',
                 },
               ],
             };

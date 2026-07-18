@@ -13,8 +13,23 @@ export function registerValidateTagged(server: McpServer): void {
   server.registerTool(
     'validate_tagged',
     {
-      title: 'Validate Tagged PDF',
-      description: `Validate PDF/UA tagged structure requirements.
+      title: 'Validate Tagged PDF (deprecated)',
+      description: `[DEPRECATED — will be removed in the next major version]
+
+Prefer pdf-verify-mcp's \`validate_conformance\` with \`flavour: "pdfua-1"\` (or \`"pdfua-2"\`).
+It supersedes this tool rather than merely replacing it: it verifies the actual \`/Alt\` and
+\`/ActualText\` values of Figure tags (this tool only counts Figures), checks Link \`/Contents\`,
+inspects StructTreeRoot from the catalog directly (this tool synthesises it per page), cites
+ISO 14289 clauses, and delegates to veraPDF when available.
+
+Reason: the family boundary is "pass/fail against an ISO standard belongs to pdf-verify-mcp;
+reporting observations belongs to pdf-reader-mcp". This tool predates pdf-verify-mcp and was
+the exception. Use \`inspect_tags\` here for structure-tree facts — that tool is NOT deprecated.
+
+This tool remains a quick preflight and still works. Only the checks below are performed;
+a pass here does not imply PDF/UA conformance.
+
+Validate PDF/UA tagged structure requirements.
 
 Args:
   - file_path (string): Absolute path to a local PDF file

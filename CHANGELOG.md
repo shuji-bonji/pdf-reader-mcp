@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-18
+
+> **仕様適合レビュー (`docs/spec-conformance-review-2026-07-17.md`) で挙がった逸脱の一括修正**。
+> ISO 32000-2 / PDF/UA-1 の**原文と照合**して直しています (根拠は各項目に条項番号付きで併記)。
+>
+> **バグ修正のみで新ツール・API 変更はありませんが、出力は実質的に変わります** — `read_images` は
+> 「常に 0 枚」から正常動作に、`inspect_fonts` は日本語 PDF での答えが反転し、`validate_metadata` は
+> 今まで通していた不正な日付を warning にします。そのため patch ではなく minor としました。
+>
+> **共通の教訓**: High 3 件はいずれも「**そのケースを踏むフィクスチャが無かった**」ために
+> 長期間検出されませんでした (既存フィクスチャは全て `StandardFonts` で Type0 の PDF が 1 つも無く、
+> 画像テストは `if (extractedCount > 0)` で本体ごとスキップされていました)。テストは 250 件緑・
+> `typecheck` も `check` も緑のまま、tier1 ツールが 1 枚も画像を返していませんでした。
+
+### Fixed
+
+- **`inspect_fonts` が Type0 (CID) フォントの埋め込みを常に `false` と誤判定していた問題を修正** (仕様適合レビュー High-1)。Type0 フォント辞書には `FontDescriptor` が存在せず (ISO 32000-2 Table 119)、実体は `DescendantFonts` の CIDFont 辞書側にあります (Table 115 で "Required; shall be an indirect reference")。にもかかわらず Type0 辞書自体を見ていたため、記述子が見つからず常に「非埋め込み」と報告していました。`Subtype == Type0` の場合は `DescendantFonts[0]` を解決してその CIDFont の `FontDescriptor` を参照するよう修正 (§9.7.6.2 「In PDF, the font number shall be 0」/ Table 119 「a one-element array」より、index 0 が唯一の descendant)。
+  - **影響**: **日本語 PDF はほぼすべて Type0** であり、「PDF/A・PDF/X 向けの埋め込み確認」という本ツールの主要ユースケースで誤答していました。NotoSansJP を埋め込んだ PDF が `isEmbedded: false` を返していた実証済みのバグです。
+  - 記述子に到達できない不正な Type0 フォント (`DescendantFonts` の欠落・空配列) は `false` を報告します。埋め込みを主張する根拠が無いためです。
+- **🔴 `read_images` が画像を 1 枚も抽出できなかった問題を修正** (D-9・実機試用で発見)。**tier1 ツールが実質不動でした**。
+  - **原因 (2 つ)**:
+    1. 画像のデコード結果は worker から**非同期に**届くため、`getOperatorList()` 直後に同期形式の `page.objs.get(name)` を呼ぶと `Requesting object that isn't resolved yet` を投げます。これを `catch {}` が飲み込んで `skippedCount` に計上していたため、**すべての PDF で `extractedCount: 0`** になっていました。コールバック形式 `get(name, callback)` で解決を待つよう修正 (届かない画像に備えてタイムアウト 10 秒)。
+    2. **ページ間で共有された画像は `page.objs` ではなく `page.commonObjs` に入ります**。pdfjs はそれを `g_` 接頭辞付きの名前で示します (例: `g_d0_img_p2_1`)。`objs` 側だけを見ていると**永久に解決せず**、①の修正だけではタイムアウトまで待って取りこぼしていました。pdfjs 自身の `getObject` と同じ規則 (`name.startsWith('g_') ? commonObjs : objs`) で分岐するよう修正。`comprehensive_1.pdf` の抽出は **10 秒 → 52ms**、取りこぼしていた 1 枚も回収して 2/2 になりました。
+  - **あわせて誤ったエラーメッセージを是正**。「The images may use an encoding format that is not directly accessible」と**ファイル側の性質のように断言**していましたが、実際は本サーバのバグで、pdfjs が問題なくデコードできる通常の PNG でも同じ文言が出ていました。原因を推測で断定しない文言に変更しています。
+  - **なぜ気付かれなかったか**: 唯一プロパティを検証する E2E テスト (IM-3) の本体が `if (result.extractedCount > 0)` で囲まれており、**0 件なので本体ごとスキップされ空振りで緑**でした。これが High-2 (下記) も同時に隠していました。ガードを外し、抽出できること自体を表明する形に変更しています。
+  - 既存の `comprehensive_1.pdf` も 0 枚 → 1 枚に回復しました。
+- **`read_images` の pdfjs `ImageKind` 誤マッピングを修正** (仕様適合レビュー High-2)。`1 = RGB / 2 = RGBA / それ以外 = Grayscale` としていましたが、正しくは **`1 = GRAYSCALE_1BPP` / `2 = RGB_24BPP` / `3 = RGBA_32BPP`** で、3 値すべてがずれていました。あわせて `bitsPerComponent: 8` の固定値も修正 — Grayscale (1bpp) では **1** を報告します。マジックナンバーの直書きをやめ `ImageKind` を pdfjs から import するようにしたため、同種の取り違えが再発しません。未知の kind は `colorSpace: 'Unknown'` を報告します。
+  - `colorSpace` / `bitsPerComponent` は pdfjs が正規化した**デコード後バッファ**の性質であり、画像 XObject の生の `/ColorSpace` エントリではありません (型定義にも明記)。
+  - 新フィクスチャ `image-kinds.pdf` (RGB / RGBA / 1bpp グレースケールを 1 枚ずつ) で 3 種すべてを実データ検証。1bpp の 8×8 画像がちょうど 8 バイトになることまで確認しています (IM-7)。
+
+- **`isValidPdfDate` の PDF 日付判定を修正** (仕様適合レビュー Medium-1・D-3)。ISO 32000-2 §7.9.4 と照合し、**誤受理 10 件・誤拒否 2 件**を是正しました。
+  - **バグ1: `[+-Z]` が文字クラスでなく範囲だった**。正規表現では `+`(U+002B)〜`Z`(U+005A) の範囲と解釈され、`,-./0-9:;<=>?@A-Z` をすべてタイムゾーン記号として受理していました (`D:20241231235959A09'00` が「有効な日付」)。§7.9.4 が許すのは PLUS SIGN / HYPHEN-MINUS / LATIN CAPITAL LETTER Z の 3 文字のみです。
+  - **バグ2: オフセットの `HH` と `mm` が不可分だった**。`(\d{2}'\d{2}'?)?` としていたため、有効な `D:20241231235959-09'` (分の省略) を拒否していました。§7.9.4 は「The minute offset field (mm) shall only be present if the APOSTROPHE … is present」と規定しており、mm は独立して省略可能です。
+  - **あわせて値域検査を追加**。旧実装は全フィールドが `\d{2}` で、**月13・日00・時24・分60・秒60 をすべて「有効」と報告**していました。§7.9.4 の各定義 (MM 01–12 / DD 01–31 / HH 00–23 / mm・SS 00–59) に従います。
+  - **条文の EXAMPLE との不整合を発見し、EXAMPLE 側を採用**。§7.9.4 の `D:199812231952-08'00` (「December 23, 1998, at 7:52 PM」) は **SS を省略したままオフセットを付けており**、同じ項の「all other fields may be present but only if all of their preceding fields are also present」と矛盾します。ISO 32000-1:2008 §7.9.4 に**同一の規定文と同一の EXAMPLE** があることを確認したため版差ではなく長年の規格側の不備と判断し、**SS の省略のみ例外として受理**します (規格自身の EXAMPLE を warning にするのは不合理なため)。それ以外は規定文どおり。
+  - 正規表現を条文のフィールド定義から組み立て直し、各行に根拠を併記しました。単体テスト 34 件を追加 (`tests/tier1/validation-service.test.ts`) — レビューの実証表・条文の EXAMPLE・NOTE 2 (1.7 の末尾 `'`)・NOTE 3 (`Z` + オフセット) を含みます。
+
+- **`inspect_annotations` の markup 注釈の分類を修正** (仕様適合レビュー Medium-2・D-4)。ISO 32000-2 **Table 171 の "Markup" 列**（規定・全型を網羅）をそのまま転記する形に改めました。手で組んだ集合が 4 型を取り違えていました。
+  - **`Popup` を markup から除外**。§12.5.6.2 は「The remaining annotation types are **not** considered markup annotations: • The popup annotation type shall not appear by itself; it shall be associated with a markup annotation…」と明示しています。popup は他の注釈のテキストを表示する**容器**であって markup ではありません。
+  - **`FileAttachment` / `Sound` / `Projection` を追加**（Table 171 はいずれも "Yes"。旧実装では漏れており、これらだけを持つページが `hasMarkup: false` と報告されていました）。`Sound` は PDF 2.0 で deprecated、`Projection` は PDF 2.0 の新規ですが、どちらも markup です。
+  - 単体テスト 33 件 — **Table 171 の全 28 型を網羅**し、型が増えたら気付けるガードを含みます。
+- **`inspect_structure` の PDF 版数の判定を修正** (仕様適合レビュー Low-3・D-8)。カタログの `/Version` があれば無条件に採用していましたが、**ヘッダとカタログの後の版**を採るのが正です。
+  - ISO 32000-2 **Table 29** は カタログの `Version` を条件付きと規定しています — 「the document conforms to … **if later than the version specified in the file's header**. **If the header specifies a later version, or if this entry is absent, the document shall conform to the version specified in the header.**」。このエントリは増分更新で版を**上げる**ためのもの (§7.5.6) で、下げるためのものではありません。
+  - ヘッダが `%PDF-1.7` でカタログが `/1.4` の場合、旧実装は `1.4` と報告していました。同版の場合もヘッダに従います（カタログは "later" ではないため）。不正な値のカタログエントリは「後の版を指定している」と示せないためヘッダが優先されます。
+  - minor は**数値比較**にしました（文字列比較では `1.10 < 1.7` となり誤ります）。単体テスト 8 件。
+
+### Deprecated
+
+- **`validate_tagged` / `validate_metadata` を非推奨化** (M-2)。description に予告を追記しました。**動作は変更しておらず、削除は次のメジャーで行います**。
+  - **理由**: PDF family の責務境界は「**ISO 規格に照らした合否を返すなら pdf-verify-mcp、観測を返すだけなら pdf-reader-mcp**」。この 2 ツールは pdf-verify-mcp が存在しなかった時代の実装で、この規則の例外でした。pdf-verify-mcp **v0.6.0 (2026-07-16) で PDF/UA 判定が実装済み**です。
+  - **移管先**: `validate_conformance` (`flavour: "pdfua-1"` / `"pdfua-2"`)。単なる移植ではなく**上位互換**です — Figure の `/Alt`・`/ActualText` を個数でなく実在で検証し、Link の `/Contents` を検証し、StructTreeRoot を catalog から直接検査し、ISO 14289 の条項を付し、veraPDF があれば委譲します。
+  - **`inspect_tags` は残します**。構造ツリーの報告は「事実」であり reader の責務です。また pdf-verify-mcp は pdfjs を持たないため、構造ツリーそのものの調査は本サーバでしかできません。
+  - あわせて `validate_metadata` の description から **誤った規格上の主張を除去**しました。「Title presence (required for PDF/UA, PDF/A)」としていましたが、PDF/UA-1 §7.1 が要求するのは **XMP の `dc:title`** であり、本ツールが見ている Info 辞書は根拠になりません (同項は適合リーダが Info 辞書を "shall ignore" と規定。ISO 32000-2 §14.3.3 も CreationDate/ModDate を除き Info 辞書を非推奨としています)。`DisplayDocTitle`・`Suspects` も未検査である旨を明記しました。**非推奨化により、これらは修正せず移管先に委ねます** (仕様適合レビュー Medium-3 / Low-1 / Low-2 に対する回答)。
+
+### Documentation
+
+- **README (en/ja) の設定例に `@latest` を付けました** (A-2)。`npx -y <pkg>` の `-y` は**インストール確認を省くだけで、更新確認はしません**。`@latest` が無いと npx は最初に取得した版をキャッシュから使い続けるため、**新版を publish しても利用者に届きません**。pdf-writer-mcp で実際に発生した問題で (npm に 0.5.0 があるのに npx は 0.4.0 を使い続けた)、`read_images` が直る今回は特に届かないと意味がないため対応しました。キャッシュの注意書き (`rm -rf ~/.npm/_npx`) も添えています。
+
+### Build
+
+- **biome を `2.5.4` に固定** (A-1)。`package.json` が `^2.3.14`・実体が `2.5.3`・`biome.json` の `$schema` が `2.3.14` と三者バラバラでした。biome は **minor 更新で整形結果が変わる**ため、キャレット指定だと手元の `npm install` が CI より先に進み、**誰も触っていないファイルに format 差分が出ます**。pdf-verify-mcp で実際に発生した問題です (2026-07-16)。これで pdf-writer-mcp / pdf-verify-mcp と揃い、PDF family 全体が 2.5.4 固定になりました。
+
 ## [0.6.3] - 2026-07-14
 
 ### Added

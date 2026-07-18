@@ -717,24 +717,76 @@ function addDiff(diffs: StructureDiffEntry[], property: string, val1: string, va
   });
 }
 
+// ─── PDF date format (ISO 32000-2 §7.9.4) ────────────────
+//
+// Built up from the clause's own field definitions rather than written as one
+// opaque expression, because the previous one-liner hid two bugs (see below).
+//
+//   (D:YYYYMMDDHHmmSSOHH'mm)
+//
+// Value ranges are from the clause text; checking them is what separates
+// "looks like a date" from "is a date" — the old pattern accepted month 13.
+const D_YYYY = '\\d{4}';
+const D_MM = '(?:0[1-9]|1[0-2])'; // "MM shall be the month (01–12)"
+const D_DD = '(?:0[1-9]|[12]\\d|3[01])'; // "DD shall be the day (01–31)"
+const D_HH = '(?:[01]\\d|2[0-3])'; // "HH shall be the hour (00–23)"
+const D_MIN = '[0-5]\\d'; // "mm shall be the minute (00–59)"
+const D_SS = '[0-5]\\d'; // "SS shall be the second (00–59)"
+
+// O and the UT offset.
+//
+// BUG 1 (fixed): the old class was `[+-Z]`, which a regex reads as the RANGE
+// U+002B(+) … U+005A(Z) — it accepted `,-./0-9:;<=>?@A-Z`. So `D:...A09'00` and
+// `D:...509'00` were reported as valid dates. The clause admits exactly three
+// characters: PLUS SIGN (+), HYPHEN-MINUS (-), LATIN CAPITAL LETTER Z (Z).
+//
+// BUG 2 (fixed): the old offset was `(\d{2}'\d{2}'?)?`, welding HH and mm
+// together, so the valid `D:...-09'` (hours, no minutes) was rejected. The
+// clause: "The APOSTROPHE … shall only be present if the HH field is present.
+// The minute offset field (mm) shall only be present if the APOSTROPHE … is
+// present." — mm is independently optional.
+//
+// The optional trailing apostrophe is the PDF 1.7 convention; NOTE 2 recommends
+// that processors keep accepting it. NOTE 3 allows Z to carry offsets too
+// ("The letter Z can optionally be followed by hour and minute offsets"), which
+// falls out of treating all three O characters alike.
+const D_OFFSET = `[+\\-Z](?:${D_HH}'(?:${D_MIN}'?)?)?`;
+
+// "the year field (YYYY) shall be present and all other fields may be present
+// but only if all of their preceding fields are also present" — hence the
+// nesting: each field encloses the next rather than being independently optional.
+//
+// SS is the one deliberate exception. The clause's own EXAMPLE —
+//
+//   "December 23, 1998, at 7:52 PM, U.S. Pacific Standard Time" → D:199812231952-08'00
+//
+// omits SS while still carrying the offset, which the sentence above forbids.
+// This is not a version difference: ISO 32000-1:2008 §7.9.4 carries the *same*
+// normative sentence and the *same* example, so it is a long-standing defect in
+// the specification. Producers copy the example, and rejecting the standard's
+// own example in a warning-level check would be indefensible — so we accept an
+// omitted SS. Everything else follows the normative sentence.
+const PDF_DATE_PATTERN = new RegExp(
+  `^D:${D_YYYY}(?:${D_MM}(?:${D_DD}(?:${D_HH}(?:${D_MIN}(?:${D_SS})?(?:${D_OFFSET})?)?)?)?)?$`,
+);
+
+/** ISO 8601 — not a PDF date, but tolerated from non-conforming producers. */
+const ISO_8601_PATTERN = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?)?$/;
+
 /**
- * Check if a date string looks like a valid PDF date format.
+ * Check if a date string is a valid PDF date.
  *
- * Per ISO 32000-1 §7.9.4, PDF date format is:
- *   D:YYYYMMDDHHmmSSOHH'mm'
- * where YYYY is required and other parts are optional.
- * O is the timezone indicator: +, -, or Z.
+ * ISO 32000-2 §7.9.4: `(D:YYYYMMDDHHmmSSOHH'mm)`. The `D:` prefix and `YYYY`
+ * are required; every later field may be omitted only if all preceding ones are
+ * present (SS excepted — see `PDF_DATE_PATTERN`). `O` is `+`, `-`, or `Z`.
  *
- * Also accepts ISO 8601 dates (YYYY-MM-DDTHH:mm:ss).
+ * Also accepts ISO 8601 (`YYYY-MM-DDTHH:mm:ss`), which is a tolerance rather
+ * than conformance — such a string does not satisfy §7.9.4.
+ *
+ * Exported for unit testing: the pattern is dense enough that it hid two bugs
+ * (a character range masquerading as a class, and a welded HH/mm offset), and
+ * exercising it through `validateMetadata` would need a fixture per date form.
  */
-function isValidPdfDate(dateStr: string): boolean {
-  // PDF date: D:YYYY with optional MM DD HH mm SS and timezone
-  if (/^D:\d{4}(\d{2}(\d{2}(\d{2}(\d{2}(\d{2}([+-Z](\d{2}'\d{2}'?)?)?)?)?)?)?)?$/.test(dateStr)) {
-    return true;
-  }
-  // ISO 8601 dates: YYYY-MM-DD with optional time
-  if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2}|Z)?)?$/.test(dateStr)) {
-    return true;
-  }
-  return false;
+export function isValidPdfDate(dateStr: string): boolean {
+  return PDF_DATE_PATTERN.test(dateStr) || ISO_8601_PATTERN.test(dateStr);
 }

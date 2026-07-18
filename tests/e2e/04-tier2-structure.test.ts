@@ -161,6 +161,63 @@ describe('04 - inspect_fonts', () => {
     expect(result.fontMap.size).toBe(0);
     expect(result.pagesScanned).toBe(EXPECTED_METADATA.empty.pageCount);
   });
+
+  // ========================================
+  // High-1 regression: Type0 (composite / CID) font embedding
+  //
+  // Type0 font dictionaries have no FontDescriptor (ISO 32000-2 Table 119);
+  // it lives on the CIDFont in DescendantFonts (Table 115, "Required; shall be
+  // an indirect reference"). Looking at the Type0 dictionary itself therefore
+  // found nothing and reported every Type0 font as not embedded — i.e. nearly
+  // every Japanese PDF, in the tool's headline "check embedding for PDF/A,
+  // PDF/X" use case.
+  //
+  // Verified against a real NotoSansJP PDF (qpdf confirmed /FontFile2 present);
+  // cid-font.pdf reproduces the same shape without shipping a CJK font binary.
+  // ========================================
+
+  // IF-5: 埋め込み済み Type0 を embedded と判定する (High-1 の回帰)
+  it('IF-5: embedded Type0 font is reported as embedded', async () => {
+    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const font = [...result.fontMap.values()].find((f) => f.name.includes('NotoSansJP'));
+
+    expect(font).toBeDefined();
+    expect(font?.type).toBe('Type0');
+    // 修正前はここが false だった（FontDescriptor を Type0 辞書自体に探していたため）
+    expect(font?.isEmbedded).toBe(true);
+  });
+
+  // IF-6: 非埋め込み Type0 は embedded と判定しない
+  //       （「Type0 なら常に true」という過剰修正を防ぐ）
+  it('IF-6: non-embedded Type0 font is not reported as embedded', async () => {
+    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const font = [...result.fontMap.values()].find((f) => f.name.includes('KozMinPr6N'));
+
+    expect(font).toBeDefined();
+    expect(font?.type).toBe('Type0');
+    // DescendantFonts は解決できるが CIDFont に FontFile* が無い
+    expect(font?.isEmbedded).toBe(false);
+  });
+
+  // IF-7: DescendantFonts を欠く不正な Type0 は埋め込みを主張しない
+  it('IF-7: malformed Type0 without DescendantFonts is not embedded', async () => {
+    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const font = [...result.fontMap.values()].find((f) => f.name.includes('BrokenCID'));
+
+    expect(font).toBeDefined();
+    expect(font?.isEmbedded).toBe(false);
+  });
+
+  // IF-8: 単純フォントの経路は Type0 対応で壊れていない
+  it('IF-8: simple (non-Type0) fonts still resolve their own FontDescriptor', async () => {
+    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const helv = [...result.fontMap.values()].find((f) => f.name.includes('Helvetica'));
+
+    expect(helv).toBeDefined();
+    // standard 14 は埋め込まれない
+    expect(helv?.isEmbedded).toBe(false);
+    expect(helv?.type).toBe('Type1');
+  });
 });
 
 // ========================================

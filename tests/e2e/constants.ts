@@ -119,7 +119,14 @@ export const FONT_FAMILIES = {
 
 export const VALID_COLOR_SPACES = ['RGB', 'RGBA', 'Grayscale'] as const;
 
-export const IMAGE_BITS_PER_COMPONENT = 8;
+/**
+ * Bits per component we may report for a decoded image.
+ *
+ * Was `= 8` (a single value). That was wrong: pdfjs's GRAYSCALE_1BPP is 1 bit
+ * per pixel, so 8 was never universal — it only looked safe because
+ * read_images extracted nothing and the assertion never ran (D-9).
+ */
+export const VALID_BITS_PER_COMPONENT = [1, 8] as const;
 
 // ========================================
 // Validation constants

@@ -6,6 +6,7 @@
 
 import {
   getDocument,
+  ImageKind,
   OPS,
   type PDFDocumentProxy,
   type PDFPageProxy,
@@ -36,6 +37,14 @@ import { detectEncryption } from './pdflib-service.js';
  * stdio JSON-RPC stream. Setting verbosity to 0 prevents this.
  */
 const PDFJS_VERBOSITY = 0; // VerbosityLevel.ERRORS
+
+/**
+ * How long to wait for a single decoded image to arrive from the pdfjs worker
+ * before giving up on it (see `getPageObject`). Generous: it only elapses for
+ * images the worker never delivers, and a slow decode is still better than a
+ * silently dropped image.
+ */
+const IMAGE_OBJECT_TIMEOUT_MS = 10_000;
 
 /**
  * Load a PDF document from a file path.
@@ -263,6 +272,87 @@ export async function countImages(filePath: string, pages?: string): Promise<num
 }
 
 /**
+ * Map pdfjs `ImageKind` to the colour space and bits-per-component we report.
+ *
+ * These describe the *decoded* buffer pdfjs hands back, not the raw PDF image
+ * XObject: pdfjs normalises the ColorSpace / BitsPerComponent of §8.9.5.1 into
+ * one of three layouts. GRAYSCALE_1BPP is 1 bit per pixel; the RGB/RGBA kinds
+ * are 8 bits per component (24bpp = 3×8, 32bpp = 4×8).
+ *
+ * The constants are imported from pdfjs rather than hardcoded — the previous
+ * implementation inlined the numbers and had all three wrong.
+ */
+export function describeImageKind(kind: number | undefined): {
+  colorSpace: string;
+  bitsPerComponent: number;
+} {
+  switch (kind) {
+    case ImageKind.GRAYSCALE_1BPP:
+      return { colorSpace: 'Grayscale', bitsPerComponent: 1 };
+    case ImageKind.RGB_24BPP:
+      return { colorSpace: 'RGB', bitsPerComponent: 8 };
+    case ImageKind.RGBA_32BPP:
+      return { colorSpace: 'RGBA', bitsPerComponent: 8 };
+    default:
+      return { colorSpace: 'Unknown', bitsPerComponent: 8 };
+  }
+}
+
+/** Decoded image object handed back by pdfjs. */
+interface PdfjsImageData {
+  width: number;
+  height: number;
+  data: Uint8Array | Uint8ClampedArray;
+  kind: number;
+}
+
+/**
+ * Resolve a pdfjs image object, waiting for it to arrive from the worker.
+ *
+ * Two things have to be right here, and both were wrong before:
+ *
+ * 1. **Wait for it.** `objs.get(name)` — the synchronous form — throws
+ *    `Requesting object that isn't resolved yet`. `getOperatorList()` resolves
+ *    once the operator list is complete, but decoded image data is pushed from
+ *    the worker separately and lands later. The callback form registers a
+ *    listener and fires when it does. Using the sync form meant every image
+ *    threw, was swallowed as "skipped", and `read_images` returned zero images
+ *    for every PDF.
+ *
+ * 2. **Look in the right pool.** Images shared across pages are placed in
+ *    `commonObjs`, not `objs`, and pdfjs marks them with a `g_` name prefix.
+ *    Asking `objs` for one waits forever. pdfjs itself dispatches on exactly
+ *    this prefix (`getObject`: `data.startsWith("g_") ? this.commonObjs :
+ *    this.objs`), so we mirror its rule rather than inventing one.
+ *
+ * The timeout is a backstop for an object that genuinely never arrives; without
+ * it the callback would never fire and the request would hang. It should not be
+ * the normal path — if it starts elapsing, something else is wrong.
+ */
+function getImageObject(
+  page: PDFPageProxy,
+  name: string,
+  timeoutMs: number = IMAGE_OBJECT_TIMEOUT_MS,
+): Promise<PdfjsImageData | undefined> {
+  // Mirrors pdfjs's own CanvasGraphics.getObject dispatch.
+  const pool = name.startsWith('g_') ? page.commonObjs : page.objs;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), timeoutMs);
+    try {
+      pool.get(name, (data: unknown) => {
+        clearTimeout(timer);
+        resolve((data as PdfjsImageData) ?? undefined);
+      });
+    } catch {
+      // Malformed reference — treat as unavailable rather than failing the page.
+      clearTimeout(timer);
+      resolve(undefined);
+    }
+  });
+}
+
+/**
  * Extract images from specified pages as base64.
  * Returns both extracted images and counts of detected/skipped images.
  */
@@ -289,33 +379,22 @@ export async function extractImages(
           const op = opList.fnArray[i];
           if (op === OPS.paintImageXObject) {
             pageDetected++;
-            try {
-              const imgName = opList.argsArray[i][0] as string;
-              const objs = page.objs;
-              const imgData = objs.get(imgName) as {
-                width: number;
-                height: number;
-                data: Uint8Array | Uint8ClampedArray;
-                kind: number;
-              } | null;
+            const imgName = opList.argsArray[i][0] as string;
+            const imgData = await getImageObject(page, imgName);
 
-              if (imgData?.data) {
-                const base64 = Buffer.from(imgData.data).toString('base64');
-                const colorSpace =
-                  imgData.kind === 1 ? 'RGB' : imgData.kind === 2 ? 'RGBA' : 'Grayscale';
+            if (imgData?.data) {
+              const base64 = Buffer.from(imgData.data).toString('base64');
+              const { colorSpace, bitsPerComponent } = describeImageKind(imgData.kind);
 
-                pageImages.push({
-                  page: pageNum,
-                  index: imageIndex,
-                  width: imgData.width,
-                  height: imgData.height,
-                  colorSpace,
-                  bitsPerComponent: 8,
-                  dataBase64: base64,
-                });
-              }
-            } catch {
-              // Some images may not be directly accessible; skip
+              pageImages.push({
+                page: pageNum,
+                index: imageIndex,
+                width: imgData.width,
+                height: imgData.height,
+                colorSpace,
+                bitsPerComponent,
+                dataBase64: base64,
+              });
             }
             imageIndex++;
           }
@@ -834,6 +913,56 @@ function compactCellText(s: string): string {
 }
 
 /**
+ * Annotation subtypes that are markup annotations.
+ *
+ * Transcribed from the "Markup" column of ISO 32000-2 Table 171 — Annotation
+ * types. That column is normative and exhaustive, so this needs no
+ * interpretation: every subtype the table marks "Yes" is here, and every one it
+ * marks "No" (Link, Popup, Movie, Screen, Widget, PrinterMark, TrapNet,
+ * Watermark, 3D, RichMedia) is not.
+ *
+ * Previously this set was assembled by hand and got three things wrong:
+ *  - Popup was included. §12.5.6.2 is explicit: "The remaining annotation types
+ *    are not considered markup annotations: • The popup annotation type shall
+ *    not appear by itself; it shall be associated with a markup annotation…".
+ *    A popup is the *container* for another annotation's text, not markup.
+ *  - FileAttachment, Sound and Projection were missing, though Table 171 marks
+ *    all three "Yes" (§12.5.6.2 lists file attachment among the annotations
+ *    with a popup window, and gives sound and projection their own groups).
+ *
+ * Sound is deprecated in PDF 2.0 and Projection is new in PDF 2.0; both are
+ * still markup, so both are reported as such.
+ */
+const MARKUP_SUBTYPES: ReadonlySet<string> = new Set([
+  'Text',
+  'FreeText',
+  'Line',
+  'Square',
+  'Circle',
+  'Polygon',
+  'PolyLine',
+  'Highlight',
+  'Underline',
+  'Squiggly',
+  'StrikeOut',
+  'Caret',
+  'Stamp',
+  'Ink',
+  'FileAttachment',
+  'Sound',
+  'Redact',
+  'Projection',
+]);
+
+/**
+ * Report whether an annotation subtype is a markup annotation
+ * (ISO 32000-2 Table 171, "Markup" column).
+ */
+export function isMarkupAnnotation(subtype: string): boolean {
+  return MARKUP_SUBTYPES.has(subtype);
+}
+
+/**
  * Analyze annotations across all pages.
  */
 export async function analyzeAnnotations(
@@ -844,25 +973,6 @@ export async function analyzeAnnotations(
 
   try {
     const pageNumbers = resolvePageNumbers(pages, doc.numPages);
-
-    const markupSubtypes = new Set([
-      'Text',
-      'FreeText',
-      'Line',
-      'Square',
-      'Circle',
-      'Polygon',
-      'PolyLine',
-      'Highlight',
-      'Underline',
-      'Squiggly',
-      'StrikeOut',
-      'Stamp',
-      'Caret',
-      'Ink',
-      'Popup',
-      'Redact',
-    ]);
 
     // 全ページのアノテーションを並列取得
     const pageResults = await Promise.all(
@@ -883,7 +993,7 @@ export async function analyzeAnnotations(
 
           if (subtype === 'Link') pageHasLinks = true;
           if (subtype === 'Widget') pageHasForms = true;
-          if (markupSubtypes.has(subtype)) pageHasMarkup = true;
+          if (isMarkupAnnotation(subtype)) pageHasMarkup = true;
 
           pageAnnotations.push({
             subtype,

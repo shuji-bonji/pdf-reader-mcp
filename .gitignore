@@ -6,3 +6,6 @@ tests/fixtures/*.pdf
 # Development-only reproduction / fixture-generation scripts (Issue #1, #2, #3 etc.)
 /repro-*
 /gen-*.mjs
+
+# Claude Code のローカル設定（環境固有・共有しない）
+.claude/settings.local.json

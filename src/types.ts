@@ -52,7 +52,14 @@ export interface ExtractedImage {
   index: number;
   width: number;
   height: number;
+  /**
+   * Colour space of the decoded buffer: 'Grayscale' | 'RGB' | 'RGBA'
+   * ('Unknown' if pdfjs reports a kind we do not recognise).
+   * This describes pdfjs's normalised output, not the raw image XObject's
+   * /ColorSpace entry.
+   */
   colorSpace: string;
+  /** Bits per component of the decoded buffer: 1 for Grayscale, 8 for RGB/RGBA. */
   bitsPerComponent: number;
   dataBase64: string;
 }

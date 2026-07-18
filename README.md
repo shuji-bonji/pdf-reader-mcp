@@ -60,7 +60,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 ### npx (recommended)
 
 ```bash
-npx @shuji-bonji/pdf-reader-mcp
+npx @shuji-bonji/pdf-reader-mcp@latest
 ```
 
 ### Claude Desktop
@@ -72,16 +72,22 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "pdf-reader-mcp": {
       "command": "npx",
-      "args": ["-y", "@shuji-bonji/pdf-reader-mcp"]
+      "args": ["-y", "@shuji-bonji/pdf-reader-mcp@latest"]
     }
   }
 }
 ```
 
+> **Use `@latest`.** The `-y` flag in `npx -y <pkg>` only skips the install
+> prompt — it does **not** check for updates. Without `@latest`, npx keeps
+> running whichever version it cached the first time, so new releases never
+> reach you. If you suspect you are on a stale version, run
+> `rm -rf ~/.npm/_npx` and restart your client.
+
 ### Claude Code
 
 ```bash
-claude mcp add pdf-reader-mcp -- npx -y @shuji-bonji/pdf-reader-mcp
+claude mcp add pdf-reader-mcp -- npx -y @shuji-bonji/pdf-reader-mcp@latest
 ```
 
 ### From Source

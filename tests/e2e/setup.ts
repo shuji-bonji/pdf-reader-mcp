@@ -21,6 +21,18 @@ export const FIXTURES = {
   comprehensive: resolve(FIXTURES_DIR, 'comprehensive_1.pdf'),
   tagged: resolve(FIXTURES_DIR, 'tagged.pdf'),
   multiFont: resolve(FIXTURES_DIR, 'multi-font.pdf'),
+  /**
+   * Type0 (composite / CID) fonts — embedded, non-embedded, and malformed.
+   * High-1 regression: the FontDescriptor of a Type0 font lives on the CIDFont
+   * in DescendantFonts, not on the Type0 dictionary itself.
+   */
+  cidFont: resolve(FIXTURES_DIR, 'cid-font.pdf'),
+  /**
+   * One image per pdfjs ImageKind (RGB / RGBA / 1bpp grayscale).
+   * High-2 regression (kind mapping) and D-9 regression (read_images extracted
+   * nothing at all, so the mapping was never reached).
+   */
+  imageKinds: resolve(FIXTURES_DIR, 'image-kinds.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */
@@ -93,6 +105,24 @@ export const ALL_FIXTURES: FixtureExpectation[] = [
     path: FIXTURES.multiFont,
     name: 'multi-font.pdf',
     pageCount: 2,
+    hasText: true,
+    hasTitle: true,
+    hasAnnotations: false,
+    hasSignatureFields: false,
+  },
+  {
+    path: FIXTURES.cidFont,
+    name: 'cid-font.pdf',
+    pageCount: 1,
+    hasText: true,
+    hasTitle: true,
+    hasAnnotations: false,
+    hasSignatureFields: false,
+  },
+  {
+    path: FIXTURES.imageKinds,
+    name: 'image-kinds.pdf',
+    pageCount: 1,
     hasText: true,
     hasTitle: true,
     hasAnnotations: false,
