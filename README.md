@@ -30,8 +30,8 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | ---------------- | -------------------------------------------------------- |
 | `get_page_count` | Lightweight page count retrieval                         |
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
-| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Emits **raw glyphs** — for tagged PDFs prefer `extract_structured_text`, which returns logical content order and resolves `/ActualText` |
-| `search_text`    | Full-text search with surrounding context. Glyph-level: text carried in `/ActualText` replacements will not match (a `note` says so when a tagged document yields zero matches) |
+| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). For **logical** order in tagged PDFs, prefer `extract_structured_text` |
+| `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Image extraction as base64 with metadata                 |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
 | `summarize`      | Quick overview report (metadata + text + image count)    |
@@ -207,7 +207,8 @@ extract_tables({ file_path: "/path/to/kaisei-tsutatsu.pdf", pages: "1" })
 A table that continues across a page break is reported as ONE table —
 `pages` is an array (e.g. `## Table 3 — Pages 5–7`), and a table touching
 the requested `pages` range is returned whole. Cell text honours
-`/ActualText` replacements. Untagged PDFs return an empty result with a
+`/ActualText` replacements (as do `read_text` and `search_text` since #18).
+Untagged PDFs return an empty result with a
 `note` recommending the column-aware fallback below.
 
 ### Read Untagged Multi-Column PDF

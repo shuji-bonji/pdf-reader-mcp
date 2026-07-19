@@ -213,7 +213,7 @@ describe('02 - read_text', () => {
 describe('02 - search_text', () => {
   // ST-1: "Hello" 検索
   it('ST-1: "Hello" matches on page 1', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
     expect(matches.length).toBeGreaterThanOrEqual(1);
     expect(matches[0].page).toBe(1);
     expect(matches[0].text).toBe(SEARCH_QUERIES.hello);
@@ -221,7 +221,7 @@ describe('02 - search_text', () => {
 
   // ST-2: "PDF" 検索 (複数マッチ)
   it('ST-2: "PDF" returns multiple matches', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.pdf);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.pdf);
     expect(matches.length).toBeGreaterThan(1);
     const pages = new Set(matches.map((m) => m.page));
     expect(pages.size).toBeGreaterThanOrEqual(1);
@@ -229,19 +229,19 @@ describe('02 - search_text', () => {
 
   // ST-3: 大文字小文字無視
   it('ST-3: case-insensitive search for "hello"', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.helloLower);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.helloLower);
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
   // ST-4: 存在しないクエリ
   it('ST-4: non-existent query returns empty', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.nonExistent);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.nonExistent);
     expect(matches).toHaveLength(0);
   });
 
   // ST-5: ページ指定検索
   it('ST-5: page filter "2" only returns page 2 matches', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.pdf, 80, '2');
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.pdf, 80, '2');
     for (const m of matches) {
       expect(m.page).toBe(2);
     }
@@ -250,7 +250,7 @@ describe('02 - search_text', () => {
   // ST-6: コンテキスト文字数指定
   it('ST-6: context_chars=10 limits context length', async () => {
     const contextChars = 10;
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello, contextChars);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello, contextChars);
     expect(matches.length).toBeGreaterThanOrEqual(1);
     expect(matches[0].contextBefore.length).toBeLessThanOrEqual(contextChars);
     expect(matches[0].contextAfter.length).toBeLessThanOrEqual(contextChars);
@@ -258,13 +258,13 @@ describe('02 - search_text', () => {
 
   // ST-7: empty.pdf で検索
   it('ST-7: empty.pdf search returns no results', async () => {
-    const matches = await searchText(FIXTURES.empty, SEARCH_QUERIES.test);
+    const { matches } = await searchText(FIXTURES.empty, SEARCH_QUERIES.test);
     expect(matches).toHaveLength(0);
   });
 
   // ST-extra: マッチのプロパティ完全性
   it('ST-extra: match object has all required properties', async () => {
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
     expect(matches.length).toBeGreaterThanOrEqual(1);
     const m = matches[0];
     expect(typeof m.page).toBe('number');
@@ -274,22 +274,88 @@ describe('02 - search_text', () => {
     expect(typeof m.contextAfter).toBe('string');
   });
 
-  // ── #15: ActualText is invisible to the glyph-level search ──
+  // ── #18: the search sees what the reader sees ──
   // structured.pdf carries a P whose glyphs read "Dif`cult" and whose
-  // /ActualText reads "Difficult" (§14.9.4). search_text works on glyphs, so
-  // it finds the former and not the latter — that asymmetry is exactly what
-  // the tool-level note (gated by isTaggedPdf) explains to the caller.
-  it('ST-8: the glyph form matches, the ActualText replacement does not', async () => {
-    const glyphMatches = await searchText(FIXTURES.structured, 'Dif`cult');
-    expect(glyphMatches.length).toBeGreaterThan(0);
+  // /ActualText reads "Difficult" (§14.9.4). #15 left the two tools disagreeing
+  // about whether the word is in the document; #18 makes search_text search the
+  // replacement, so the glyph form is what is now absent.
+  it('ST-8: the ActualText replacement matches, the glyph form does not', async () => {
+    const { matches: replacementMatches } = await searchText(FIXTURES.structured, 'Difficult');
+    expect(replacementMatches).toHaveLength(1);
+    expect(replacementMatches[0].page).toBe(1);
 
-    const replacementMatches = await searchText(FIXTURES.structured, 'Difficult');
-    expect(replacementMatches).toHaveLength(0);
+    const { matches: glyphMatches } = await searchText(FIXTURES.structured, 'Dif`cult');
+    expect(glyphMatches).toHaveLength(0);
   });
 
-  // ST-9: isTaggedPdf — the gate for the #15 note — tells tagged from untagged.
+  // ST-9: isTaggedPdf still distinguishes tagged from untagged. It no longer
+  // gates the search note (#18 keys that off unresolved pages instead), but
+  // get_metadata reports the same flag.
   it('ST-9: isTaggedPdf is true for structured.pdf, false for simple.pdf', async () => {
     expect(await isTaggedPdf(FIXTURES.structured)).toBe(true);
     expect(await isTaggedPdf(FIXTURES.simple)).toBe(false);
+  });
+
+  // ST-10: read_text must agree with search_text and with extract_structured_text.
+  // "同一サーバ内で本文の答えが割れる" was the whole of #18.
+  it('ST-10: read_text resolves structure-element /ActualText', async () => {
+    const pages = await extractText(FIXTURES.structured, '1');
+    expect(pages[0].text).toContain('Difficult');
+    expect(pages[0].text).not.toContain('Dif`cult');
+  });
+
+  // ── #18 path 2: /ActualText on a marked-content sequence, untagged ──
+  // actual-text-span.pdf is the §14.9.4 EXAMPLE verbatim: hyphenation changes
+  // the spelling of the German "Drucker", and a `Span` property list carries the
+  // character that restores it. The document has NO structure tree, so this is
+  // reachable only by reading the content stream.
+  it('ST-11: read_text resolves Span-level /ActualText in an untagged document', async () => {
+    const pages = await extractText(FIXTURES.actualTextSpan, '1');
+    // Unresolved, the three items read "Dru", "k-", "ker".
+    expect(pages[0].text).toBe('Drucker');
+  });
+
+  it('ST-12: search_text finds the Span-level replacement', async () => {
+    const { matches, unresolvedPages } = await searchText(FIXTURES.actualTextSpan, 'Drucker');
+    expect(matches.length).toBeGreaterThan(0);
+    expect(unresolvedPages).toHaveLength(0);
+  });
+
+  // ST-13: R-14.9.4-3 — "If each of two (or more) consecutive structure or
+  // marked-content sequences has an ActualText entry, they shall be treated as
+  // if no word break is present between them." Page 2 of the fixture splits
+  // "Bäckerei" across two lines, each half in its own Span with /ActualText.
+  // A line break is a word break, so the requirement outranks the Y grouping.
+  it('ST-13: consecutive /ActualText sequences get no word break between them', async () => {
+    const pages = await extractText(FIXTURES.actualTextSpan, '2');
+    // The two halves are on different lines; neither a space nor a newline may
+    // survive between them.
+    expect(pages[0].text).toBe('Bäckerei');
+  });
+
+  // ── #18: an encrypted document's /ActualText is ciphertext, not text ──
+  // §7.6.2 encrypts strings and streams; pdf-lib is loaded with
+  // `ignoreEncryption`, which ignores encryption rather than undoing it. So the
+  // /ActualText it hands back is RC4 output. Resolving it would substitute
+  // garbage for the body of every permissions-encrypted PDF — measured on
+  // PDF32000_2008.pdf, 18026 such entries, and page 1's title came out as
+  // "Document management&)ð — 6±o Portable document format".
+  it('ST-14: an encrypted document falls back to glyphs instead of ciphertext', async () => {
+    const pages = await extractText(FIXTURES.encryptedActualText);
+    // The glyphs, decrypted by pdfjs. Not "Difficult", and not RC4 output.
+    expect(pages[0].text).toContain('Dif');
+    expect(pages[0].text).not.toContain('Difficult');
+  });
+
+  // The reason matters as much as the fact: "encrypted" means no tool on this
+  // server will do better, whereas "unaligned" is worth retrying elsewhere.
+  it('ST-15: search_text reports the encrypted page, and says why', async () => {
+    const { matches, unresolvedPages, unresolvedReason } = await searchText(
+      FIXTURES.encryptedActualText,
+      'Difficult',
+    );
+    expect(matches).toHaveLength(0);
+    expect(unresolvedPages).toEqual([1]);
+    expect(unresolvedReason).toBe('encrypted');
   });
 });

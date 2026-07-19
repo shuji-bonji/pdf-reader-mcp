@@ -18,7 +18,9 @@ export function registerReadText(server: McpServer): void {
 
 Text is extracted page by page, sorted by vertical position (top to bottom) then horizontal position (left to right), providing natural reading order.
 
-For **tagged** PDFs, prefer \`extract_structured_text\`: it returns text in logical content order (ISO 32000-2 §14.8.2.5) and resolves \`/ActualText\` replacements (§14.9.4), neither of which this tool does — read_text emits **raw glyphs** in coordinate order, so a word carried as ActualText (ligature substitutes, hyphenation fixes) appears here in its glyph form. Tables in tagged PDFs are best read with \`extract_tables\`.
+\`/ActualText\` replacements (ISO 32000-2 §14.9.4) are resolved, on both of the paths that clause defines: the \`/ActualText\` of a structure element, and the one in a \`Span\` marked-content property list — the latter occurs in untagged documents too. So a word carried as ActualText (ligature substitutes, hyphenation fixes) reads here the way a person viewing the page sees it, not in its glyph form.
+
+For **tagged** PDFs, \`extract_structured_text\` is still the better tool when order matters: it returns text in logical content order (ISO 32000-2 §14.8.2.5), which this tool does not — read_text sorts by coordinate. Tables in tagged PDFs are best read with \`extract_tables\`.
 
 For **untagged** multi-column PDFs (e.g. older 新旧対照表 PDFs that lack a structure tree), pass \`split_columns: 2\` or \`3\` to bucket items by X-coordinate left-to-right.
 

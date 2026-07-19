@@ -296,7 +296,7 @@ describe('extractText', () => {
 
 describe('searchText', () => {
   it('should find case-insensitive matches', async () => {
-    const matches = await searchText(SIMPLE_PDF, 'pdf');
+    const { matches } = await searchText(SIMPLE_PDF, 'pdf');
     expect(matches.length).toBeGreaterThan(0);
     // "PDF" appears in "Hello PDF World" and other places
     const page1Matches = matches.filter((m) => m.page === 1);
@@ -304,18 +304,18 @@ describe('searchText', () => {
   });
 
   it('should return no matches for non-existent text', async () => {
-    const matches = await searchText(SIMPLE_PDF, 'xyznonexistent');
+    const { matches } = await searchText(SIMPLE_PDF, 'xyznonexistent');
     expect(matches).toHaveLength(0);
   });
 
   it('should search within specific pages', async () => {
-    const matches = await searchText(SIMPLE_PDF, 'Page Two', 80, '2');
+    const { matches } = await searchText(SIMPLE_PDF, 'Page Two', 80, '2');
     expect(matches.length).toBeGreaterThan(0);
     expect(matches.every((m) => m.page === 2)).toBe(true);
   });
 
   it('should include context around matches', async () => {
-    const matches = await searchText(SIMPLE_PDF, 'digital signatures', 40);
+    const { matches } = await searchText(SIMPLE_PDF, 'digital signatures', 40);
     expect(matches.length).toBeGreaterThan(0);
     // Context should be present (non-empty around the match)
     const match = matches[0];

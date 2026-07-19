@@ -4,6 +4,7 @@
  * Centralizes all pdfjs-dist interactions for reuse across tools.
  */
 
+import type { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import {
   getDocument,
   ImageKind,
@@ -11,7 +12,6 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import type { TextItem } from 'pdfjs-dist/types/src/display/api.js';
 import { DEFAULT_SEARCH_CONTEXT } from '../constants.js';
 import type {
   AnnotationInfo,
@@ -25,7 +25,13 @@ import type {
   TagsAnalysis,
 } from '../types.js';
 import { getFileSize, readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
-import { detectEncryption } from './pdflib-service.js';
+import {
+  buildSpanActualTextMap,
+  buildStructActualTextMap,
+  foldActualText,
+  type PositionedText,
+} from './actual-text-service.js';
+import { detectEncryption, loadWithPdfLib } from './pdflib-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
@@ -126,6 +132,64 @@ export interface ExtractTextOptions {
 }
 
 /**
+ * Everything `/ActualText` resolution needs that pdfjs cannot supply (#18):
+ * a pdf-lib view of the same file, for the structure tree and the content
+ * streams. Absent when the file could not be opened with pdf-lib, in which case
+ * extraction falls back to raw glyphs.
+ */
+interface ActualTextResolution {
+  libDoc: PdfLibDocument;
+  structActualText: ReadonlyMap<string, string>;
+  /**
+   * The document is encrypted, so neither path can run: §7.6.2 encrypts strings
+   * and streams, and pdf-lib is loaded with `ignoreEncryption`. Recorded so the
+   * caller can say *why* nothing was resolved — "the content stream did not
+   * line up" would be a wrong and unactionable explanation here.
+   */
+  encrypted: boolean;
+}
+
+/** One page's extracted text, plus whether `Span`-level replacement was resolved. */
+interface PageTextResult {
+  text: string;
+  markedContentResolved: boolean;
+}
+
+/** A `getTextContent({ includeMarkedContent: true })` item, as pdfjs types it loosely. */
+interface RawTextContentItem {
+  type?: string;
+  id?: string | null;
+  tag?: string;
+  str?: string;
+  width?: number;
+  height?: number;
+  transform?: number[];
+  hasEOL?: boolean;
+}
+
+/**
+ * Open the same file with pdf-lib so `/ActualText` can be resolved.
+ *
+ * Returns `undefined` rather than throwing: a file pdf-lib cannot parse is
+ * still readable by pdfjs, and the pre-#18 behaviour (raw glyphs) is a valid
+ * fallback. Callers report the degradation instead of failing.
+ */
+async function loadActualTextResolution(
+  filePath: string,
+): Promise<ActualTextResolution | undefined> {
+  try {
+    const libDoc = await loadWithPdfLib(filePath);
+    return {
+      libDoc,
+      structActualText: buildStructActualTextMap(libDoc),
+      encrypted: libDoc.isEncrypted,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Extract text from a pre-loaded PDFDocumentProxy.
  * Does NOT destroy the document — caller is responsible for lifecycle.
  */
@@ -133,6 +197,7 @@ export async function extractTextFromDoc(
   doc: PDFDocumentProxy,
   pages?: string,
   options: ExtractTextOptions = {},
+  resolution?: ActualTextResolution,
 ): Promise<PageText[]> {
   const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
@@ -140,7 +205,7 @@ export async function extractTextFromDoc(
   const results = await Promise.all(
     pageNumbers.map(async (pageNum) => {
       const page = await doc.getPage(pageNum);
-      const text = await extractPageText(page, options);
+      const { text } = await extractPageText(page, options, resolution);
       return { page: pageNum, text };
     }),
   );
@@ -150,31 +215,62 @@ export async function extractTextFromDoc(
 
 /**
  * Extract text from specified pages (1-based).
+ *
+ * Resolves `/ActualText` (ISO 32000-2 §14.9.4) on both of the paths the clause
+ * defines — see `actual-text-service`. The pdf-lib load that makes this possible
+ * is best-effort: a file it cannot parse still extracts, as raw glyphs.
  */
 export async function extractText(
   filePath: string,
   pages?: string,
   options: ExtractTextOptions = {},
 ): Promise<PageText[]> {
-  const doc = await loadDocument(filePath);
+  const [doc, resolution] = await Promise.all([
+    loadDocument(filePath),
+    loadActualTextResolution(filePath),
+  ]);
 
   try {
-    return await extractTextFromDoc(doc, pages, options);
+    return await extractTextFromDoc(doc, pages, options, resolution);
   } finally {
     await doc.destroy();
   }
 }
 
+/** What `search_text` gets back: the matches, and how complete the text was. */
+export interface SearchTextResult {
+  matches: SearchMatch[];
+  /**
+   * Pages where `/ActualText` could not be resolved (§14.9.4). A miss on one of
+   * these pages may still be a replacement the search could not see — which is
+   * what #15 warned about, now narrowed to the cases where it is actually true.
+   */
+  unresolvedPages: number[];
+  /**
+   * Why `unresolvedPages` is non-empty. `encrypted` means the whole document is
+   * out of reach and no other tool of this server will do better; `unaligned`
+   * means the content stream of those particular pages could not be matched up
+   * with the extracted text.
+   */
+  unresolvedReason?: 'encrypted' | 'unaligned';
+}
+
 /**
  * Search for text across all pages.
+ *
+ * Searches the same text `read_text` returns, `/ActualText` included (#18), so
+ * the two tools can no longer disagree about whether a word is in the document.
  */
 export async function searchText(
   filePath: string,
   query: string,
   contextChars: number = DEFAULT_SEARCH_CONTEXT,
   pages?: string,
-): Promise<SearchMatch[]> {
-  const doc = await loadDocument(filePath);
+): Promise<SearchTextResult> {
+  const [doc, resolution] = await Promise.all([
+    loadDocument(filePath),
+    loadActualTextResolution(filePath),
+  ]);
   const lowerQuery = query.toLowerCase();
 
   try {
@@ -184,10 +280,24 @@ export async function searchText(
     const pageTexts = await Promise.all(
       pageNumbers.map(async (pageNum) => {
         const page = await doc.getPage(pageNum);
-        const fullText = await extractPageText(page);
-        return { pageNum, fullText };
+        const { text: fullText, markedContentResolved } = await extractPageText(
+          page,
+          {},
+          resolution,
+        );
+        return { pageNum, fullText, markedContentResolved };
       }),
     );
+
+    const unresolvedPages = pageTexts.filter((p) => !p.markedContentResolved).map((p) => p.pageNum);
+    // Encryption disables both paths for the whole document, so it outranks the
+    // per-page alignment explanation whenever it applies.
+    const unresolvedReason =
+      unresolvedPages.length === 0
+        ? undefined
+        : resolution?.encrypted
+          ? ('encrypted' as const)
+          : ('unaligned' as const);
 
     // 抽出済みテキストからマッチを検索（CPU処理のみ、同期で十分）
     const matches: SearchMatch[] = [];
@@ -223,7 +333,7 @@ export async function searchText(
       }
     }
 
-    return matches;
+    return { matches, unresolvedPages, unresolvedReason };
   } finally {
     await doc.destroy();
   }
@@ -430,13 +540,35 @@ export async function extractImages(
 async function extractPageText(
   page: PDFPageProxy,
   options: ExtractTextOptions = {},
-): Promise<string> {
-  const content = await page.getTextContent();
-  const items = content.items.filter(
-    (item): item is TextItem => 'str' in item && item.str !== undefined,
+  resolution?: ActualTextResolution,
+): Promise<PageTextResult> {
+  // `includeMarkedContent` is what makes /ActualText resolution possible (#18):
+  // the markers say where each marked-content sequence starts and ends, which is
+  // what both replacement paths key off. The text items themselves are
+  // unaffected by the flag.
+  const content = await page.getTextContent({ includeMarkedContent: true });
+  const rawItems = content.items as RawTextContentItem[];
+
+  const beginCount = rawItems.filter(
+    (item) => item.type === 'beginMarkedContent' || item.type === 'beginMarkedContentProps',
+  ).length;
+
+  let spanActualText: Map<number, string> | undefined;
+  let markedContentResolved = true;
+  if (resolution?.libDoc) {
+    spanActualText = buildSpanActualTextMap(resolution.libDoc, page.pageNumber - 1, beginCount);
+    markedContentResolved = spanActualText !== undefined;
+  } else {
+    markedContentResolved = beginCount === 0;
+  }
+
+  const items = foldActualText(
+    rawItems,
+    resolution?.structActualText ?? EMPTY_ACTUAL_TEXT,
+    spanActualText,
   );
 
-  if (items.length === 0) return '';
+  if (items.length === 0) return { text: '', markedContentResolved };
 
   const splitColumns = options.splitColumns ?? 1;
 
@@ -447,7 +579,7 @@ async function extractPageText(
     const pageWidth = view[2] - view[0];
     const colWidth = pageWidth / splitColumns;
 
-    const buckets: TextItem[][] = Array.from({ length: splitColumns }, () => []);
+    const buckets: PositionedText[][] = Array.from({ length: splitColumns }, () => []);
     for (const item of items) {
       const x = item.transform[4] - view[0];
       const colIdx = Math.min(Math.max(0, Math.floor(x / colWidth)), splitColumns - 1);
@@ -455,11 +587,17 @@ async function extractPageText(
     }
 
     const columnTexts = buckets.map((bucket) => itemsToText(bucket, options));
-    return columnTexts.filter((s) => s.length > 0).join('\n\n');
+    return {
+      text: columnTexts.filter((s) => s.length > 0).join('\n\n'),
+      markedContentResolved,
+    };
   }
 
-  return itemsToText(items, options);
+  return { text: itemsToText(items, options), markedContentResolved };
 }
+
+/** No structure-element replacements — shared so the empty case allocates nothing. */
+const EMPTY_ACTUAL_TEXT: ReadonlyMap<string, string> = new Map();
 
 /**
  * Reorder a flat list of TextItems by Y descending, then X ascending,
@@ -469,7 +607,7 @@ async function extractPageText(
  * If `options.compactWhitespace` is true, the assembled text passes through
  * `compactRuns` as a final step.
  */
-function itemsToText(items: TextItem[], options: ExtractTextOptions = {}): string {
+function itemsToText(items: PositionedText[], options: ExtractTextOptions = {}): string {
   if (items.length === 0) return '';
 
   // Sort by Y descending (top to bottom), then X ascending (left to right)
@@ -482,28 +620,80 @@ function itemsToText(items: TextItem[], options: ExtractTextOptions = {}): strin
   });
 
   // Group into lines based on Y-coordinate proximity
-  const lines: string[] = [];
-  let currentLine: string[] = [];
+  const lines: PositionedText[][] = [];
+  let currentLine: PositionedText[] = [];
   let lastY = sorted[0].transform[5];
 
   for (const item of sorted) {
     const y = item.transform[5];
-    if (Math.abs(y - lastY) > 2) {
-      if (currentLine.length > 0) {
-        lines.push(currentLine.join(' '));
-        currentLine = [];
-      }
+    // ISO 32000-2 §14.9.4: consecutive sequences that each carry /ActualText
+    // "shall be treated as if no word break is present between them" — and a
+    // line break is a word break. This is the hyphenation case the clause's
+    // EXAMPLE is about, where the two halves are on different lines by
+    // construction, so the Y grouping has to yield to the requirement.
+    const weldToPrevious =
+      item.replacement?.adjacentToPrevious === true &&
+      currentLine.at(-1)?.replacement !== undefined;
+
+    if (!weldToPrevious && Math.abs(y - lastY) > 2 && currentLine.length > 0) {
+      lines.push(currentLine);
+      currentLine = [];
     }
-    currentLine.push(item.str);
-    lastY = y;
+    currentLine.push(item);
+    if (!weldToPrevious) lastY = y;
   }
 
-  if (currentLine.length > 0) {
-    lines.push(currentLine.join(' '));
-  }
+  if (currentLine.length > 0) lines.push(currentLine);
 
-  const text = lines.join('\n');
+  const text = lines.map(joinLine).join('\n');
   return options.compactWhitespace ? compactRuns(text) : text;
+}
+
+/** Join one line's items, deciding each boundary with `separatorBefore`. */
+function joinLine(line: PositionedText[]): string {
+  let out = '';
+  for (let i = 0; i < line.length; i++) {
+    if (i > 0) out += separatorBefore(line[i - 1], line[i]);
+    out += line[i].str;
+  }
+  return out;
+}
+
+/**
+ * Decide what goes between two items of the same line.
+ *
+ * The default is a space, which is what this extractor has always done: pdfjs
+ * splits a line into items at every state change, and for ordinary prose those
+ * boundaries usually are word boundaries.
+ *
+ * `/ActualText` is the exception, and §14.9.4 says why: the value "is a
+ * **character** substitution for the content enclosed", not a word or phrase
+ * substitution (NOTE 2 draws exactly this contrast with `Alt`). A `BDC` … `EMC`
+ * pair forces pdfjs to flush the current item, so a replacement is *always*
+ * split from its neighbours even mid-word — the clause's own EXAMPLE, `(Dru) Tj
+ * /Span <</ActualText (c)>> BDC (k-) Tj EMC (ker) Tj`, is three items that must
+ * read `Drucker`. A space there would be one this extractor invented.
+ *
+ * So a boundary involving a replacement drops the space when the two items are
+ * geometrically flush, and two consecutive replacements drop it unconditionally
+ * (that is the "no word break" requirement, which does not depend on geometry).
+ */
+function separatorBefore(previous: PositionedText, current: PositionedText): string {
+  if (current.replacement?.adjacentToPrevious && previous.replacement) return '';
+  if ((previous.replacement || current.replacement) && isFlush(previous, current)) return '';
+  return ' ';
+}
+
+/**
+ * Whether `current` starts where `previous` ends, within a quarter of the line
+ * height. The tolerance absorbs kerning and the rounding in the item widths
+ * pdfjs reports; a real inter-word space is far wider.
+ */
+function isFlush(previous: PositionedText, current: PositionedText): boolean {
+  const end = previous.transform[4] + previous.width;
+  const start = current.transform[4];
+  const tolerance = 0.25 * Math.max(previous.height, current.height, 1);
+  return start >= previous.transform[4] && start - end <= tolerance;
 }
 
 /**
@@ -526,9 +716,11 @@ function compactRuns(text: string): string {
 /**
  * Whether the document claims to be tagged (`/MarkInfo /Marked true`).
  *
- * Used by search_text to explain empty results on tagged documents (#15):
- * the search runs over raw glyphs, so text carried in `/ActualText`
- * replacements (§14.9.4) is invisible to it.
+ * Was used by search_text to explain empty results on tagged documents (#15).
+ * Since #18 resolves `/ActualText` on both of its paths, an empty result no
+ * longer implies replacement text was missed, and the warning is keyed off the
+ * pages where resolution was actually skipped instead. Kept as a public probe:
+ * `get_metadata` reports the same flag, and the tests assert it.
  */
 export async function isTaggedPdf(filePath: string): Promise<boolean> {
   const doc = await loadDocument(filePath);

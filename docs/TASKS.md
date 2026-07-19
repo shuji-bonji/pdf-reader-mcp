@@ -3,20 +3,44 @@
 | 項目 | 内容 |
 |------|------|
 | 作成日 | 2026-07-16 |
-| 最終更新 | 2026-07-18（セッション 1 完了: D-1 / D-2 / B-1） |
-| 現状 | v0.6.3・16 ツール（3 tier）・npm 公開済み ／ **セッション 1 の修正は未リリース** |
+| 最終更新 | 2026-07-20（#18 = R-5 の本解決を反映） |
+| 現状 | **v0.9.0**・**17 ツール**（3 tier）・npm 公開済み・**npx で公開版検証済み**。加えて **#18 が `[Unreleased]` に載っている**（未リリース） |
 | 基準 | `mcps/pdf-family-role-architecture.md`（責務分担提案）／ `Document-Note/mcps/PDFfamily/` |
 | 備考 | pdf-verify-mcp v0.6.0 / pdf-writer-mcp v0.4.0 の作業で判明した課題を含む |
-| **次の最優先** | **D-5（M-8 = `extract_structured_text`）= セッション 2**。まず `specs/08` のレビューから |
+| **次の最優先** | **#18（R-5 の本解決）のリリース**。実装・テストは済んでいて `[Unreleased]` にある。以降は family の進行順に従う（reader 単体で残るのは次メジャーでの `validate_*` 削除だけ） |
 
-## 次にやること（2026-07-18・family の進行順より）
+## 現在地（2026-07-19）
 
-writer は v0.13.0 で一区切りついた。**family の次は reader**。
-理由: reader は学習データ工場（`specs/00` §0）で「**読み戻し**」と「**ラベル付け**」を担う。
-**誤答する reader はラベルを汚染する** — writer 側に残るのは申告済みの損失 + 回避策ありなので、
-こちらが先。
+**リリース済み**:
 
-### セッション 1（バグ修正・境界が明確・すぐ出せる）✅ 完了（2026-07-18・未リリース）
+| 版 | 内容 |
+|----|------|
+| v0.7.0 | 仕様適合の D 系一括修正（High 3 / Medium 2 / Low 1）+ `validate_*` 非推奨予告 + biome/README |
+| v0.8.0 | **M-8 `extract_structured_text`** 新設 + C-1（`inspect_tags` の疑似 Root ノード解消・破壊的変更） |
+| v0.9.0 | spec ⇄ reader 相互チェックで挙がった **Issue #14〜#17** の一括対応（#14 `extract_tables` の walker 載せ替え = 破壊的変更／#15 ActualText の明示 + note／#16 セル `\|` エスケープ／#17 ページ列の範囲圧縮） |
+
+いずれも npx でクリーン取得した公開版を実機で叩いて確認済み（handshake 0.9.0・17 ツール）。
+
+**未リリース（`[Unreleased]`）**:
+
+- ✅ **R-5 の本解決** — #18 で決着。#15 は「`read_text` / `search_text` は生グリフである」
+  ことを明示して閉じたが、**同一サーバ内で答えが割れる状態自体は残っていた**。#18 で §14.9.4 の
+  2 経路（構造要素 / `Span` マーク付きコンテンツ）をどちらも解決した。経路 2 は pdfjs が property
+  list を捨てるため**コンテンツストリームを自前で走査**し、`BMC`/`BDC`/`EMC` の**出現順インデックス**で
+  pdfjs のマーカーと突き合わせる（数が合わないページは経路 2 を諦めて生グリフに戻す）。
+  R-14.9.4-3（連続 ActualText 間に語区切りを入れない）も実装済み。
+
+**残っているもの**:
+
+- 次メジャーでの `validate_tagged` / `validate_metadata` 削除（B-1 のステップ 3）
+
+> **family の進行順**: 2026-07-19 時点で spec / reader / verify / writer の再監査は一巡した。
+> reader は「学習データ工場のラベル源」（`specs/00` §0）なので、**誤答が見つかったときは
+> 他 MCP より優先する**という原則は維持する。現在地の正典は `specs/00-overview.md` 末尾の付記。
+
+## 次にやること（2026-07-18 時点の記録・以下は全て消化済み）
+
+### セッション 1（バグ修正・境界が明確・すぐ出せる）✅ 完了（2026-07-18・v0.7.0 で公開）
 
 **D-1（High-1）→ D-2（High-2）→ B-1（M-2）**、＋実機試用で発見した **D-9（High-3）**、
 ＋ shuji さんの指示で **D-3（Medium-1）**。実測で白黒がついた。
@@ -39,7 +63,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
   → `npm run check` はホストで未実行**。リリース前に必ず通すこと（D-9 の修正後は特に
   `test:fixtures` の再実行が必須 — `image-kinds.pdf` が無いと IM-3/5/6/7 が落ちる）
 
-### セッション 2（新ツール・「決める」作業）
+### セッション 2（新ツール・「決める」作業）✅ 完了（v0.8.0 で公開）
 
 **D-5（M-8 = `extract_structured_text`）**。**セッション 1 と混ぜないこと** —
 仕様が Draft v0.1 で設計判断が要り、混ぜると両方が雑になる。
@@ -53,7 +77,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
 > 書いてある**ので、着手時は必ず先に読むこと。ここは索引に過ぎない。
 
 - [x] **D-1. 🔴 High-1: `inspect_fonts` が Type0 の埋め込みを常に false と誤判定**【実証済み】
-      → **修正済み（2026-07-18・未リリース）**。`Subtype == Type0` なら `DescendantFonts[0]` を解決し
+      → **修正済み（2026-07-18・v0.7.0 で公開）**。`Subtype == Type0` なら `DescendantFonts[0]` を解決し
       CIDFont の `FontDescriptor` を見る。回帰テスト IF-5〜IF-8（`cid-font.pdf`）。
       条文の再確認: FontDescriptor がある CIDFont 辞書は **Table 115**（レポートの「Table 116」は誤記）。
       「`DescendantFonts[0]` でよい」根拠は §9.7.6.2「In PDF, the font number shall be 0」＋
@@ -68,14 +92,14 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
       `FontDescriptor` を見る。
       **回帰テストの作り方**: writer で NotoSansJP を埋め込んだ PDF を生成 → `isEmbedded: true` を要求
 - [x] **D-2. 🔴 High-2: `read_images` の pdfjs ImageKind 誤マッピング**
-      → **修正済み（2026-07-18・未リリース）**。`describeImageKind()` に切り出し、
+      → **修正済み（2026-07-18・v0.7.0 で公開）**。`describeImageKind()` に切り出し、
       **`ImageKind` を pdfjs から import**（マジックナンバー直書きが事故の原因だったため）。
       1bpp では `bitsPerComponent: 1` を返す。未知の kind は `'Unknown'`。
       単体テスト 5 件（pdfjs 側の定数が将来ずれたら気付けるガードを含む）＋
       新フィクスチャ `image-kinds.pdf` で 3 種を実データ検証（IM-6 / IM-7）。
       **注: D-9 を直すまでこの経路には到達しなかった**（下記）
 - [x] **D-9. 🔴 High-3（新規・実機試用で発見）: `read_images` が画像を 1 枚も抽出できない**
-      → **修正済み（2026-07-18・未リリース）**。`src/services/pdfjs-service.ts` `extractImages`。
+      → **修正済み（2026-07-18・v0.7.0 で公開）**。`src/services/pdfjs-service.ts` `extractImages`。
       **原因は 2 つ重なっていた**:
       ① 画像は worker から**非同期に**届くため、同期形式の `page.objs.get(name)` が
       `Requesting object that isn't resolved yet` を投げ、`catch {}` が飲み込んで全件 skipped に
@@ -93,7 +117,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
       囲まれており、**0 件なので本体ごとスキップされ空振りで緑**だった。これが High-2 も同時に
       隠していた。**「テストが緑」は「テストが走った」を意味しない**
 - [x] **D-3. Medium: `isValidPdfDate` の `[+-Z]` が範囲指定バグ / `HH'`（分なし）を拒否**【実証済み】
-      → **修正済み（2026-07-18・未リリース。shuji さんの指示で「直す」を選択）**。
+      → **修正済み（2026-07-18・v0.7.0 で公開。shuji さんの指示で「直す」を選択）**。
       **誤受理 10 件・誤拒否 2 件**を是正。単体テスト 34 件（`tests/tier1/validation-service.test.ts`）。
       正規表現を条文のフィールド定義から組み立て直し、各行に根拠を併記した。
       **値域検査も追加** — 旧実装は全フィールド `\d{2}` で **月13・日00・時24・分60・秒60 を
@@ -104,7 +128,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
       **SS の省略のみ例外として受理**（規格自身の EXAMPLE を warning にするのは不合理）。
       なお `isValidPdfDate` を export した（private だと 1 形式 1 フィクスチャが必要になるため）
 - [x] **D-4. Medium: `inspect_annotations` が Popup を markup 扱い / FileAttachment・Sound・Projection 漏れ**
-      → **修正済み（2026-07-18・未リリース）**。**根拠は Table 172 ではなく Table 171 の "Markup" 列**
+      → **修正済み（2026-07-18・v0.7.0 で公開）**。**根拠は Table 172 ではなく Table 171 の "Markup" 列**
       （レビューは §12.5.6.2 の散文と Table 172 を根拠にしていたが、**Table 171 に型ごとの
       Markup 列が規定として存在する** — 散文から推測する必要はなかった）。全 28 型をそのまま転記。
       `Redact` も "Yes"（レビューの「＋redaction」は正しかった）。単体テスト 33 件で全型を固定
@@ -128,7 +152,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
         独立して着手できる未実装の中間ピースは存在しない → **D-7 として新規に作るものは無い**。
 
 - [x] **D-8. Low: `analyzeStructure` が `/Version` をヘッダ版数と比較せず無条件優先**
-      → **修正済み（2026-07-18・未リリース）**。`resolvePdfVersion()` に切り出し（export・単体テスト 8 件）。
+      → **修正済み（2026-07-18・v0.7.0 で公開）**。`resolvePdfVersion()` に切り出し（export・単体テスト 8 件）。
       Table 29 は「If the header specifies a later version, or if this entry is absent, the document
       **shall conform to the version specified in the header**」と規定。**同版のときもヘッダに従う**
       （catalog は "later" ではない）。**minor は数値比較**にした — 文字列比較だと `1.10 < 1.7` で誤る
@@ -136,7 +160,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
 ## E. 新ツール
 
 - [x] **D-5（M-8）. `extract_structured_text`（構造付きテキスト抽出）**
-      → **実装済み（2026-07-18・未リリース）**。仕様は **specs/08 v0.2**（v0.1 をレビューして改訂）。
+      → **実装済み（2026-07-18・v0.8.0 で公開）**。仕様は **specs/08 v0.2**（v0.1 をレビューして改訂）。
       レビュー: `docs/m8-spec-review-2026-07-18.md`。
       **走査は `StructTreeRoot` 深さ優先**（`src/services/struct-tree-service.ts`）。
       v0.1 の「`extract_tables` の一般化」は**採らなかった** — ページ単位併合では logical content
@@ -149,7 +173,7 @@ writer は v0.13.0 で一区切りついた。**family の次は reader**。
       単体テストが `\n` 直渡しで空振りしていた。`buildIdToTextMap` を raw 保持にして結合後に解決、
       `extract_tables` と共通化。CJK レンジの穴（`。`U+3002 が漏れ）も同時修正
 - [x] **D-5 の副産物: `inspect_tags` の C-1 を解消**（specs/08 §3.5）
-      → **実装済み（2026-07-18・未リリース・破壊的変更 = 0.8.0 相当）**。
+      → **実装済み（2026-07-18・v0.8.0 で公開・破壊的変更）**。
       同じ walker に載せ替え、疑似 `Root` ノードを廃止。2 ページ文書で `Document` は 1 つ、
       ページ跨ぎ要素はまるごと。`validate_tagged`（deprecated）用の `analyzeTagsFromDoc` は温存
 

@@ -5,7 +5,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type SearchTextInput, SearchTextSchema } from '../../schemas/tier1.js';
-import { isTaggedPdf, searchText } from '../../services/pdfjs-service.js';
+import { searchText } from '../../services/pdfjs-service.js';
 import type { SearchResult } from '../../types.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSearchResultMarkdown } from '../../utils/formatter.js';
@@ -19,7 +19,7 @@ export function registerSearchText(server: McpServer): void {
 
 Case-insensitive search across all or specified pages. Each match includes the page number, the matched text, and configurable surrounding context.
 
-The search runs over **raw glyphs** and does not resolve \`/ActualText\` replacements (ISO 32000-2 §14.9.4) — a word carried as ActualText (ligature substitutes, hyphenation fixes) will NOT match here even though a viewer shows it. For tagged PDFs, \`extract_structured_text\` returns the replacement text; search that output instead. When a search of a tagged document finds nothing, the result carries a \`note\` saying so.
+The search runs over the same text \`read_text\` returns, so \`/ActualText\` replacements (ISO 32000-2 §14.9.4) match: a word carried as ActualText (ligature substitutes, hyphenation fixes) is found under the spelling a viewer shows, not under its glyph form. Rarely, a page's marked content cannot be aligned with the extracted text and the replacement is left unresolved; when that happens on a search with no hits, the result carries a \`note\` naming those pages.
 
 Args:
   - file_path (string): Absolute path to a local PDF file
@@ -45,12 +45,11 @@ Examples:
     },
     async (params: SearchTextInput) => {
       try {
-        const allMatches = await searchText(
-          params.file_path,
-          params.query,
-          params.context_chars,
-          params.pages,
-        );
+        const {
+          matches: allMatches,
+          unresolvedPages,
+          unresolvedReason,
+        } = await searchText(params.file_path, params.query, params.context_chars, params.pages);
 
         const truncated = allMatches.length > params.max_results;
         const matches = allMatches.slice(0, params.max_results);
@@ -62,14 +61,24 @@ Examples:
           truncated,
         };
 
-        // #15: an empty result on a tagged document may mean the text lives in
-        // /ActualText replacements (§14.9.4), which this glyph-level search
-        // cannot see. Say so instead of letting "0 matches" read as "not there".
-        if (allMatches.length === 0 && (await isTaggedPdf(params.file_path))) {
+        // #18 resolves /ActualText, so the blanket #15 warning no longer
+        // applies — but the resolution can still be skipped. Keep saying so,
+        // now only where it is actually true, and say which of the two reasons
+        // it is: they call for different next steps, and pointing an encrypted
+        // document at extract_structured_text would waste the caller's time
+        // (that tool reads its replacement text through pdf-lib as well).
+        if (allMatches.length === 0 && unresolvedPages.length > 0) {
           result.note =
-            'No glyph-level matches, but this document is tagged. Text supplied via ' +
-            '/ActualText replacements (ISO 32000-2 §14.9.4) is not visible to search_text — ' +
-            'try extract_structured_text, which resolves replacement text.';
+            unresolvedReason === 'encrypted'
+              ? 'No matches. This document is encrypted, so replacement text (/ActualText, ' +
+                'ISO 32000-2 §14.9.4) could not be read: §7.6.2 encrypts strings and streams, ' +
+                'and this server does not decrypt them. What was searched is the glyphs as ' +
+                'drawn. No other tool here will do better — decrypt the file first if you ' +
+                'need the replacement text.'
+              : 'No matches. Replacement text (/ActualText, ISO 32000-2 §14.9.4) was resolved, ' +
+                `except on page(s) ${unresolvedPages.join(', ')}, whose content stream could not ` +
+                'be aligned with the extracted text. A Span-level replacement there would be ' +
+                'invisible to this search — try extract_structured_text if the document is tagged.';
         }
 
         const text =
