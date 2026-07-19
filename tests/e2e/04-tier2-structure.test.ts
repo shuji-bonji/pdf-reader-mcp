@@ -7,8 +7,8 @@
  */
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { extractTables } from '../../src/services/pdfjs-service.js';
 import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
+import { extractTables } from '../../src/services/struct-tree-service.js';
 import type { TablesExtractionResult } from '../../src/types.js';
 import { formatTablesMarkdown } from '../../src/utils/formatter.js';
 import { A4_SIZE, EXPECTED_METADATA, FONT_FAMILIES } from './constants.js';
@@ -278,7 +278,7 @@ describe('04 - extract_tables', () => {
       totalTables: 1,
       tables: [
         {
-          page: 1,
+          pages: [1],
           index: 1,
           headerRows: [
             {
@@ -301,7 +301,7 @@ describe('04 - extract_tables', () => {
       ],
     };
     const md = formatTablesMarkdown(fake);
-    expect(md).toContain('## Page 1 — Table 1');
+    expect(md).toContain('## Table 1 — Page 1');
     expect(md).toContain('| 改正後 | 改正前 |');
     expect(md).toContain('| --- | --- |');
     expect(md).toContain('| A1 | B1 |');
@@ -311,6 +311,45 @@ describe('04 - extract_tables', () => {
   it('ET-5: pages parameter filters scanned pages', async () => {
     const result = await extractTables(FIXTURES.tagged, '1');
     expect(result.pagesScanned).toBe(1);
+  });
+
+  // ── #14 regression: the walker moved to StructTreeRoot ──
+
+  // ET-6: ONE Table element continuing across a page break stays ONE table.
+  // The per-page walk this replaces reported two fragments (page 2's carrying
+  // only the continuation row) — the "phantom table" failure mode observed on
+  // ISO 32000-2 pp.383–386.
+  it('ET-6: a page-spanning Table is one table with pages [1, 2]', async () => {
+    const result = await extractTables(FIXTURES.spanningTable);
+    expect(result.isTagged).toBe(true);
+    expect(result.totalTables).toBe(1);
+
+    const [table] = result.tables;
+    expect(table.pages).toEqual([1, 2]);
+    expect(table.headerRows).toHaveLength(1);
+    expect(table.bodyRows).toHaveLength(2);
+    // The continuation row (content on page 2) belongs to the same table.
+    expect(table.bodyRows[1].cells.map((c) => c.text)).toEqual(['Costs', '60']);
+  });
+
+  // ET-7: a table touching the requested range is returned whole.
+  it('ET-7: pages="2" returns the spanning table whole, not a fragment', async () => {
+    const result = await extractTables(FIXTURES.spanningTable, '2');
+    expect(result.totalTables).toBe(1);
+    expect(result.tables[0].pages).toEqual([1, 2]);
+    expect(result.tables[0].bodyRows).toHaveLength(2);
+  });
+
+  // ET-8: structured.pdf's single-page table keeps working on the new walker.
+  it('ET-8: structured.pdf yields its one table with document-wide index', async () => {
+    const result = await extractTables(FIXTURES.structured);
+    expect(result.totalTables).toBe(1);
+    expect(result.tables[0].pages).toEqual([1]);
+    expect(result.tables[0].index).toBe(1);
+    expect(result.tables[0].bodyRows.map((r) => r.cells.map((c) => c.text))).toEqual([
+      ['Item', 'Amount'],
+      ['Sales', '100'],
+    ]);
   });
 });
 

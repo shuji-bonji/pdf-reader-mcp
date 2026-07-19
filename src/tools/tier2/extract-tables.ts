@@ -10,7 +10,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type ExtractTablesInput, ExtractTablesSchema } from '../../schemas/tier2.js';
-import { extractTables } from '../../services/pdfjs-service.js';
+import { extractTables } from '../../services/struct-tree-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatTablesMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
@@ -22,10 +22,15 @@ export function registerExtractTables(server: McpServer): void {
       description: `Extract every \`<Table>\` subtree from a Tagged PDF as a structured row/cell list,
 optionally rendered as Markdown tables.
 
-How it works: walks the StructTree and pulls cell text for each \`<TR>\` →
-\`<TH>/<TD>\`, then collapses kerning whitespace (e.g. "消 費 税 法" → "消費税法").
-This sidesteps reading-order extraction's failure mode on multi-column tables
-(typical of 新旧対照表 PDFs).
+How it works: walks the document's StructTreeRoot depth-first (the same walker
+as \`extract_structured_text\` / \`inspect_tags\`) and pulls cell text for each
+\`<TR>\` → \`<TH>/<TD>\`, then collapses kerning whitespace (e.g. "消 費 税 法" →
+"消費税法"). This sidesteps reading-order extraction's failure mode on
+multi-column tables (typical of 新旧対照表 PDFs).
+
+A Table that continues across a page break is ONE table (ISO 32000-2 §14.8.2.5
+NOTE 2) — \`pages\` is an array, and a table touching the requested page range is
+returned whole. Cell text honours \`/ActualText\` replacements (§14.9.4).
 
 Args:
   - file_path (string): Absolute path to a local PDF file
@@ -34,15 +39,16 @@ Args:
 
 Returns:
   Markdown — \`# Extracted Tables\` summary block followed by one
-  \`## Page N — Table M\` section per table with a GFM table.
+  \`## Table N — Page(s) …\` section per table with a GFM table.
 
-  JSON — \`{ isTagged, tables: [{ page, index, headerRows, bodyRows, footerRows }],
-  totalTables, pagesScanned, note? }\`.
+  JSON — \`{ isTagged, tables: [{ pages, index, headerRows, bodyRows, footerRows }],
+  totalTables, pagesScanned, note? }\`. \`index\` is the table's 1-based position
+  in logical content order, document-wide.
 
 Limitations:
   - Untagged PDFs return an empty result and a \`note\`.
   - colspan/rowspan are not honoured (cells are listed in source order).
-  - Nested tables are skipped to keep page indices stable.
+  - Nested tables are not emitted separately (their text appears in the outer cell).
 
 Examples:
   - Pull 新旧対照表 from a kaisei tsutatsu PDF for diffing

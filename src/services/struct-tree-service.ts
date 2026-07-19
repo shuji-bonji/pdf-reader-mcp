@@ -48,15 +48,19 @@ import {
   PDFString,
 } from 'pdf-lib';
 import type {
+  ExtractedTable,
   StructuredElement,
   StructuredTableCell,
   StructuredTextResult,
+  TableRow,
+  TablesExtractionResult,
   TagNode,
   TagsAnalysis,
 } from '../types.js';
 import { resolvePageNumbers } from '../utils/pdf-helpers.js';
 import {
   buildDocumentIdToTextMap,
+  compactCellText,
   LINE_BREAK,
   loadDocument,
   resolveLineBreaks,
@@ -567,6 +571,151 @@ export async function extractStructuredText(
         roles: options.roles,
         pages: pageFilter,
       }),
+    };
+  } finally {
+    await jsDoc.destroy();
+  }
+}
+
+// ─── extract_tables (#14) ───────────────────────────────────────────────────
+
+/**
+ * Collect every top-level `Table` element in logical content order.
+ *
+ * Nested tables are not emitted as separate tables (parity with the previous
+ * implementation) — their text still appears inside the enclosing cell.
+ */
+function collectTableElements(
+  elements: StructElement[],
+  into: StructElement[] = [],
+): StructElement[] {
+  for (const element of elements) {
+    if (element.role === 'Table') {
+      into.push(element);
+      continue;
+    }
+    collectTableElements(element.children, into);
+  }
+  return into;
+}
+
+/** Split a `Table` element's rows into THead / TBody / TFoot sections. */
+function tableRowsBySection(
+  table: StructElement,
+  idToText: Map<string, string>,
+): { headerRows: TableRow[]; bodyRows: TableRow[]; footerRows: TableRow[] } {
+  const headerRows: TableRow[] = [];
+  const bodyRows: TableRow[] = [];
+  const footerRows: TableRow[] = [];
+
+  const rowFrom = (tr: StructElement): TableRow | null => {
+    const cells = tr.children
+      .filter((c) => c.role === 'TH' || c.role === 'TD')
+      .map((c) => ({
+        // Same cell treatment as before the walker swap: CJK-aware line-break
+        // resolution, whitespace collapse, kerning fold, Markdown escaping.
+        // textOf additionally honours /ActualText (§14.9.4), which the old
+        // per-page walk did not.
+        text: compactCellText(textOf(c, idToText, true)),
+        isHeader: c.role === 'TH',
+      }));
+    return cells.length === 0 ? null : { cells };
+  };
+
+  const appendRows = (section: StructElement, into: TableRow[]): void => {
+    for (const child of section.children) {
+      if (child.role === 'TR') {
+        const row = rowFrom(child);
+        if (row) into.push(row);
+      }
+    }
+  };
+
+  for (const child of table.children) {
+    if (child.role === 'THead') appendRows(child, headerRows);
+    else if (child.role === 'TBody') appendRows(child, bodyRows);
+    else if (child.role === 'TFoot') appendRows(child, footerRows);
+    else if (child.role === 'TR') {
+      // Tables sometimes omit THead/TBody and place TRs directly under <Table>.
+      const row = rowFrom(child);
+      if (row) bodyRows.push(row);
+    }
+  }
+
+  return { headerRows, bodyRows, footerRows };
+}
+
+/**
+ * Extract every `<Table>` subtree as structured rows/cells (#14).
+ *
+ * Walks the document's `StructTreeRoot` once — the same walker as
+ * `extract_structured_text` and `inspect_tags` (C-1) — so a Table StructElem
+ * that continues across a page break stays ONE table with `pages: [..]`.
+ *
+ * The previous implementation merged per-page `page.getStructTree()` trees.
+ * That sliced a page-spanning Table into per-page fragments and emitted
+ * "phantom" tables (a lone empty header cell) on pages that carried only the
+ * element's Figures — observed on ISO 32000-2 pp.383–386, where the per-page
+ * walk reported 7 tables for what the structure tree holds as 4.
+ *
+ * The `pages` argument filters by touch: a table that touches the range is
+ * returned whole, and `index` is assigned in document order before filtering
+ * so the same table keeps the same index whatever the filter.
+ */
+export async function extractTables(
+  filePath: string,
+  pages?: string,
+): Promise<TablesExtractionResult> {
+  const libDoc = await loadWithPdfLib(filePath);
+
+  const markInfo = deref(libDoc, libDoc.catalog.get(PDFName.of('MarkInfo')));
+  const marked =
+    markInfo instanceof PDFDict ? deref(libDoc, markInfo.get(PDFName.of('Marked'))) : undefined;
+  const isTagged = String(marked) === 'true';
+
+  const roots = walkStructTree(libDoc);
+
+  if (!isTagged || !roots || roots.length === 0) {
+    return {
+      isTagged: false,
+      tables: [],
+      totalTables: 0,
+      pagesScanned: 0,
+      note:
+        'Document is not tagged. extract_tables relies on /MarkInfo /Marked true ' +
+        'and a StructTree. For untagged two-column PDFs, fall back to a ' +
+        'column-aware reading strategy (see pdf-reader-mcp Issue #3).',
+    };
+  }
+
+  const jsDoc = await loadDocument(filePath);
+  try {
+    const idToText = await buildDocumentIdToTextMap(jsDoc);
+
+    // Map page object numbers (what /Pg holds) to 1-based page numbers.
+    const pageNumByObjNum = new Map<number, number>();
+    const libPages = libDoc.getPages();
+    for (let i = 0; i < libPages.length; i++) {
+      pageNumByObjNum.set(libPages[i].ref.objectNumber, i + 1);
+    }
+
+    const pageNumbers = resolvePageNumbers(pages, jsDoc.numPages);
+    const wanted = pages ? new Set(pageNumbers) : undefined;
+
+    const tables: ExtractedTable[] = [];
+    const tableElements = collectTableElements(roots);
+    for (const [i, element] of tableElements.entries()) {
+      const tablePages = pagesOf(element, pageNumByObjNum);
+      if (wanted && tablePages.length > 0 && !tablePages.some((p) => wanted.has(p))) continue;
+      const { headerRows, bodyRows, footerRows } = tableRowsBySection(element, idToText);
+      tables.push({ pages: tablePages, index: i + 1, headerRows, bodyRows, footerRows });
+    }
+
+    return {
+      isTagged: true,
+      tables,
+      totalTables: tables.length,
+      pagesScanned: pageNumbers.length,
     };
   } finally {
     await jsDoc.destroy();

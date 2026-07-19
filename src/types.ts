@@ -44,6 +44,13 @@ export interface SearchResult {
   totalMatches: number;
   matches: SearchMatch[];
   truncated: boolean;
+  /**
+   * Set when the search found nothing but the document is tagged (#15).
+   * search_text sees raw glyphs only — a tagged document may carry the
+   * searched words in `/ActualText` replacements (ISO 32000-2 §14.9.4),
+   * which only `extract_structured_text` resolves.
+   */
+  note?: string;
 }
 
 /** An extracted image from a PDF page */
@@ -227,9 +234,16 @@ export interface TableRow {
 
 /** A single table extracted from a Tagged PDF's structure tree. */
 export interface ExtractedTable {
-  /** 1-based page number where the table appears. */
-  page: number;
-  /** 1-based index of the table within the page (1 = first table on the page). */
+  /**
+   * 1-based page numbers the table's content lives on, ascending (#14).
+   *
+   * An array, not a number: a Table StructElem that continues across a page
+   * break is ONE table (§14.8.2.5 NOTE 2), and since the walker moved to the
+   * document's StructTreeRoot it is reported whole. Was `page: number` when
+   * extraction was per-page — that sliced spanning tables into fragments.
+   */
+  pages: number[];
+  /** 1-based index of the table in logical content order, document-wide. */
   index: number;
   /** Rows from `<THead>`. Empty if the table has no explicit header section. */
   headerRows: TableRow[];

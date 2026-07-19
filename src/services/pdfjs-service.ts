@@ -17,14 +17,10 @@ import type {
   AnnotationInfo,
   AnnotationsAnalysis,
   ExtractedImage,
-  ExtractedTable,
   ImageExtractionResult,
   PageText,
   PdfMetadata,
   SearchMatch,
-  TableCell,
-  TableRow,
-  TablesExtractionResult,
   TagNode,
   TagsAnalysis,
 } from '../types.js';
@@ -528,6 +524,25 @@ function compactRuns(text: string): string {
 }
 
 /**
+ * Whether the document claims to be tagged (`/MarkInfo /Marked true`).
+ *
+ * Used by search_text to explain empty results on tagged documents (#15):
+ * the search runs over raw glyphs, so text carried in `/ActualText`
+ * replacements (§14.9.4) is invisible to it.
+ */
+export async function isTaggedPdf(filePath: string): Promise<boolean> {
+  const doc = await loadDocument(filePath);
+  try {
+    const markInfo = await getMarkInfo(doc);
+    return markInfo?.Marked === true;
+  } catch {
+    return false;
+  } finally {
+    await doc.destroy();
+  }
+}
+
+/**
  * Get MarkInfo dictionary from the catalog.
  */
 async function getMarkInfo(doc: PDFDocumentProxy): Promise<Record<string, boolean> | null> {
@@ -652,99 +667,12 @@ export async function analyzeTagsFromDoc(doc: PDFDocumentProxy): Promise<TagsAna
 // so that page-spanning elements stay whole — see that file's C-1 note.
 // `analyzeTagsFromDoc` below is retained only for the deprecated validate_tagged.
 
-// ─── extract_tables ────────────────────────────────────────────────────────
-
-/**
- * Extract tables from a Tagged PDF as structured rows/cells.
- *
- * The strategy is: for each page, walk the StructTree, identify `<Table>`
- * subtrees, then walk down `<THead>/<TBody>/<TFoot>` → `<TR>` → `<TH>/<TD>`.
- * Cell text is reconstructed by mapping each Span/P/Lbl/LBody leaf node's
- * `id` (e.g. `p715R_mc4`) onto the corresponding `beginMarkedContentProps`
- * boundary in `getTextContent({ includeMarkedContent: true })`.
- *
- * Untagged PDFs return `isTagged: false`, an empty `tables` array, and a
- * `note` recommending the column-aware extraction (planned in a future
- * release) as the fallback for two-column layouts without a structure tree.
- *
- * Cell text is post-processed:
- *   - Newlines (`hasEOL`) become single spaces.
- *   - Repeated whitespace runs (including U+3000 fullwidth space) collapse to one.
- *   - Per-character kerning spaces (e.g. `"消 費 税 法"`) are folded
- *     by removing single ASCII spaces between two CJK characters.
- */
-export async function extractTablesFromDoc(
-  doc: PDFDocumentProxy,
-  pages?: string,
-): Promise<TablesExtractionResult> {
-  const markInfo = await getMarkInfo(doc);
-  const isTagged = markInfo?.Marked === true;
-
-  if (!isTagged) {
-    return {
-      isTagged: false,
-      tables: [],
-      totalTables: 0,
-      pagesScanned: 0,
-      note:
-        'Document is not tagged. extract_tables relies on /MarkInfo /Marked true ' +
-        'and a StructTree. For untagged two-column PDFs, fall back to a ' +
-        'column-aware reading strategy (see pdf-reader-mcp Issue #3).',
-    };
-  }
-
-  const pageNumbers = resolvePageNumbers(pages, doc.numPages);
-
-  const perPage = await Promise.all(
-    pageNumbers.map(async (pageNum) => {
-      const page = await doc.getPage(pageNum);
-      try {
-        const [tree, textContent] = await Promise.all([
-          page.getStructTree(),
-          page.getTextContent({ includeMarkedContent: true }),
-        ]);
-        if (!tree) return [] as ExtractedTable[];
-
-        const idToText = buildIdToTextMap(textContent.items);
-        const tables: ExtractedTable[] = [];
-        collectTables(tree as unknown as StructNode, pageNum, idToText, tables);
-        return tables;
-      } catch {
-        return [] as ExtractedTable[];
-      }
-    }),
-  );
-
-  const tables = perPage.flat();
-  return {
-    isTagged: true,
-    tables,
-    totalTables: tables.length,
-    pagesScanned: pageNumbers.length,
-  };
-}
-
-export async function extractTables(
-  filePath: string,
-  pages?: string,
-): Promise<TablesExtractionResult> {
-  const doc = await loadDocument(filePath);
-  try {
-    return await extractTablesFromDoc(doc, pages);
-  } finally {
-    await doc.destroy();
-  }
-}
-
-// ─── extract_tables internals ──────────────────────────────────────────────
-
-/** A node from `page.getStructTree()`. Has either `role`+`children` or `type === 'content'`+`id`. */
-interface StructNode {
-  role?: string;
-  children?: StructNode[];
-  type?: 'content';
-  id?: string;
-}
+// Note: extract_tables no longer lives here. Like inspect_tags (C-1) it walks
+// the document's StructTreeRoot so that a page-spanning Table stays ONE table —
+// see `extractTables` in struct-tree-service.ts (#14). The per-page
+// `page.getStructTree()` walk this file used to host sliced such tables into
+// per-page fragments and emitted phantom empty tables on pages that carried
+// only their Figures.
 
 /** A `getTextContent({ includeMarkedContent: true })` item. */
 export interface TextContentItemLike {
@@ -890,90 +818,6 @@ export async function buildDocumentIdToTextMap(
   return merged;
 }
 
-/** Walk the StructTree and append every `<Table>` subtree as an ExtractedTable. */
-function collectTables(
-  node: StructNode,
-  pageNum: number,
-  idToText: Map<string, string>,
-  out: ExtractedTable[],
-): void {
-  if (node.type === 'content') return;
-
-  if (node.role === 'Table') {
-    const headerRows: TableRow[] = [];
-    const bodyRows: TableRow[] = [];
-    const footerRows: TableRow[] = [];
-
-    for (const child of node.children ?? []) {
-      if (child.type === 'content') continue;
-      if (child.role === 'THead') {
-        appendTableRowsFromSection(child, idToText, headerRows);
-      } else if (child.role === 'TBody') {
-        appendTableRowsFromSection(child, idToText, bodyRows);
-      } else if (child.role === 'TFoot') {
-        appendTableRowsFromSection(child, idToText, footerRows);
-      } else if (child.role === 'TR') {
-        // Tables sometimes omit THead/TBody and place TRs directly under <Table>.
-        const row = buildRowFromTR(child, idToText);
-        if (row) bodyRows.push(row);
-      }
-    }
-
-    // `out` is a per-page accumulator passed in by the caller, so
-    // `out.length + 1` is the next index within this page (1-based).
-    out.push({
-      page: pageNum,
-      index: out.length + 1,
-      headerRows,
-      bodyRows,
-      footerRows,
-    });
-    return; // Don't recurse into a Table — nested tables are uncommon and
-    // would confuse the per-page index. (Add nested-table support later.)
-  }
-
-  for (const child of node.children ?? []) {
-    collectTables(child, pageNum, idToText, out);
-  }
-}
-
-function appendTableRowsFromSection(
-  section: StructNode,
-  idToText: Map<string, string>,
-  out: TableRow[],
-): void {
-  for (const child of section.children ?? []) {
-    if (child.type === 'content') continue;
-    if (child.role === 'TR') {
-      const row = buildRowFromTR(child, idToText);
-      if (row) out.push(row);
-    }
-  }
-}
-
-function buildRowFromTR(tr: StructNode, idToText: Map<string, string>): TableRow | null {
-  const cells: TableCell[] = [];
-  for (const child of tr.children ?? []) {
-    if (child.type === 'content') continue;
-    if (child.role === 'TH' || child.role === 'TD') {
-      const text = compactCellText(collectTextUnder(child, idToText));
-      cells.push({ text, isHeader: child.role === 'TH' });
-    }
-  }
-  return cells.length === 0 ? null : { cells };
-}
-
-function collectTextUnder(node: StructNode, idToText: Map<string, string>): string {
-  if (node.type === 'content') {
-    return node.id ? (idToText.get(node.id) ?? '') : '';
-  }
-  const parts: string[] = [];
-  for (const child of node.children ?? []) {
-    parts.push(collectTextUnder(child, idToText));
-  }
-  return parts.join(' ');
-}
-
 /**
  * Normalise raw cell text:
  *   0. Resolve line breaks (CJK-aware) — a break between two CJK characters is
@@ -986,7 +830,7 @@ function collectTextUnder(node: StructNode, idToText: Map<string, string>): stri
  *      natural inter-word spacing like "事業者 法人番号" is preserved.
  *   3. Trim and Markdown-escape pipes / newlines.
  */
-function compactCellText(s: string): string {
+export function compactCellText(s: string): string {
   if (!s) return '';
   // Step 0: CJK-aware line-break resolution (see resolveLineBreaks). idToText now
   // keeps raw `\n` markers, so a cell wrapping mid-word no longer gains a space.

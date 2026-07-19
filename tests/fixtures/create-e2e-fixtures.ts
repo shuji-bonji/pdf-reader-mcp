@@ -861,6 +861,109 @@ async function createStructuredPdf(): Promise<void> {
 }
 
 /**
+ * Create spanning-table.pdf — a 2-page PDF whose ONE `Table` StructElem
+ * continues across the page break (#14).
+ *
+ * Structure: Document > Table > [ THead > TR(TH,TH) @p1,
+ * TBody > TR(TD,TD) @p1 + TR(TD,TD) @p2 ]. The second body row lives on
+ * page 2 — a table that a per-page walk would slice into two fragments,
+ * but that the StructTreeRoot walker must report as ONE table with
+ * `pages: [1, 2]`.
+ */
+async function createSpanningTablePdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const page1 = doc.addPage([595, 842]);
+  const page2 = doc.addPage([595, 842]);
+
+  const marked = (page: typeof page1, mcid: number, tag: string, draw: () => void): void => {
+    page.pushOperators(
+      PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [`/${tag}`, `<</MCID ${mcid}>>`]),
+    );
+    draw();
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
+  };
+
+  // Page 1: header row + first body row.
+  marked(page1, 0, 'TH', () => page1.drawText('Item', { x: 50, y: 780, size: 12, font: bold }));
+  marked(page1, 1, 'TH', () => page1.drawText('Amount', { x: 150, y: 780, size: 12, font: bold }));
+  marked(page1, 2, 'TD', () => page1.drawText('Sales', { x: 50, y: 760, size: 12, font }));
+  marked(page1, 3, 'TD', () => page1.drawText('100', { x: 150, y: 760, size: 12, font }));
+  // Page 2: the continuation row.
+  marked(page2, 0, 'TD', () => page2.drawText('Costs', { x: 50, y: 780, size: 12, font }));
+  marked(page2, 1, 'TD', () => page2.drawText('60', { x: 150, y: 780, size: 12, font }));
+
+  doc.catalog.set(PDFName.of('MarkInfo'), context.obj({ Marked: true }));
+
+  const structRootRef = context.nextRef();
+  const docRef = context.nextRef();
+  const ref = () => context.nextRef();
+  const [table, thead, tbody, trH, tr1, tr2, thA, thB, td1a, td1b, td2a, td2b] = Array.from(
+    { length: 12 },
+    ref,
+  );
+
+  const p1Ref = page1.ref;
+  const p2Ref = page2.ref;
+
+  const elem = (
+    S: string,
+    parent: ReturnType<typeof ref>,
+    K?: unknown,
+    Pg?: ReturnType<typeof ref>,
+  ) => {
+    const d: Record<string, unknown> = { Type: 'StructElem', S, P: parent };
+    if (Pg) d.Pg = Pg;
+    if (K !== undefined) d.K = K;
+    return context.obj(d);
+  };
+
+  context.assign(thA, elem('TH', trH, 0, p1Ref));
+  context.assign(thB, elem('TH', trH, 1, p1Ref));
+  context.assign(trH, elem('TR', thead, [thA, thB]));
+  context.assign(thead, elem('THead', table, [trH]));
+
+  context.assign(td1a, elem('TD', tr1, 2, p1Ref));
+  context.assign(td1b, elem('TD', tr1, 3, p1Ref));
+  context.assign(tr1, elem('TR', tbody, [td1a, td1b]));
+  // ★ The continuation row: its cells' content lives on page 2.
+  context.assign(td2a, elem('TD', tr2, 0, p2Ref));
+  context.assign(td2b, elem('TD', tr2, 1, p2Ref));
+  context.assign(tr2, elem('TR', tbody, [td2a, td2b]));
+  context.assign(tbody, elem('TBody', table, [tr1, tr2]));
+
+  context.assign(table, elem('Table', docRef, [thead, tbody]));
+  context.assign(docRef, elem('Document', structRootRef, [table]));
+
+  page1.node.set(PDFName.of('StructParents'), context.obj(0));
+  page2.node.set(PDFName.of('StructParents'), context.obj(1));
+  const parentTree = context.obj({
+    Nums: [0, [thA, thB, td1a, td1b], 1, [td2a, td2b]],
+  });
+  context.assign(
+    structRootRef,
+    context.obj({
+      Type: 'StructTreeRoot',
+      K: [docRef],
+      ParentTree: context.register(parentTree),
+      ParentTreeNextKey: 2,
+    }),
+  );
+  doc.catalog.set(PDFName.of('StructTreeRoot'), structRootRef);
+
+  doc.setTitle('Spanning Table Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E fixture - ONE Table StructElem continuing across a page break (#14)');
+  doc.setProducer('pdf-reader-mcp test suite');
+
+  await writeFile(`${FIXTURES_DIR}/spanning-table.pdf`, await doc.save());
+  console.log('Created: spanning-table.pdf (2 pages, one Table element across the break)');
+}
+
+/**
  * Create a corrupted "PDF" file (non-PDF bytes).
  */
 async function createCorruptedPdf(): Promise<void> {
@@ -870,15 +973,26 @@ async function createCorruptedPdf(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  await createComprehensivePdf();
-  await createTaggedPdf();
-  await createMultiFontPdf();
-  await createCidFontPdf();
-  await createImageKindsPdf();
-  await createStructuredPdf();
-  await createNoMetadataPdf();
-  await createCorruptedPdf();
-  console.log('All E2E test fixtures created.');
+  // An optional argv narrows the run to one fixture, so adding a fixture does
+  // not force regenerating (and re-committing) every existing one.
+  const only = process.argv[2];
+  const creators: Array<[string, () => Promise<void>]> = [
+    ['comprehensive', createComprehensivePdf],
+    ['tagged', createTaggedPdf],
+    ['multi-font', createMultiFontPdf],
+    ['cid-font', createCidFontPdf],
+    ['image-kinds', createImageKindsPdf],
+    ['structured', createStructuredPdf],
+    ['spanning-table', createSpanningTablePdf],
+    ['no-metadata', createNoMetadataPdf],
+    ['corrupted', createCorruptedPdf],
+  ];
+  const wanted = creators.filter(([name]) => !only || name === only);
+  if (wanted.length === 0) {
+    throw new Error(`Unknown fixture "${only}". Known: ${creators.map(([n]) => n).join(', ')}`);
+  }
+  for (const [, create] of wanted) await create();
+  console.log(only ? `Fixture created: ${only}` : 'All E2E test fixtures created.');
 }
 
 main().catch(console.error);

@@ -18,7 +18,9 @@ export function registerReadText(server: McpServer): void {
 
 Text is extracted page by page, sorted by vertical position (top to bottom) then horizontal position (left to right), providing natural reading order.
 
-For **untagged** multi-column PDFs (e.g. older 新旧対照表 PDFs that lack a structure tree), pass \`split_columns: 2\` or \`3\` to bucket items by X-coordinate left-to-right. Tagged PDFs with proper \`<Table>\` markup should use the \`extract_tables\` tool instead.
+For **tagged** PDFs, prefer \`extract_structured_text\`: it returns text in logical content order (ISO 32000-2 §14.8.2.5) and resolves \`/ActualText\` replacements (§14.9.4), neither of which this tool does — read_text emits **raw glyphs** in coordinate order, so a word carried as ActualText (ligature substitutes, hyphenation fixes) appears here in its glyph form. Tables in tagged PDFs are best read with \`extract_tables\`.
+
+For **untagged** multi-column PDFs (e.g. older 新旧対照表 PDFs that lack a structure tree), pass \`split_columns: 2\` or \`3\` to bucket items by X-coordinate left-to-right.
 
 For Japanese form-style PDFs (帳票・様式) where U+3000 fullwidth spaces are used as visual indentation, pass \`compact_whitespace: true\` to collapse runs of whitespace to a single ASCII space. Cuts 20–40% of token consumption without losing content.
 

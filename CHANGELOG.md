@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-19
+
+> spec ⇄ reader 相互チェック（2026-07-19。`Document-Note/mcps/PDFfamily/reviews/` の 2 レポート）で
+> 発見された 4 件（Issue #14〜#17）の一括対応。
+
+### Changed
+
+- **🔴 `extract_tables` を StructTreeRoot 走査に載せ替え** ([#14](https://github.com/shuji-bonji/pdf-reader-mcp/issues/14)・破壊的変更)。
+  従来はページごとの `page.getStructTree()` を併合していたため、**ページを跨ぐ Table 要素が
+  ページ単位の断片に分裂**し、Figure しか載っていないページには「ヘッダ 1 セル・中身空」の
+  **幻テーブル**が生まれていました（ISO 32000-2 EC3 の pp.383–388 で実測: 実体 4 表に対し 8 表を報告。
+  0.8.0 の C-1 で `inspect_tags` から取り除いたのと同じ failure mode で、本ツールの主要ユースケース
+  = 新旧対照表はほぼ確実にページを跨ぎます）。M-8 と同じ walker（`struct-tree-service`）に載せ替え、
+  跨ぎ Table は `pages: [383, 384, 385, 386]` のような **1 つの表**として返します。
+  - **出力が変わります**: `tables[].page`（数値）→ **`tables[].pages`（配列）**。`index` はページ内
+    連番から**文書全体の論理順連番**に変更（`pages` フィルタに関わらず同じ表は同じ index）。
+    Markdown の見出しも `## Page N — Table M` → `## Table M — Page(s) …`。
+  - 副次的な改善: セルの `/ActualText` を解決するようになりました（§14.9.4。旧経路は生グリフ）。
+  - 実測: ISO PDF pp.383–388 が 8 表 → **5 表**（幻 3 つが消え、Table 126 の跨ぎ断片が 1 表に）。
+  - 回帰フィクスチャ `spanning-table.pdf`（ページ跨ぎ Table 単体）と ET-6〜ET-8 を追加。
+    `create-e2e-fixtures.ts` は引数で単一フィクスチャのみ生成できるようにしました
+    （既存フィクスチャの再生成・再コミットを避けるため）。
+
+### Fixed
+
+- **`search_text` / `read_text` の ActualText 非対応を明示し、空振り時に案内を返すように**
+  ([#15](https://github.com/shuji-bonji/pdf-reader-mcp/issues/15))。両ツールは生グリフを見るため、
+  `/ActualText` 置換（§14.9.4「shall be used as a replacement」）で運ばれる語は**ビューアに見えていても
+  ヒットしません**（`extract_structured_text` は「Difficult」を返すのに `search_text("Difficult")` は
+  0 件 — 同一サーバ内で答えが割れていました）。グリフ置換の解決は pdfjs の textContent が
+  ActualText を公開しないため本リリースでは行わず、(1) 両 description に生グリフである旨と
+  `extract_structured_text` への案内を明記し、(2) **タグ付き文書で 0 件のとき `note` を返す**ように
+  しました（「無い」と「見えない」の区別を呼び出し側に渡す）。`isTaggedPdf()` を追加。
+  read_text の description が M-8 登場前のまま `extract_tables` しか案内していなかった点も更新
+  （Issue #15 同梱の R-6）。
+- **`extract_structured_text` の Markdown で表セル内の `|` を GFM エスケープ**
+  ([#16](https://github.com/shuji-bonji/pdf-reader-mcp/issues/16))。ISO PDF Table 126 の `−|𝑦|` などで
+  列が壊れていました。`extract_tables` は抽出時にエスケープ済みで、同一リポジトリ内で挙動が
+  割れていたもの。M-8 側は**表示時のみ**エスケープし、JSON は生テキストのまま（層の分離を保つ）。
+- **`extract_structured_text` の Markdown の `pages` 表示を連続範囲に圧縮**
+  ([#17](https://github.com/shuji-bonji/pdf-reader-mcp/issues/17))。`join('–')` で全列挙していたため、
+  文書全域に跨る `Document` 要素が 1000 個超のページ番号を並べ、応答が数十 KB 膨張して
+  truncate を圧迫していました。`1–3, 7, 9–10` 形式に変更（表示のみ。JSON の配列は不変）。
+  副次効果として、構造木に載らないページが欠番として一目で見えます。
+
 ## [0.8.0] - 2026-07-18
 
 ### Added

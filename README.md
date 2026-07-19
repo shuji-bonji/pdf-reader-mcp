@@ -22,7 +22,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**16 tools** organized into three tiers:
+**17 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -30,8 +30,8 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | ---------------- | -------------------------------------------------------- |
 | `get_page_count` | Lightweight page count retrieval                         |
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
-| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms) |
-| `search_text`    | Full-text search with surrounding context                |
+| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Emits **raw glyphs** — for tagged PDFs prefer `extract_structured_text`, which returns logical content order and resolves `/ActualText` |
+| `search_text`    | Full-text search with surrounding context. Glyph-level: text carried in `/ActualText` replacements will not match (a `note` says so when a tagged document yields zero matches) |
 | `read_images`    | Image extraction as base64 with metadata                 |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
 | `summarize`      | Quick overview report (metadata + text + image count)    |
@@ -45,14 +45,15 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `inspect_fonts`       | Font inventory (embedded/subset/type detection)                     |
 | `inspect_annotations` | Annotation listing (categorized by subtype)                         |
 | `inspect_signatures`  | Digital signature field structure analysis                          |
-| `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns)   |
+| `extract_structured_text` | Tagged PDF text in **logical content order** (ISO 32000-2 §14.8.2.5), each piece labelled with its structure type (`H1` / `P` / `Table` …). Resolves `/ActualText`, separates `/Alt` and list labels, keeps page-spanning elements whole |
+| `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns). A table continuing across a page break is ONE table (`pages` array) |
 
 ### Tier 3: Validation & Analysis
 
 | Tool                | Description                                          |
 | ------------------- | ---------------------------------------------------- |
-| `validate_tagged`   | PDF/UA tag structure validation (8 checks)           |
-| `validate_metadata` | Metadata conformance checking (10 checks)            |
+| `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
+| `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
 
 ## Installation
@@ -162,6 +163,33 @@ compare_structure({
   | Tagged      | true | true | ✅ |
 ```
 
+### Extract Structured Text (Tagged PDF, logical order)
+
+```
+extract_structured_text({ file_path: "/path/to/report.pdf", pages: "1-2" })
+→ # Structured Text
+  - **Tagged**: Yes / **Language**: en-US / **Elements**: 7
+
+  ## Logical Content Order
+
+  - **Document** (pages 1–2)
+    - **H1** (page 1) — Quarterly Report
+    - **P** (pages 1–2) — This paragraph begins on page one and continues on page two.
+    - **Table** (page 1)
+      | Item | Amount |
+      |---|---|
+      | Sales | 100 |
+    - **Figure** (page 2) — *alt:* A bar chart of sales
+```
+
+This answers "what is the text of the H1?" — which `read_text` (flat,
+coordinate order) cannot. Order is a depth-first traversal of the structure
+tree (ISO 32000-2 §14.8.2.5). `/ActualText` replaces the glyphs (§14.9.4),
+`/Alt` stays out of the body text (§14.9.3), list labels are reported
+separately, and an element spanning a page break stays ONE element. Use
+`roles: ["H1", "H2"]` to pull an outline. Untagged PDFs return
+`isTagged: false` with a reason — nothing is guessed from coordinates.
+
 ### Extract Tables (Tagged PDF)
 
 ```
@@ -169,15 +197,18 @@ extract_tables({ file_path: "/path/to/kaisei-tsutatsu.pdf", pages: "1" })
 → # Extracted Tables
   - **Tagged**: Yes / **Pages Scanned**: 1 / **Tables Found**: 1
 
-  ## Page 1 — Table 1
+  ## Table 1 — Page 1
 
   | 改正後 | 改正前 |
   | --- | --- |
   | …第２条第 16 項《定義》… | …第２条第 15 項《定義》… |
 ```
 
-Untagged PDFs return an empty result with a `note` recommending the
-column-aware fallback below.
+A table that continues across a page break is reported as ONE table —
+`pages` is an array (e.g. `## Table 3 — Pages 5–7`), and a table touching
+the requested `pages` range is returned whole. Cell text honours
+`/ActualText` replacements. Untagged PDFs return an empty result with a
+`note` recommending the column-aware fallback below.
 
 ### Read Untagged Multi-Column PDF
 

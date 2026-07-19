@@ -5,7 +5,7 @@
  * ST-1〜ST-7: search_text (searchText)
  */
 import { describe, expect, it } from 'vitest';
-import { extractText, searchText } from '../../src/services/pdfjs-service.js';
+import { extractText, isTaggedPdf, searchText } from '../../src/services/pdfjs-service.js';
 import { EXPECTED_TEXT, SEARCH_QUERIES } from './constants.js';
 import { FIXTURES } from './setup.js';
 
@@ -272,5 +272,24 @@ describe('02 - search_text', () => {
     expect(typeof m.text).toBe('string');
     expect(typeof m.contextBefore).toBe('string');
     expect(typeof m.contextAfter).toBe('string');
+  });
+
+  // ── #15: ActualText is invisible to the glyph-level search ──
+  // structured.pdf carries a P whose glyphs read "Dif`cult" and whose
+  // /ActualText reads "Difficult" (§14.9.4). search_text works on glyphs, so
+  // it finds the former and not the latter — that asymmetry is exactly what
+  // the tool-level note (gated by isTaggedPdf) explains to the caller.
+  it('ST-8: the glyph form matches, the ActualText replacement does not', async () => {
+    const glyphMatches = await searchText(FIXTURES.structured, 'Dif`cult');
+    expect(glyphMatches.length).toBeGreaterThan(0);
+
+    const replacementMatches = await searchText(FIXTURES.structured, 'Difficult');
+    expect(replacementMatches).toHaveLength(0);
+  });
+
+  // ST-9: isTaggedPdf — the gate for the #15 note — tells tagged from untagged.
+  it('ST-9: isTaggedPdf is true for structured.pdf, false for simple.pdf', async () => {
+    expect(await isTaggedPdf(FIXTURES.structured)).toBe(true);
+    expect(await isTaggedPdf(FIXTURES.simple)).toBe(false);
   });
 });

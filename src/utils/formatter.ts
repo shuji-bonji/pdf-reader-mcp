@@ -109,6 +109,10 @@ export function formatSearchResultMarkdown(result: SearchResult): string {
     lines.push('---', '⚠️ Results truncated. Use page range parameters to narrow the search.');
   }
 
+  if (result.note) {
+    lines.push('', '## Note', '', `> ${result.note}`);
+  }
+
   return lines.join('\n');
 }
 
@@ -222,6 +226,49 @@ export function formatTagsMarkdown(analysis: TagsAnalysis): string {
 }
 
 /**
+ * Escape a table cell for GitHub-flavoured Markdown (#16).
+ *
+ * Same treatment as extract_tables' cells: `|` would end the cell, and a raw
+ * newline would end the row. Applied at FORMAT time only — the JSON output
+ * carries the raw text.
+ */
+function escapeMarkdownCell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ');
+}
+
+/**
+ * Render a page-number list compactly (#17).
+ *
+ * Consecutive runs collapse to `start–end`; gaps are comma-separated:
+ * `[1,2,3]` → `"1–3"`, `[1,2,3,7,9,10]` → `"1–3, 7, 9–10"`.
+ *
+ * Without this, an element spanning a whole document (`Document` in a
+ * 1000-page PDF) renders every page number and bloats the response by tens
+ * of kilobytes. A side benefit: pages absent from the structure tree show up
+ * as visible gaps. Display only — JSON keeps the full array.
+ */
+export function formatPageList(pages: number[]): string {
+  if (pages.length === 0) return '';
+  const parts: string[] = [];
+  let runStart = pages[0];
+  let prev = pages[0];
+  const flush = (): void => {
+    parts.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`);
+  };
+  for (const p of pages.slice(1)) {
+    if (p === prev + 1) {
+      prev = p;
+      continue;
+    }
+    flush();
+    runStart = p;
+    prev = p;
+  }
+  flush();
+  return parts.join(', ');
+}
+
+/**
  * Format structured text as Markdown.
  *
  * Rendered as an indented outline, which is what flat + `depth` already is —
@@ -245,7 +292,7 @@ export function formatStructuredTextMarkdown(result: StructuredTextResult): stri
     const indent = '  '.repeat(element.depth);
     const parts: string[] = [`${indent}- **${element.role}**`];
 
-    if (element.pages.length > 1) parts.push(`(pages ${element.pages.join('–')})`);
+    if (element.pages.length > 1) parts.push(`(pages ${formatPageList(element.pages)})`);
     else if (element.pages.length === 1) parts.push(`(page ${element.pages[0]})`);
 
     if (element.label) parts.push(`\`${element.label}\``);
@@ -258,7 +305,7 @@ export function formatStructuredTextMarkdown(result: StructuredTextResult): stri
     if (element.rows) {
       lines.push('');
       for (const [rowIndex, row] of element.rows.entries()) {
-        lines.push(`${indent}  | ${row.map((c) => c.text).join(' | ')} |`);
+        lines.push(`${indent}  | ${row.map((c) => escapeMarkdownCell(c.text)).join(' | ')} |`);
         if (rowIndex === 0 && row.some((c) => c.isHeader)) {
           lines.push(`${indent}  |${row.map(() => '---').join('|')}|`);
         }
@@ -554,7 +601,9 @@ export function formatTablesMarkdown(result: TablesExtractionResult): string {
   }
 
   for (const table of result.tables) {
-    lines.push('', `## Page ${table.page} — Table ${table.index}`, '');
+    const where =
+      table.pages.length === 1 ? `Page ${table.pages[0]}` : `Pages ${formatPageList(table.pages)}`;
+    lines.push('', `## Table ${table.index} — ${where}`, '');
     lines.push(renderTableAsMarkdown(table));
   }
 
