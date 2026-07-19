@@ -131,7 +131,7 @@ describe('08 - cross-service integration', () => {
   // テキスト抽出 → 検索の組み合わせ
   it('text extraction followed by search works correctly', async () => {
     await extractText(FIXTURES.simple);
-    const matches = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
+    const { matches } = await searchText(FIXTURES.simple, SEARCH_QUERIES.hello);
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 

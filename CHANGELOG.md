@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-20
+
+### Fixed
+
+- **🔴 `read_text` / `search_text` が `/ActualText` を解決するように**
+  ([#18](https://github.com/shuji-bonji/pdf-reader-mcp/issues/18))。0.9.0 は #15 を「明示」で閉じており、
+  **同一サーバ内で「この PDF に Difficult と書いてあるか」の答えが Yes/No に割れた**ままでした
+  （`extract_structured_text` は `Difficult`、`search_text("Difficult")` は 0 件）。本リリースで
+  ISO 32000-2 §14.9.4 が定める**置換テキストの 2 経路をどちらも解決**します。
+  - **経路 1 — 構造要素の `/ActualText`**（PDF 1.4）。`StructTreeRoot` を走査し、要素が持つ
+    マーク付きコンテンツ参照（`/Pg` + `/MCID`）を pdfjs の MCID に対応づけて置換します。
+    要素に `/ActualText` があればその**サブツリー全体**が置換対象なので、内側の `/ActualText` には
+    降りません（§14.9.4「a character substitution for the content **enclosed by**…」）。
+  - **経路 2 — マーク付きコンテンツの `/ActualText`**（PDF 1.5、`Span` の property list）。
+    pdfjs の `getTextContent({ includeMarkedContent: true })` は property list を捨てて `/MCID` しか
+    渡さないため、**コンテンツストリームを自前で走査**します（新規 `content-stream-service`）。
+    この経路は**タグ無し文書にも現れる**ので、構造木経由では原理的に届きません。
+  - **位置合わせは出現順インデックス**です。スキャナは `BMC`/`BDC`/`EMC` の順序だけを記録し、
+    pdfjs が出すマーカーと 1:1 で対応させます（座標マッチ不要）。**数が食い違ったページは
+    経路 2 を丸ごと諦めます** — 生グリフを返すのは 0.9.0 までの既知の挙動ですが、
+    ズレた位置に置換テキストを差し込むのは新しい壊れ方なので。`/Contents` 配列の結合と
+    Form XObject の `Do` 追跡は pdfjs と同じ順序に揃えてあります。
+  - **R-14.9.4-3 に対応**: 「consecutive な `/ActualText` の間に語区切りを入れてはならない」。
+    行グルーピングより優先されます（条文の EXAMPLE がまさに行跨ぎのハイフネーションのため）。
+  - `search_text` の `note` は #15 の一律警告から、**実際に解決できなかったページ**を名指しし、
+    さらに**理由**（`encrypted` / `unaligned`）を伝えるものに変わりました。暗号化が理由のときは
+    「他のツールでも解決できない」と言い切ります（`extract_structured_text` も pdf-lib 経由なので）。
+    内部 API では `searchText()` が `unresolvedReason` を返します。
+  - 副次的な変更: 空文字の EOL 項目が行頭に余分な空白を生んでいたのを止めました
+    （`"…\n This is…"` → `"…\nThis is…"`）。
+  - **暗号化 PDF では両経路を無効化**します。§7.6.2 が暗号化するのは**文字列とストリームだけ**なので、
+    構造木は普通に歩けてしまう一方、そこに入っている文字列は暗号文です。reader は pdf-lib を
+    `ignoreEncryption` で読む（＝復号はしない）ため、`/ActualText` として返るのは RC4 の出力でした。
+    実測: `PDF32000_2008.pdf`（オーナーパスワードのみ・ビューアでは普通に開く）は
+    **18026 件**の `/ActualText` を持ち、その全てが `&)ð` のようなバイト列。#18 はこれを
+    **本文の置換に使う**ので、1 ページ目の表題が
+    `Document management&)ð — 6±o Portable document format` になっていました。
+    `doc.isEncrypted` で `struct-tree-walker` の文字列読み取りと
+    コンテンツストリーム走査の両方を止めます（`extract_structured_text` /
+    `extract_tables` の `/ActualText`・`/Alt`・`/Lang` にも同じ穴があり、あわせて塞がります）。
+  - 新フィクスチャ `actual-text-span.pdf`（**タグ無し**・§14.9.4 EXAMPLE の「Druk-/ker → Drucker」と
+    連続 ActualText の「Bäcke-/rei → Bäckerei」）と `encrypted-actualtext.pdf`
+    （RC4 40-bit・`/ActualText` が暗号文。pdf-lib では作れないので手書き）、
+    ST-8・ST-10〜ST-15、`tests/tier1/actual-text-service.test.ts` を追加。
+  - `searchText()` の戻り値が `SearchMatch[]` → `{ matches, unresolvedPages, unresolvedReason }`
+    になりました（内部 API）。
+  - 構造木の走査部分を `struct-tree-walker.ts` に分離（pdfjs に依存しない部分だけを切り出し、
+    `actual-text-service` から循環インポートなしに使うため）。`struct-tree-service` は再エクスポートします。
+
 ## [0.9.0] - 2026-07-19
 
 > spec ⇄ reader 相互チェック（2026-07-19。`Document-Note/mcps/PDFfamily/reviews/` の 2 レポート）で

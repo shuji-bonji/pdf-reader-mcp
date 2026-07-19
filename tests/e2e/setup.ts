@@ -45,6 +45,18 @@ export const FIXTURES = {
    * must report one table with pages [1, 2].
    */
   spanningTable: resolve(FIXTURES_DIR, 'spanning-table.pdf'),
+  /**
+   * `/ActualText` on marked-content sequences, in an UNTAGGED document (#18).
+   * Page 1 is the ISO 32000-2 §14.9.4 EXAMPLE ("Druk-"/"ker" → "Drucker");
+   * page 2 has two consecutive Spans with ActualText, for R-14.9.4-3.
+   */
+  actualTextSpan: resolve(FIXTURES_DIR, 'actual-text-span.pdf'),
+  /**
+   * An RC4-encrypted tagged PDF whose `/ActualText` is ciphertext (#18).
+   * pdf-lib does not decrypt, so anything that trusts the string it returns
+   * substitutes garbage for the page text.
+   */
+  encryptedActualText: resolve(FIXTURES_DIR, 'encrypted-actualtext.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */

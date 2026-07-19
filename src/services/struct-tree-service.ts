@@ -37,16 +37,7 @@
  * text from pdfjs.
  */
 
-import {
-  PDFArray,
-  PDFDict,
-  type PDFDocument,
-  PDFHexString,
-  PDFName,
-  PDFNumber,
-  PDFRef,
-  PDFString,
-} from 'pdf-lib';
+import { PDFDict, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 import type {
   ExtractedTable,
   StructuredElement,
@@ -66,182 +57,25 @@ import {
   resolveLineBreaks,
 } from './pdfjs-service.js';
 import { loadWithPdfLib } from './pdflib-service.js';
+import {
+  type ContentRef,
+  collectContentRefs,
+  deref,
+  pdfjsMarkedContentId,
+  type StructElement,
+  walkStructTree,
+} from './struct-tree-walker.js';
 
-/**
- * A marked-content reference: the text this structure element owns on one page.
- *
- * `pageObjNum` is the object number of the `/Pg` page, which is what pdfjs's
- * marked-content id is built from (see `pdfjsMarkedContentId`).
- */
-export interface ContentRef {
-  pageObjNum: number;
-  mcid: number;
-}
-
-/** A node in the document's logical structure hierarchy. */
-export interface StructElement {
-  /** The structure type, `/S` (e.g. `H1`, `P`, `Table`). */
-  role: string;
-  /**
-   * `/ActualText` — a **character-level replacement** for the content
-   * (ISO 32000-2 §14.9.4: "shall be used as a replacement, not a description").
-   * When present it supersedes the glyphs; it is not a description.
-   */
-  actualText: string | null;
-  /**
-   * `/Alt` — an **alternate description** for content that "does not translate
-   * naturally into text" (§14.9.3), e.g. a Figure. This is a description *of*
-   * the content, not the content, so it is kept apart from the text and must
-   * never be reported as the element's text.
-   */
-  alt: string | null;
-  /** `/Lang`, if this element overrides the document language (§14.9.2). */
-  lang: string | null;
-  /** Marked-content references owned directly by this element, in order. */
-  contentRefs: ContentRef[];
-  /** Child structure elements, in document order. */
-  children: StructElement[];
-}
-
-/**
- * Build the pdfjs marked-content id for a `/Pg` + `/MCID` pair.
- *
- * pdfjs names marked content `p{pageObjectNumber}R_mc{mcid}` — verified against
- * pdfjs-dist in `tests/tier1/struct-tree-service.test.ts`. Note it drops the
- * generation number (`p7R`, not `p7_0R`).
- *
- * This format is pdfjs's internal convention, not a published contract, so the
- * test asserts it against real pdfjs output: if a pdfjs upgrade renames these,
- * the test fails rather than the tool silently returning empty text. (D-2 was
- * caused by hardcoding pdfjs constants without such a guard.)
- */
-export function pdfjsMarkedContentId(ref: ContentRef): string {
-  return `p${ref.pageObjNum}R_mc${ref.mcid}`;
-}
-
-/** Resolve a value that may be an indirect reference. */
-function deref(doc: PDFDocument, obj: unknown): unknown {
-  return obj instanceof PDFRef ? doc.context.lookup(obj) : obj;
-}
-
-/** Read a text-ish value (`PDFString` / `PDFHexString`) from a dictionary. */
-function textEntry(doc: PDFDocument, dict: PDFDict, key: string): string | null {
-  const value = deref(doc, dict.get(PDFName.of(key)));
-  if (value instanceof PDFString || value instanceof PDFHexString) return value.decodeText();
-  return null;
-}
-
-/** Normalise `/K` — it may be absent, a single object, or an array. */
-function kidsOf(doc: PDFDocument, dict: PDFDict): unknown[] {
-  const k = deref(doc, dict.get(PDFName.of('K')));
-  if (k === undefined || k === null) return [];
-  if (k instanceof PDFArray) return k.asArray();
-  return [k];
-}
-
-/**
- * Walk one structure element.
- *
- * `/K` is polymorphic (§14.7.2 Table 355) and every form has to be handled:
- *
- *  - **integer** — an MCID on the element's own (possibly inherited) `/Pg`
- *  - **MCR dict** — an MCID with its own `/Pg`, which is how an element points
- *    at content on a page other than its own. This is the page-spanning case.
- *  - **OBJR dict** — a reference to an annotation or form field. Skipped: it
- *    owns no page text.
- *  - **StructElem dict** — a child element, recursed into
- *
- * `/Pg` is inherited: an element without one uses its nearest ancestor's.
- */
-function walkElement(
-  doc: PDFDocument,
-  dict: PDFDict,
-  inheritedPg: PDFRef | undefined,
-): StructElement | null {
-  const s = deref(doc, dict.get(PDFName.of('S')));
-  if (!(s instanceof PDFName)) return null;
-
-  const pgValue = dict.get(PDFName.of('Pg'));
-  const pg = pgValue instanceof PDFRef ? pgValue : inheritedPg;
-
-  const element: StructElement = {
-    role: s.decodeText(),
-    actualText: textEntry(doc, dict, 'ActualText'),
-    alt: textEntry(doc, dict, 'Alt'),
-    lang: textEntry(doc, dict, 'Lang'),
-    contentRefs: [],
-    children: [],
-  };
-
-  for (const kid of kidsOf(doc, dict)) {
-    // An MCID written directly, on this element's page.
-    if (kid instanceof PDFNumber) {
-      if (pg) element.contentRefs.push({ pageObjNum: pg.objectNumber, mcid: kid.asNumber() });
-      continue;
-    }
-
-    const resolved = deref(doc, kid);
-    if (!(resolved instanceof PDFDict)) continue;
-
-    const type = resolved.get(PDFName.of('Type'));
-    const typeName = type instanceof PDFName ? type.decodeText() : null;
-
-    if (typeName === 'MCR') {
-      const mcid = deref(doc, resolved.get(PDFName.of('MCID')));
-      const mcrPgValue = resolved.get(PDFName.of('Pg'));
-      const mcrPg = mcrPgValue instanceof PDFRef ? mcrPgValue : pg;
-      if (mcid instanceof PDFNumber && mcrPg) {
-        element.contentRefs.push({ pageObjNum: mcrPg.objectNumber, mcid: mcid.asNumber() });
-      }
-      continue;
-    }
-
-    // OBJR points at an annotation or form field, which carries no page text.
-    if (typeName === 'OBJR') continue;
-
-    // Anything with an /S is a child structure element. Checking /S rather than
-    // Type == StructElem on purpose: Type is optional in practice and plenty of
-    // producers omit it.
-    if (resolved.get(PDFName.of('S'))) {
-      const child = walkElement(doc, resolved, pg);
-      if (child) element.children.push(child);
-    }
-  }
-
-  return element;
-}
-
-/**
- * Walk the document's structure tree from the catalog.
- *
- * Returns the top-level structure elements in document order, or `null` when the
- * catalog has no `StructTreeRoot` (an untagged document, or one whose structure
- * tree is unreachable).
- *
- * Note this reads only `StructTreeRoot`; it needs neither `/ParentTree` nor
- * `/StructParents`, which pdfjs's per-page `getStructTree()` does require.
- */
-export function walkStructTree(doc: PDFDocument): StructElement[] | null {
-  const root = deref(doc, doc.catalog.get(PDFName.of('StructTreeRoot')));
-  if (!(root instanceof PDFDict)) return null;
-
-  const elements: StructElement[] = [];
-  for (const kid of kidsOf(doc, root)) {
-    const resolved = deref(doc, kid);
-    if (resolved instanceof PDFDict && resolved.get(PDFName.of('S'))) {
-      const element = walkElement(doc, resolved, undefined);
-      if (element) elements.push(element);
-    }
-  }
-  return elements;
-}
-
-/** Collect every content reference under an element, in document order. */
-export function collectContentRefs(element: StructElement, into: ContentRef[] = []): ContentRef[] {
-  into.push(...element.contentRefs);
-  for (const child of element.children) collectContentRefs(child, into);
-  return into;
-}
+// The walk itself now lives in `struct-tree-walker` (pdf-lib only, no pdfjs) so
+// that `actual-text-service` can use it without a circular import. Re-exported
+// here because this module is the published entry point for structure work.
+export {
+  type ContentRef,
+  collectContentRefs,
+  pdfjsMarkedContentId,
+  type StructElement,
+  walkStructTree,
+};
 
 // ─── Structured text (M-8) ───────────────────────────────
 

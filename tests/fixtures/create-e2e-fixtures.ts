@@ -9,10 +9,13 @@
  *  - cid-font.pdf        : Type0 (composite/CID) fonts — embedded & not (High-1 regression)
  *  - image-kinds.pdf     : One image of each pdfjs ImageKind (High-2 / D-9 regression)
  *  - structured.pdf      : REAL tagged PDF with page-spanning elements (M-8)
+ *  - actual-text-span.pdf: UNTAGGED PDF with Span-level /ActualText (#18, §14.9.4)
+ *  - encrypted-actualtext.pdf: RC4-encrypted tagged PDF whose /ActualText is ciphertext (#18)
  *  - no-metadata.pdf     : PDF with no metadata set
  *  - corrupted.pdf       : Invalid file (non-PDF bytes)
  */
 
+import { createHash } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import {
@@ -966,6 +969,203 @@ async function createSpanningTablePdf(): Promise<void> {
 /**
  * Create a corrupted "PDF" file (non-PDF bytes).
  */
+/**
+ * `/ActualText` on **marked-content sequences**, in an UNTAGGED document (#18).
+ *
+ * This is the second of the two places ISO 32000-2 §14.9.4 allows replacement
+ * text, and the one no structure-tree walk can reach:
+ *
+ * > (PDF 1.5) A marked-content sequence (see 14.6, "Marked content"), through
+ * > an ActualText entry in a property list attached to the marked-content
+ * > sequence with a Span tag.
+ *
+ * The document deliberately has **no** `StructTreeRoot` and no `/MarkInfo`, so
+ * anything that resolves it had to read the content stream.
+ *
+ * **Page 1** is the clause's EXAMPLE — German hyphenation used to change the
+ * spelling of "Drucker", and `/ActualText (c)` puts the `c` back where the
+ * glyphs say `k-`:
+ *
+ * ```
+ * (Dru) Tj /Span <</ActualText (c)>> BDC (k-) Tj EMC (ker) Tj
+ * ```
+ *
+ * It is drawn on one line so the fixture tests the substitution itself; the
+ * cross-line case gets its own page.
+ *
+ * **Page 2** exercises R-14.9.4-3 — "If each of two (or more) consecutive
+ * structure or marked-content sequences has an ActualText entry, they shall be
+ * treated as if no word break is present between them." Two Spans, each with
+ * `/ActualText`, on two different lines: "Bäcke-" + "rei" must read "Bäckerei"
+ * with nothing between, line break included. Their values are hex strings with
+ * a UTF-16BE BOM, which is also the encoding path a real producer uses for
+ * anything outside ASCII.
+ */
+async function createActualTextSpanPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  /** A PDF hex string holding `text` as UTF-16BE with a BOM (§7.9.2.2). */
+  const utf16Hex = (text: string): string => {
+    let hex = 'FEFF';
+    for (const unit of text) {
+      const code = unit.codePointAt(0) ?? 0;
+      hex += code.toString(16).padStart(4, '0').toUpperCase();
+    }
+    return `<${hex}>`;
+  };
+
+  const setContent = (page: ReturnType<typeof doc.addPage>, operators: string): void => {
+    const fontName = page.node.newFontDictionary('F1', font.ref);
+    const stream = doc.context.stream(`BT ${fontName} 12 Tf ${operators} ET`);
+    page.node.set(PDFName.of('Contents'), doc.context.register(stream));
+  };
+
+  const page1 = doc.addPage([300, 200]);
+  setContent(page1, '20 150 Td (Dru) Tj /Span <</ActualText (c)>> BDC (k-) Tj EMC (ker) Tj');
+
+  const page2 = doc.addPage([300, 200]);
+  setContent(
+    page2,
+    `20 150 Td /Span <</ActualText ${utf16Hex('Bäcke')}>> BDC (Bäcke-) Tj EMC ` +
+      `0 -20 Td /Span <</ActualText ${utf16Hex('rei')}>> BDC (rei) Tj EMC`,
+  );
+
+  // No MarkInfo, no StructTreeRoot: the point is that this is NOT a tagged PDF.
+  await writeFile(`${FIXTURES_DIR}/actual-text-span.pdf`, await doc.save());
+  console.log('Created: actual-text-span.pdf (untagged, Span-level /ActualText, §14.9.4)');
+}
+
+/**
+ * An **encrypted** tagged PDF whose `/ActualText` must NOT be trusted (#18).
+ *
+ * ISO 32000-2 §7.6.2 encrypts *strings and streams* and nothing else. So an
+ * encrypted document's structure tree still walks perfectly — names, numbers and
+ * references are all in the clear — while every string in it is ciphertext. The
+ * reader loads pdf-lib with `ignoreEncryption`, which ignores encryption rather
+ * than undoing it, so the `/ActualText` pdf-lib hands back is the ciphertext.
+ *
+ * Before this fixture existed, that ciphertext went straight into `read_text`.
+ * Measured on `PDF32000_2008.pdf` (owner-password encrypted, opens fine in any
+ * viewer): 18026 `/ActualText` entries, every one of them bytes like `&)ð`,
+ * each one *replacing* the page text it was attached to. Page 1's title came out
+ * as "Document management&)ð — 6±o Portable document format…".
+ *
+ * The fixture is written by hand rather than with pdf-lib, which cannot produce
+ * encrypted files. It uses the standard security handler at V1/R2 (RC4, 40-bit)
+ * with an empty user password — the "permissions only" encryption that real
+ * documents like the one above use. The glyphs read `Dif\`cult` and the
+ * (encrypted) `/ActualText` says `Difficult`; a reader that resolved it here
+ * would be resolving ciphertext, so `read_text` must return the glyphs.
+ */
+async function createEncryptedActualTextPdf(): Promise<void> {
+  /** §7.6.4.3 Table 25 — the 32-byte padding string. */
+  const PAD = Buffer.from([
+    0x28, 0xbf, 0x4e, 0x5e, 0x4e, 0x75, 0x8a, 0x41, 0x64, 0x00, 0x4e, 0x56, 0xff, 0xfa, 0x01, 0x08,
+    0x2e, 0x2e, 0x00, 0xb6, 0xd0, 0x68, 0x3e, 0x80, 0x2f, 0x0c, 0xa9, 0xfe, 0x64, 0x53, 0x69, 0x7a,
+  ]);
+  const md5 = (...bufs: Buffer[]): Buffer => createHash('md5').update(Buffer.concat(bufs)).digest();
+
+  function rc4(key: Buffer, data: Buffer): Buffer {
+    const s = Array.from({ length: 256 }, (_, i) => i);
+    let j = 0;
+    for (let i = 0; i < 256; i++) {
+      j = (j + s[i] + key[i % key.length]) & 0xff;
+      [s[i], s[j]] = [s[j], s[i]];
+    }
+    const out = Buffer.alloc(data.length);
+    let i = 0;
+    j = 0;
+    for (let k = 0; k < data.length; k++) {
+      i = (i + 1) & 0xff;
+      j = (j + s[i]) & 0xff;
+      [s[i], s[j]] = [s[j], s[i]];
+      out[k] = data[k] ^ s[(s[i] + s[j]) & 0xff];
+    }
+    return out;
+  }
+
+  const permissions = -1;
+  const pBytes = Buffer.alloc(4);
+  pBytes.writeInt32LE(permissions, 0);
+  const fileId = Buffer.from('0123456789abcdef0123456789abcdef', 'hex');
+
+  // Algorithm 3: /O, from the owner password — absent, so the user password
+  // (also empty) is padded and used instead.
+  const O = rc4(md5(PAD).subarray(0, 5), PAD);
+  // Algorithm 2: the file encryption key.
+  const key = md5(PAD, O, pBytes, fileId).subarray(0, 5);
+  // Algorithm 4: /U for R2.
+  const U = rc4(key, PAD);
+  // Algorithm 1: the per-object key is the file key plus the object and
+  // generation numbers, little-endian, hashed.
+  const objectKey = (num: number, gen = 0): Buffer =>
+    md5(
+      key,
+      Buffer.from([
+        num & 0xff,
+        (num >> 8) & 0xff,
+        (num >> 16) & 0xff,
+        gen & 0xff,
+        (gen >> 8) & 0xff,
+      ]),
+    ).subarray(0, Math.min(key.length + 5, 16));
+
+  const hex = (buf: Buffer): string => `<${buf.toString('hex').toUpperCase()}>`;
+  const content = rc4(
+    objectKey(4),
+    Buffer.from('/P <</MCID 0>> BDC BT /F1 12 Tf 20 50 Td (Dif`cult) Tj ET EMC\n', 'latin1'),
+  );
+  const actualText = rc4(objectKey(7), Buffer.from('Difficult', 'latin1'));
+
+  const objects: (string | null)[] = [
+    '<</Type/Catalog/Pages 2 0 R/MarkInfo<</Marked true>>/StructTreeRoot 6 0 R>>',
+    '<</Type/Pages/Kids[3 0 R]/Count 1>>',
+    '<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]/Resources<</Font<</F1 5 0 R>>>>/Contents 4 0 R/StructParents 0>>',
+    null, // 4 — the content stream, written separately
+    '<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>',
+    '<</Type/StructTreeRoot/K 7 0 R>>',
+    `<</Type/StructElem/S/P/P 6 0 R/Pg 3 0 R/K 0/ActualText ${hex(actualText)}>>`,
+    // The /Encrypt dictionary's own strings are exempt from encryption (§7.6.2).
+    `<</Filter/Standard/V 1/R 2/Length 40/O ${hex(O)}/U ${hex(U)}/P ${permissions}>>`,
+  ];
+
+  const parts: Buffer[] = [];
+  let offset = 0;
+  const push = (chunk: string | Buffer): void => {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'latin1');
+    parts.push(bytes);
+    offset += bytes.length;
+  };
+  const offsets: number[] = [];
+
+  push('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n');
+  for (let i = 0; i < objects.length; i++) {
+    offsets[i + 1] = offset;
+    if (objects[i] === null) {
+      push(`${i + 1} 0 obj\n<</Length ${content.length}>>\nstream\n`);
+      push(content);
+      push('\nendstream\nendobj\n');
+    } else {
+      push(`${i + 1} 0 obj\n${objects[i]}\nendobj\n`);
+    }
+  }
+
+  const startxref = offset;
+  let table = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= objects.length; i++) {
+    table += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+  push(table);
+  push(
+    `trailer\n<</Size ${objects.length + 1}/Root 1 0 R/Encrypt 8 0 R/ID[${hex(fileId)}${hex(fileId)}]>>\n` +
+      `startxref\n${startxref}\n%%EOF\n`,
+  );
+
+  await writeFile(`${FIXTURES_DIR}/encrypted-actualtext.pdf`, Buffer.concat(parts));
+  console.log('Created: encrypted-actualtext.pdf (RC4 40-bit, tagged, /ActualText is ciphertext)');
+}
+
 async function createCorruptedPdf(): Promise<void> {
   const data = Buffer.from('This is not a PDF file. Just random text content.\n'.repeat(10));
   await writeFile(`${FIXTURES_DIR}/corrupted.pdf`, data);
@@ -984,6 +1184,8 @@ async function main(): Promise<void> {
     ['image-kinds', createImageKindsPdf],
     ['structured', createStructuredPdf],
     ['spanning-table', createSpanningTablePdf],
+    ['actual-text-span', createActualTextSpanPdf],
+    ['encrypted-actualtext', createEncryptedActualTextPdf],
     ['no-metadata', createNoMetadataPdf],
     ['corrupted', createCorruptedPdf],
   ];
