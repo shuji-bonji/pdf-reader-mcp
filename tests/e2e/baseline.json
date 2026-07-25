@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 66,
-      "timestamp": "2026-07-19T21:33:10.212Z"
+      "durationMs": 151,
+      "timestamp": "2026-07-25T11:26:05.363Z"
     },
     {
       "operation": "extractText-3pages",
-      "durationMs": 12,
-      "timestamp": "2026-07-19T21:33:10.227Z"
+      "durationMs": 14,
+      "timestamp": "2026-07-25T11:26:05.379Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 5,
-      "timestamp": "2026-07-19T21:33:10.231Z"
+      "durationMs": 6,
+      "timestamp": "2026-07-25T11:26:05.385Z"
     },
     {
       "operation": "analyzeStructure",
-      "durationMs": 3,
-      "timestamp": "2026-07-19T21:33:10.235Z"
+      "durationMs": 5,
+      "timestamp": "2026-07-25T11:26:05.390Z"
     },
     {
       "operation": "analyzeFonts",
       "durationMs": 2,
-      "timestamp": "2026-07-19T21:33:10.237Z"
+      "timestamp": "2026-07-25T11:26:05.392Z"
     },
     {
       "operation": "validateTagged",
-      "durationMs": 6,
-      "timestamp": "2026-07-19T21:33:10.243Z"
+      "durationMs": 7,
+      "timestamp": "2026-07-25T11:26:05.398Z"
     },
     {
       "operation": "validateMetadata",
-      "durationMs": 3,
-      "timestamp": "2026-07-19T21:33:10.247Z"
+      "durationMs": 5,
+      "timestamp": "2026-07-25T11:26:05.403Z"
     },
     {
       "operation": "compareStructure",
       "durationMs": 7,
-      "timestamp": "2026-07-19T21:33:10.254Z"
+      "timestamp": "2026-07-25T11:26:05.411Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 25,
-      "timestamp": "2026-07-19T21:33:10.280Z"
+      "durationMs": 24,
+      "timestamp": "2026-07-25T11:26:05.435Z"
     },
     {
       "operation": "countImages",
-      "durationMs": 6,
-      "timestamp": "2026-07-19T21:33:10.287Z"
+      "durationMs": 7,
+      "timestamp": "2026-07-25T11:26:05.442Z"
     },
     {
       "operation": "analyzeSignatures",
-      "durationMs": 4,
-      "timestamp": "2026-07-19T21:33:10.290Z"
+      "durationMs": 5,
+      "timestamp": "2026-07-25T11:26:05.447Z"
     }
   ]
 }

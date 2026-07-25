@@ -19,10 +19,40 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { SERVER_NAME, SERVER_VERSION } from './constants.js';
 import { registerAllTools } from './tools/index.js';
 
-const server = new McpServer({
-  name: SERVER_NAME,
-  version: SERVER_VERSION,
-});
+/**
+ * `initialize` の応答としてクライアントへ返す説明（family 規約: PDFfamily specs/06）。
+ *
+ * **reader の出力は「観測」であって「判定」ではない。** ツール説明にも書いてあるが、
+ * `instructions` はクライアントのシステムコンテキストに直接載るため、ツールを 1 つも
+ * 呼ばないうちに読まれる — 射程を伝える位置としてはここが最も早い。
+ * 先例は pdf-spec-mcp v0.4.5（Issue #13）。
+ */
+const INSTRUCTIONS = `This server OBSERVES what is inside a PDF. It does not judge whether it is correct.
+
+Everything it returns is an observation: extracted text, tables, the structure tree, fonts,
+annotations, images, and the *structure* of signature fields. Treat the output as evidence,
+never as a verdict.
+
+What it does NOT do:
+  - No cryptographic verification. inspect_signatures reads signature fields structurally and
+    says so explicitly; whether a signature is mathematically valid is pdf-verify-mcp's answer
+    (verify_signatures / verify_integrity).
+  - No conformance judgement. validate_tagged / validate_metadata are deprecated in favour of
+    pdf-verify-mcp's validate_conformance, which delegates to veraPDF.
+  - No incremental-update history, no object-ID-to-coordinate mapping, no OCR.
+
+Where an observation here and a verdict from pdf-verify-mcp disagree, the verdict wins —
+this server reads the file, the validator applies the rules.
+
+For what the specification *requires*, ask pdf-spec-mcp. This server never quotes ISO clauses.`;
+
+const server = new McpServer(
+  {
+    name: SERVER_NAME,
+    version: SERVER_VERSION,
+  },
+  { instructions: INSTRUCTIONS },
+);
 
 // Register all tools
 registerAllTools(server);

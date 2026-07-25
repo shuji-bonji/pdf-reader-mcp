@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-07-25
+
+### Documentation
+
+- **The server now sends `instructions` on `initialize`.** A client loads them into its system
+  context before calling a single tool, which makes it the earliest point at which this server's
+  scope can be stated — earlier than any tool description.
+
+  What it states: **everything this server returns is an observation, not a verdict.** Extracted
+  text, tables, the structure tree, fonts and the *structure* of signature fields are evidence.
+  Whether a signature is mathematically valid, or whether a file conforms to anything, is
+  pdf-verify-mcp's answer. Where an observation here disagrees with a verdict there, the verdict
+  wins — this server reads the file, the validator applies the rules.
+
+  Behaviour is unchanged; no tool was added, removed or altered.
+
 ## [0.9.1] - 2026-07-20
 
 ### Fixed
