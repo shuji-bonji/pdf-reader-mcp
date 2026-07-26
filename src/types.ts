@@ -381,3 +381,61 @@ export interface StructureComparison {
   };
   summary: string;
 }
+
+// ─── Object → coordinates (Issue #20 / family gap G-A) ───
+
+/**
+ * A rectangle in PDF user space: origin bottom-left, points, `x1 < x2` and
+ * `y1 < y2` (ISO 32000-1 §7.9.5 normalised form). Deliberately the same shape
+ * `pdf-writer-mcp`'s `add_annotation` takes, so a result can be handed over
+ * without reinterpretation.
+ */
+export interface ObjectRect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** How an object's coordinates were arrived at */
+export type ObjectLocationBasis =
+  /** the object's own `/Rect` — exact */
+  | 'annotation-rect'
+  /** the object is a page; the rectangle is its crop/media box */
+  | 'page-box'
+  /** the object is a page's content stream; the rectangle is the whole page */
+  | 'page-content-stream'
+  /** the object is a resource of the page and has no rectangle of its own */
+  | 'page-resource';
+
+/** One place an object occupies. An object may be used by several pages. */
+export interface ObjectLocation {
+  /** 1-based page number; null when no page could be tied to the object */
+  page: number | null;
+  /** null when the object has no rectangle (a font, an image resource, …) */
+  rect: ObjectRect | null;
+  basis: ObjectLocationBasis;
+}
+
+/** locate_objects result for one requested object number */
+export interface LocatedObject {
+  objectNumber: number;
+  /** Generation as present in the document; null when the object was not found */
+  generation: number | null;
+  /** false when no object with this number exists — e.g. freed by a revision */
+  found: boolean;
+  type: string | null;
+  subtype: string | null;
+  /** `/T` of a form field, when readable (never for an encrypted document) */
+  fieldName: string | null;
+  locations: ObjectLocation[];
+  /** Why there is no location, or what the returned one does and does not mean */
+  reason: string | null;
+}
+
+/** locate_objects output */
+export interface ObjectLocationResult {
+  objects: LocatedObject[];
+  isEncrypted: boolean;
+  notes: string[];
+}

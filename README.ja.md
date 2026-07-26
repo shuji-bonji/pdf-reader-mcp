@@ -22,7 +22,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ## 機能
 
-**17 ツール** を 3 層構成で提供します。
+**18 ツール** を 3 層構成で提供します。
 
 ### Tier 1: 基本機能
 
@@ -47,6 +47,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `inspect_signatures`  | 電子署名フィールドの構造解析                             |
 | `extract_structured_text` | Tagged PDF のテキストを**論理コンテンツ順**（ISO 32000-2 §14.8.2.5）で、構造タイプ（`H1` / `P` / `Table` …）のラベル付きで抽出。`/ActualText` を解決し、`/Alt`・箇条書き記号は本文と分離、ページ跨ぎ要素は 1 要素のまま |
 | `extract_tables`      | Tagged PDF の `<Table>` を Markdown テーブルとして抽出。ページを跨ぐ表は 1 つの表（`pages` 配列）として返す |
+| `locate_objects`      | オブジェクト番号 → ページ + 矩形。座標は [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) の `add_annotation` がそのまま受け取る形（PDF 座標系・左下原点・pt・正規化済み）。[pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `verify_integrity` が返す「どのオブジェクトが変わったか」を「どこにあるか」に繋ぐ。各位置は根拠（`basis`）を明示する — 注釈自身の `/Rect` は正確、コンテンツストリームは「ページ全体」までしか言えない |
 
 ### Tier 3: 検証・分析
 

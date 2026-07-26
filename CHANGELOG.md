@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-27
+
+### Added
+
+- **`locate_objects` — object number → page and rectangle**
+  ([#20](https://github.com/shuji-bonji/pdf-reader-mcp/issues/20)). The family could say *which*
+  object changed (`verify_integrity`) and could *draw* on a rectangle (`add_annotation`), but had
+  no way to get from one to the other: `add_annotation` requires a rect, and nothing in the family
+  could produce it. That gap is why UC-10 — "point at the object that was tampered with" — was
+  filed as undesigned rather than as work.
+
+  The rectangle comes back in PDF user space, origin bottom-left, in points, normalised to
+  `x1 < x2` and `y1 < y2` (ISO 32000-1 §7.9.5). That is not a formatting choice: it is the exact
+  shape `add_annotation` accepts, so the result can be handed over without being reinterpreted —
+  and reinterpretation is where coordinate systems go wrong.
+
+  **Every location names the basis it rests on**, because they are not equally strong claims:
+
+  | basis | what it means | how exact |
+  | --- | --- | --- |
+  | `annotation-rect` | the object's own `/Rect` | exact |
+  | `page-box` | the object is a page; its crop/media box | exact |
+  | `page-content-stream` | the object draws the page | **the whole page**, not the part that changed |
+  | `page-resource` | a font, image or colour space the page uses | no rectangle exists |
+
+  Collapsing those into one "rect" field would let a page-sized rectangle be read as "the region
+  that changed". Narrowing a content stream to the paragraph that moved needs a content-stream
+  walk carrying the graphics state — the structure-element→bbox half of #20, which stays open.
+
+  Two distinctions kept deliberately: an object number with no object is `found: false`, not
+  "found but unlocatable" (a diff hands over objects a later revision freed, and the two readings
+  are opposite); and in an encrypted document coordinates and types are still reported — numbers
+  and names are not encrypted, ISO 32000-1 §7.6.2 — while `/T` field names come back as `null`
+  rather than as the ciphertext pdf-lib would hand over.
+
+  Verified against 60 PDFs on hand: 0 errors. On a real sign-then-annotate specimen the tool turns
+  verify's "object 27 was added after the signature" into page 1, rect (72, 700, 300, 720), which
+  `add_annotation` takes as-is — UC-10 end to end.
+
 ## [0.9.2] - 2026-07-25
 
 ### Documentation

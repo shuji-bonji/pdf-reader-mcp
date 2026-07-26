@@ -8,6 +8,7 @@ import type {
   ExtractedTable,
   FontsAnalysis,
   MetadataValidation,
+  ObjectLocationResult,
   PageText,
   PdfMetadata,
   PdfSummary,
@@ -641,4 +642,60 @@ function padCells(cells: { text: string }[], n: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < n; i++) out.push(cells[i]?.text ?? '');
   return out;
+}
+
+/**
+ * locate_objects — object number → page and rectangle.
+ *
+ * The basis of each coordinate is printed next to it on purpose: a rectangle
+ * taken from an annotation's own `/Rect` and one that is merely "the page this
+ * content stream draws" are not the same claim, and a report that hides the
+ * difference invites the second to be read as the first.
+ */
+export function formatObjectLocationsMarkdown(result: ObjectLocationResult): string {
+  const lines: string[] = ['# Object Locations', ''];
+  lines.push(
+    'Coordinates are PDF user space (origin bottom-left, pt), normalised to `x1 < x2` and',
+    '`y1 < y2` — the form `add_annotation` takes.',
+    '',
+  );
+
+  for (const object of result.objects) {
+    const label = [
+      object.type ? `/${object.type}` : null,
+      object.subtype ? `/${object.subtype}` : null,
+      object.fieldName ? `"${object.fieldName}"` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    lines.push(`## Object ${object.objectNumber}${label ? ` — ${label}` : ''}`, '');
+
+    if (!object.found) {
+      lines.push('- **Not found in the document**');
+      if (object.reason) lines.push(`- ${object.reason}`);
+      lines.push('');
+      continue;
+    }
+
+    if (object.locations.length === 0) {
+      lines.push('- No location');
+    } else {
+      lines.push('| Page | Rect (x1, y1, x2, y2) | Basis |', '|---|---|---|');
+      for (const location of object.locations) {
+        const rect = location.rect
+          ? `${location.rect.x1}, ${location.rect.y1}, ${location.rect.x2}, ${location.rect.y2}`
+          : '—';
+        lines.push(`| ${location.page ?? '—'} | ${rect} | ${location.basis} |`);
+      }
+    }
+    if (object.reason) lines.push('', `> ${object.reason}`);
+    lines.push('');
+  }
+
+  if (result.notes.length > 0) {
+    lines.push('## Notes', '');
+    for (const note of result.notes) lines.push(`- ${note}`);
+  }
+
+  return lines.join('\n');
 }

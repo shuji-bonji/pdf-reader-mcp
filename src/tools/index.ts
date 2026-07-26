@@ -20,6 +20,7 @@ import { registerInspectFonts } from './tier2/inspect-fonts.js';
 import { registerInspectSignatures } from './tier2/inspect-signatures.js';
 import { registerInspectStructure } from './tier2/inspect-structure.js';
 import { registerInspectTags } from './tier2/inspect-tags.js';
+import { registerLocateObjects } from './tier2/locate-objects.js';
 // Tier 3: Validation & analysis
 import { registerCompareStructure } from './tier3/compare-structure.js';
 import { registerValidateMetadata } from './tier3/validate-metadata.js';
@@ -46,6 +47,7 @@ export function registerAllTools(server: McpServer): void {
   registerInspectSignatures(server);
   registerExtractTables(server);
   registerExtractStructuredText(server);
+  registerLocateObjects(server);
 
   // Tier 3: Validation & analysis
   registerValidateTagged(server);

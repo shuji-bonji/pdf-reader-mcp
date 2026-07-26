@@ -22,7 +22,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**17 tools** organized into three tiers:
+**18 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -47,6 +47,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `inspect_signatures`  | Digital signature field structure analysis                          |
 | `extract_structured_text` | Tagged PDF text in **logical content order** (ISO 32000-2 §14.8.2.5), each piece labelled with its structure type (`H1` / `P` / `Table` …). Resolves `/ActualText`, separates `/Alt` and list labels, keeps page-spanning elements whole |
 | `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns). A table continuing across a page break is ONE table (`pages` array) |
+| `locate_objects`      | Object number → page and rectangle, in the coordinate form [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) `add_annotation` takes. Bridges [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `verify_integrity`'s "which objects changed" to "where they are". Each location names its `basis`: an annotation's own `/Rect` is exact, a content stream can only say "the whole page" |
 
 ### Tier 3: Validation & Analysis
 

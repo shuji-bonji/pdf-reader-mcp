@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 151,
-      "timestamp": "2026-07-25T11:26:05.363Z"
+      "durationMs": 93,
+      "timestamp": "2026-07-26T23:40:55.507Z"
     },
     {
       "operation": "extractText-3pages",
       "durationMs": 14,
-      "timestamp": "2026-07-25T11:26:05.379Z"
+      "timestamp": "2026-07-26T23:40:55.522Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 6,
-      "timestamp": "2026-07-25T11:26:05.385Z"
+      "durationMs": 5,
+      "timestamp": "2026-07-26T23:40:55.527Z"
     },
     {
       "operation": "analyzeStructure",
-      "durationMs": 5,
-      "timestamp": "2026-07-25T11:26:05.390Z"
+      "durationMs": 3,
+      "timestamp": "2026-07-26T23:40:55.530Z"
     },
     {
       "operation": "analyzeFonts",
       "durationMs": 2,
-      "timestamp": "2026-07-25T11:26:05.392Z"
+      "timestamp": "2026-07-26T23:40:55.531Z"
     },
     {
       "operation": "validateTagged",
       "durationMs": 7,
-      "timestamp": "2026-07-25T11:26:05.398Z"
+      "timestamp": "2026-07-26T23:40:55.539Z"
     },
     {
       "operation": "validateMetadata",
       "durationMs": 5,
-      "timestamp": "2026-07-25T11:26:05.403Z"
+      "timestamp": "2026-07-26T23:40:55.544Z"
     },
     {
       "operation": "compareStructure",
-      "durationMs": 7,
-      "timestamp": "2026-07-25T11:26:05.411Z"
+      "durationMs": 15,
+      "timestamp": "2026-07-26T23:40:55.560Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 24,
-      "timestamp": "2026-07-25T11:26:05.435Z"
+      "durationMs": 13,
+      "timestamp": "2026-07-26T23:40:55.573Z"
     },
     {
       "operation": "countImages",
-      "durationMs": 7,
-      "timestamp": "2026-07-25T11:26:05.442Z"
+      "durationMs": 4,
+      "timestamp": "2026-07-26T23:40:55.577Z"
     },
     {
       "operation": "analyzeSignatures",
-      "durationMs": 5,
-      "timestamp": "2026-07-25T11:26:05.447Z"
+      "durationMs": 3,
+      "timestamp": "2026-07-26T23:40:55.581Z"
     }
   ]
 }

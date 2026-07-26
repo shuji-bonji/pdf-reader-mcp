@@ -38,6 +38,22 @@ export const InspectAnnotationsSchema = z
   })
   .strict();
 
+/** locate_objects */
+export const LocateObjectsSchema = z
+  .object({
+    file_path: FilePathSchema,
+    object_numbers: z
+      .array(z.number().int().min(1))
+      .min(1)
+      .max(200)
+      .describe(
+        'Object numbers to locate, e.g. [25, 27]. Typically the objects ' +
+          "pdf-verify-mcp's verify_integrity reported as changed.",
+      ),
+    response_format: ResponseFormatSchema,
+  })
+  .strict();
+
 /** extract_structured_text */
 export const ExtractStructuredTextSchema = z
   .object({
@@ -81,3 +97,4 @@ export type InspectAnnotationsInput = z.infer<typeof InspectAnnotationsSchema>;
 export type InspectSignaturesInput = z.infer<typeof InspectSignaturesSchema>;
 export type ExtractTablesInput = z.infer<typeof ExtractTablesSchema>;
 export type ExtractStructuredTextInput = z.infer<typeof ExtractStructuredTextSchema>;
+export type LocateObjectsInput = z.infer<typeof LocateObjectsSchema>;
