@@ -45,7 +45,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `inspect_fonts`       | フォント一覧（埋め込み/サブセット/Type判定）             |
 | `inspect_annotations` | 注釈一覧（タイプ別分類）                                 |
 | `inspect_signatures`  | 電子署名フィールドの構造解析                             |
-| `extract_structured_text` | Tagged PDF のテキストを**論理コンテンツ順**（ISO 32000-2 §14.8.2.5）で、構造タイプ（`H1` / `P` / `Table` …）のラベル付きで抽出。`/ActualText` を解決し、`/Alt`・箇条書き記号は本文と分離、ページ跨ぎ要素は 1 要素のまま |
+| `extract_structured_text` | Tagged PDF のテキストを**論理コンテンツ順**（ISO 32000-2 §14.8.2.5）で、構造タイプ（`H1` / `P` / `Table` …）のラベル付きで抽出。`/ActualText` を解決し、`/Alt`・箇条書き記号は本文と分離、ページ跨ぎ要素は 1 要素のまま。`include_bbox: true` で**各要素の描画位置**（ページごとに 1 矩形・`add_annotation` がそのまま取る形）を追加 |
 | `extract_tables`      | Tagged PDF の `<Table>` を Markdown テーブルとして抽出。ページを跨ぐ表は 1 つの表（`pages` 配列）として返す |
 | `locate_objects`      | オブジェクト番号 → ページ + 矩形。座標は [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) の `add_annotation` がそのまま受け取る形（PDF 座標系・左下原点・pt・正規化済み）。[pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `verify_integrity` が返す「どのオブジェクトが変わったか」を「どこにあるか」に繋ぐ。各位置は根拠（`basis`）を明示する — 注釈自身の `/Rect` は正確、コンテンツストリームは「ページ全体」までしか言えない |
 
@@ -188,6 +188,44 @@ extract_structured_text({ file_path: "/path/to/report.pdf", pages: "1-2" })
 箇条書き記号は `label` に分離、ページ跨ぎ要素は 1 要素のまま返します。
 `roles: ["H1", "H2"]` でアウトラインだけの取得も可能。タグ無し文書は座標から
 推測せず `isTagged: false` と理由を返します。
+
+#### `include_bbox`: 要素がどこに描かれているか
+
+```
+extract_structured_text({ file_path: "/doc.pdf", roles: ["P"], include_bbox: true })
+→ - **P** (page 1) — Measured paragraph
+    - *bbox* p1 `(50.0, 297.5, 161.4, 308.6)` — text-extent
+  - **Figure** (page 1)
+    - *bbox* p1 `(50.0, 150.0, 110.0, 190.0)` — layout-attribute-bbox
+```
+
+矩形は PDF default user space（左下原点・pt・正規化済み）＝
+[pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) `add_annotation`
+がそのまま取る形なので、「この段落に注釈を付ける」の途中で座標系を解釈し直す
+必要がありません。`/Rotate` や原点がずれた `/CropBox` の影響も受けません。
+
+`basis` は主張の強さを表し、2 つは**種類が違う**:
+
+| `basis` | 中身 |
+| --- | --- |
+| `layout-attribute-bbox` | ファイルが**宣言**している `/BBox`（ISO 32000-2 Table 379）。`/A` と `/C` + `/ClassMap` の両経路を読む。生成者の申告をそのまま返す＝**テキストを持たない内容について言える唯一の根拠** |
+| `text-extent` | 要素が持つテキストからの**実測**。ベースライン原点＋フォントの ascent/descent = 行ボックスであってグリフ輪郭ではない。画像・ベクター描画は一切寄与しない |
+
+ページを跨ぐ要素は**ページごとに 1 矩形**（1 つに潰すと、その要素が無いページに
+矩形を置くことになる）。矩形が出せない要素は 0 幅の矩形ではなく `boxNote` で
+理由を述べます。
+
+**宣言はそのまま返した上で、突き合わせます。** ファイルは平気で嘘を書きます —
+*Well-Tagged PDF 1.0* と *Tagged PDF Best Practice Guide* の**両方**の表紙 `Figure` が
+`/BBox [-32768 -32768 32767 32767]`（矩形であるべき場所に int16 のセンチネル）を
+宣言しており、PDF32000_2008 は 545 件中 131 件がページの外まで届きます。
+この出力は `add_annotation` にそのまま渡される前提なので、宣言は**ページボックス
+（§7.7.3.3）**と**要素自身の本文**の両方に突き合わせ、どちらかと矛盾すれば
+`boxNote` で報告します（矩形自体は改変せずそのまま返します）。
+
+**独立した正解との突き合わせ**: *Well-Tagged PDF (WTPDF) 1.0* で、`Link` 構造要素
+166 件の実測矩形を、生成者が同じリンクに対して置いた `Link` **注釈**の `/Rect`
+173 件と比較した結果、IoU 中央値 **0.972**・完全に外れたものは 0 件。
 
 ### Tagged PDF からテーブル抽出
 

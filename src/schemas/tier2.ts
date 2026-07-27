@@ -68,6 +68,18 @@ export const ExtractStructuredTextSchema = z
       .describe(
         'Structure types to include, e.g. ["H1","H2"] to extract an outline. Omit for all roles.',
       ),
+    include_bbox: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        'Also report where each element is drawn, as boxes: one rectangle per page in PDF ' +
+          'default user space (origin bottom-left, pt, normalised) — the form pdf-writer-mcp ' +
+          'add_annotation takes. Each carries a basis: "layout-attribute-bbox" (the /BBox the ' +
+          'file declares) or "text-extent" (measured from the element\'s text; images and ' +
+          'vector art contribute nothing). Elements with no rectangle carry boxNote saying why. ' +
+          'Off by default: it costs a second pass over every page.',
+      ),
     response_format: ResponseFormatSchema,
   })
   .strict();

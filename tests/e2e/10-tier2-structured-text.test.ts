@@ -222,4 +222,191 @@ describe('10 - extract_structured_text', () => {
       expect(result.lang).toBe('en-US');
     });
   });
+
+  // ========================================
+  // include_bbox — 構造要素 → 描画座標（Issue #20 第 2 段階 / family G-A）
+  //
+  // 目的は UC-7 の「この段落に注釈を付ける」を family 内で閉じること。
+  // 返す矩形は pdf-writer-mcp `add_annotation` がそのまま取る形
+  // （PDF default user space・左下原点・pt・§7.9.5 正規化済み）でなければ
+  // 受け渡しの途中で座標系を解釈し直すことになる。
+  //
+  // ここのテストは全て「間違えても *それらしい* 矩形が出る」ケースを踏む。
+  // エラーにならない誤りは緑のテストを生き延びるので、値そのものを固定する。
+  // ========================================
+  describe('include_bbox: where an element is drawn (#20 stage 2)', () => {
+    // BB-1: 既定では bbox を出さない（後方互換）
+    it('BB-1: no boxes unless asked — the default output is unchanged', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox);
+
+      expect(result.elements.every((e) => e.boxes === undefined)).toBe(true);
+      expect(result.elements.every((e) => e.boxNote === undefined)).toBe(true);
+      expect(result.bboxNotes).toBeUndefined();
+    });
+
+    // BB-2: テキストからの実測。ベースライン + フォントの ascent/descent。
+    //       ベースライン y=300・12pt・Helvetica (ascent .718 / descent -.207)
+    //       → y1 = 300 - 2.484、y2 = 300 + 8.616
+    it('BB-2: a paragraph is measured from its text, ascent and descent included', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const p = result.elements.find((e) => e.text === 'Measured paragraph');
+
+      expect(p?.boxes).toHaveLength(1);
+      const box = p?.boxes?.[0];
+      expect(box?.page).toBe(1);
+      expect(box?.basis).toBe('text-extent');
+      expect(box?.rect.x1).toBeCloseTo(50, 1);
+      expect(box?.rect.y1).toBeCloseTo(297.52, 1);
+      expect(box?.rect.y2).toBeCloseTo(308.62, 1);
+      // 正規化済み = add_annotation にそのまま渡せる
+      expect(box?.rect.x2).toBeGreaterThan(box?.rect.x1 ?? 0);
+      expect(box?.rect.y2).toBeGreaterThan(box?.rect.y1 ?? 0);
+    });
+
+    // BB-3: テキストを持たない Figure は /A の宣言 /BBox から座標を得る。
+    //       実測では絶対に出せない（画像・ベクターは測っていない）ので、
+    //       宣言を読まなければこの要素は「位置不明」で終わる。
+    it('BB-3: a text-less Figure gets its rectangle from the declared /BBox (/A)', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const figures = result.elements.filter((e) => e.role === 'Figure');
+
+      expect(figures[0].boxes).toEqual([
+        { page: 1, rect: { x1: 50, y1: 150, x2: 110, y2: 190 }, basis: 'layout-attribute-bbox' },
+      ]);
+    });
+
+    // BB-4: 同じ属性を /C + /ClassMap 経由で宣言した場合（§14.7.6.2）。
+    //       /A しか見ない実装はこれを取りこぼすが、エラーにはならない。
+    it('BB-4: the same attribute reached through /C + /ClassMap is not lost', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const figures = result.elements.filter((e) => e.role === 'Figure');
+
+      expect(figures[1].boxes).toEqual([
+        { page: 1, rect: { x1: 200, y1: 150, x2: 260, y2: 190 }, basis: 'layout-attribute-bbox' },
+      ]);
+    });
+
+    // BB-5: 宣言が自分の本文を覆っていない = ファイルの自己矛盾。
+    //       黙って実測で上書きせず、宣言をそのまま返した上で食い違いを報告する。
+    //       （/A が配列 + リビジョン番号（§14.7.6.3）の形でもあることを兼ねる）
+    it('BB-5: a declaration that does not cover its own text is reported, not reconciled', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const p = result.elements.find((e) => e.text === 'Overclaimed');
+
+      expect(p?.boxes?.[0].basis).toBe('layout-attribute-bbox');
+      expect(p?.boxes?.[0].rect).toEqual({ x1: 0, y1: 0, x2: 10, y2: 10 });
+      expect(p?.boxNote).toContain('does not cover the text measured inside the element');
+    });
+
+    // BB-5b: ページの外まで届く宣言 /BBox。
+    //        `-32768 -32768 32767 32767`（int16 のセンチネル）は捏造ではなく、
+    //        WTPDF 1.0 と Tagged PDF Best Practice Guide の**両方**の表紙 Figure に
+    //        実在する（PDF32000_2008 では 545 件中 131 件がページ外へ出る）。
+    //        無警告で返すと add_annotation に渡されて座標空間全体に描かれる。
+    it('BB-5b: a declared /BBox reaching outside its page is flagged, not passed on quietly', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const figures = result.elements.filter((e) => e.role === 'Figure');
+      const sentinel = figures[2];
+
+      // 宣言そのものは隠さず返す（reader は観測を返す）
+      expect(sentinel.boxes?.[0].rect).toEqual({
+        x1: -32768,
+        y1: -32768,
+        x2: 32767,
+        y2: 32767,
+      });
+      expect(sentinel.boxNote).toContain('reaches outside page 1');
+      expect(sentinel.boxNote).toContain('add_annotation');
+      // 正しい宣言には警告を出さない（負の対照）
+      expect(figures[0].boxNote).toBeUndefined();
+      expect(figures[1].boxNote).toBeUndefined();
+    });
+
+    // BB-6: 45° 回転したテキスト。軸並行に x + width と足すと *それらしく*
+    //       間違える（x2 が 317 付近になる）。run 自身の軸で組み立てて初めて
+    //       実際の外接矩形になる。
+    it('BB-6: rotated text is measured along the run axes, not the page axes', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const p = result.elements.find((e) => e.text === 'Slanted');
+      const rect = p?.boxes?.[0].rect;
+
+      // 原点 (250,250) より左に張り出す — 軸並行の計算では絶対に出ない
+      expect(rect?.x1).toBeLessThan(250);
+      expect(rect?.x1).toBeCloseTo(239.85, 1);
+      // 45° なので幅と高さはほぼ同じ
+      const width = (rect?.x2 ?? 0) - (rect?.x1 ?? 0);
+      const height = (rect?.y2 ?? 0) - (rect?.y1 ?? 0);
+      expect(Math.abs(width - height)).toBeLessThan(0.5);
+    });
+
+    // BB-7: /MediaBox の原点が (0,0) でなく、かつ /Rotate 90 のページ。
+    //       矩形は default user space なのでどちらにも影響されない。
+    //       ここがずれると add_annotation にそのまま渡せなくなる。
+    it('BB-7: an offset MediaBox and /Rotate 90 do not move the rectangle', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+      const p = result.elements.find((e) => e.text === 'Offset page');
+      const box = p?.boxes?.[0];
+
+      expect(box?.page).toBe(2);
+      // コンテンツストリームに書いた座標そのもの
+      expect(box?.rect.x1).toBeCloseTo(150, 1);
+      expect(box?.rect.y1).toBeCloseTo(497.52, 1);
+    });
+
+    // BB-8: ページを跨ぐ要素は「ページごとに 1 矩形」。
+    //       1 つに潰すと、その要素が存在しないページに矩形を置くことになる。
+    it('BB-8: a page-spanning element gets ONE rectangle PER PAGE', async () => {
+      const result = await extractStructuredText(FIXTURES.structured, { includeBbox: true });
+      const spanning = result.elements.find((e) => e.role === 'P' && e.pages.length > 1);
+
+      expect(spanning?.boxes).toHaveLength(2);
+      expect(spanning?.boxes?.map((b) => b.page)).toEqual([1, 2]);
+      expect(spanning?.boxes?.every((b) => b.basis === 'text-extent')).toBe(true);
+    });
+
+    // BB-9: 測れないものは「測れない」と言う。
+    //       structured.pdf の Figure は矩形を描くだけで文字が無く、/BBox も無い。
+    //       ここで 0 幅の矩形やページ全体を返すのが最悪の挙動。
+    it('BB-9: a Figure with no text and no /BBox gets no rectangle and says why', async () => {
+      const result = await extractStructuredText(FIXTURES.structured, { includeBbox: true });
+      const figure = result.elements.find((e) => e.role === 'Figure');
+
+      expect(figure?.boxes).toBeUndefined();
+      expect(figure?.boxNote).toContain('No text was measured');
+      expect(figure?.boxNote).toContain('BBox attribute');
+    });
+
+    // BB-10: コンテナ（Document / Table / L）は子孫の矩形の合併を持つ。
+    //        Table は 2 ページに跨るので 2 矩形。
+    it('BB-10: a container covers its descendants, per page', async () => {
+      const result = await extractStructuredText(FIXTURES.spanningTable, { includeBbox: true });
+      const table = result.elements.find((e) => e.role === 'Table');
+
+      expect(table?.boxes?.map((b) => b.page)).toEqual([1, 2]);
+    });
+
+    // BB-12: 「本文がある = 位置もある」。テキスト地図と矩形地図は同じ走査・
+    //        同じ除外規則から作られているので、同一サーバ内で答えが割れては
+    //        いけない（#15 → #18 で一度やった失敗）。
+    //        実測: WTPDF 1.0 / Tagged-PDF Best Practice Guide / PDF32000_2008 /
+    //        ISO 32000-2 の計 78,198 要素で違反 0。
+    it('BB-12: an element that has text always has a rectangle', async () => {
+      for (const fixture of [FIXTURES.structured, FIXTURES.spanningTable, FIXTURES.elementBbox]) {
+        const result = await extractStructuredText(fixture, { includeBbox: true });
+        const textButNoBox = result.elements.filter((e) => e.text && !e.boxes?.length);
+
+        expect(textButNoBox.map((e) => `${e.role}:${e.text}`)).toEqual([]);
+      }
+    });
+
+    // BB-11: 矩形の意味（座標系・実測か宣言か）を結果に添えて返す。
+    //        add_annotation に渡す側が「何を持っているか」を知らずに渡すのを防ぐ。
+    it('BB-11: the result states what the rectangles mean', async () => {
+      const result = await extractStructuredText(FIXTURES.elementBbox, { includeBbox: true });
+
+      expect(result.bboxNotes?.length).toBeGreaterThan(0);
+      expect(result.bboxNotes?.join(' ')).toContain('default user space');
+      expect(result.bboxNotes?.join(' ')).toContain('add_annotation');
+    });
+  });
 });

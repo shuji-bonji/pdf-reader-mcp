@@ -174,6 +174,50 @@ export interface StructuredElement {
    * "row 2, column 3"; every other role is an outline and fits `depth`.
    */
   rows?: StructuredTableCell[][];
+  /**
+   * Where this element is drawn, one rectangle per page (Issue #20, stage 2).
+   *
+   * Present only when `include_bbox` was requested AND a rectangle could be
+   * arrived at. An array, not a rectangle: an element that spans pages has no
+   * single rectangle, and merging them would place content on a page it is not on.
+   */
+  boxes?: ElementBox[];
+  /**
+   * Why there is no rectangle, or what the returned one does and does not cover.
+   * Present only when `include_bbox` was requested and something has to be said.
+   */
+  boxNote?: string;
+}
+
+/** How an element's rectangle was arrived at (Issue #20, stage 2). */
+export type ElementBoxBasis =
+  /**
+   * The `/BBox` layout attribute the file declares for this element
+   * (ISO 32000-2 Table 379: "the coordinates of the left, bottom, right and top
+   * edges … of the structure element's bounding box"). This is the producer's
+   * own statement about the geometry — a **declaration**, not a measurement.
+   */
+  | 'layout-attribute-bbox'
+  /**
+   * Measured from the text the element owns: the union of each run's box, taken
+   * from the run's baseline origin and the font's ascent/descent (§9.4.4 places
+   * glyphs by Trm; the run's transform is that mapping into default user space).
+   * Non-text marks — images, vector art — contribute nothing.
+   */
+  | 'text-extent';
+
+/** One place a structure element is drawn. */
+export interface ElementBox {
+  /** 1-based page number. */
+  page: number;
+  /**
+   * PDF default user space, origin bottom-left, pt, normalised (x1 < x2, y1 < y2)
+   * — the same rectangle `pdf-writer-mcp` `add_annotation` takes, so it can be
+   * handed over without reinterpreting the coordinate system. Unaffected by
+   * `/Rotate` and by a `/CropBox` whose origin is not (0, 0).
+   */
+  rect: ObjectRect;
+  basis: ElementBoxBasis;
 }
 
 /** extract_structured_text output */
@@ -183,6 +227,8 @@ export interface StructuredTextResult {
   elements: StructuredElement[];
   /** Why extraction is not possible, when `isTagged` is false. */
   note?: string;
+  /** What the rectangles do and do not mean. Present only when `include_bbox`. */
+  bboxNotes?: string[];
 }
 
 /** inspect_tags output */

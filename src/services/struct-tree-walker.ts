@@ -73,6 +73,19 @@ export interface StructElement {
   contentRefs: ContentRef[];
   /** Child structure elements, in document order. */
   children: StructElement[];
+  /**
+   * The `/BBox` layout attribute, as four numbers in default user space, or
+   * `null` when the element declares none.
+   *
+   * ISO 32000-2 Table 379: "An array of four numbers in default user space units
+   * that shall give the coordinates of the left, bottom, right, and top edges …
+   * of the structure element's bounding box (the rectangle that completely
+   * encloses its visible content)."
+   *
+   * This is what the *file says*, not what was measured. It is not inheritable,
+   * so an element that declares none has none — no ancestor's value applies.
+   */
+  layoutBBox: number[] | null;
 }
 
 /**
@@ -118,6 +131,74 @@ function textEntry(doc: PDFDocument, dict: PDFDict, key: string): string | null 
   return null;
 }
 
+// ─── Layout attributes (Issue #20, stage 2) ─────────────────────────────────
+
+/**
+ * The owner of the standard *layout* attributes (§14.8.5.4). `BBox` is one of
+ * them, so it is only read from an attribute object that claims that owner:
+ * a `/BBox` under some other `/O` belongs to that owner's vocabulary, and
+ * reading it anyway would be borrowing a key across namespaces.
+ */
+const LAYOUT_OWNER = 'Layout';
+
+function bboxOfAttributeObject(doc: PDFDocument, value: unknown): number[] | null {
+  const dict = deref(doc, value);
+  if (!(dict instanceof PDFDict)) return null;
+  const owner = deref(doc, dict.get(PDFName.of('O')));
+  if (!(owner instanceof PDFName) || owner.decodeText() !== LAYOUT_OWNER) return null;
+
+  const bbox = deref(doc, dict.get(PDFName.of('BBox')));
+  if (!(bbox instanceof PDFArray) || bbox.size() !== 4) return null;
+
+  const numbers: number[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    const entry = deref(doc, bbox.get(i));
+    if (!(entry instanceof PDFNumber)) return null;
+    const n = entry.asNumber();
+    if (!Number.isFinite(n)) return null;
+    numbers.push(n);
+  }
+  return numbers;
+}
+
+/**
+ * Read the `/BBox` layout attribute of one structure element.
+ *
+ * `/A` holds "either a single attribute object or an array of at least one
+ * object" (§14.7.6.1), and in the array form attribute objects are interleaved
+ * with revision numbers (§14.7.6.3) — integers, which are skipped here. When the
+ * same attribute appears more than once, "the later (in array order) entry shall
+ * take precedence", so the array is scanned front to back and the last hit wins.
+ *
+ * `/C` names attribute classes resolved through the structure tree root's
+ * `/ClassMap` (§14.7.6.2). `/A` beats `/C`: "If both the A and C entries are
+ * present and a given attribute is specified by both, the one specified by the A
+ * entry shall take precedence."
+ */
+function layoutBBoxOf(doc: PDFDocument, dict: PDFDict, classMap: PDFDict | null): number[] | null {
+  const fromEntry = (value: unknown, resolve: (v: unknown) => unknown): number[] | null => {
+    const entry = deref(doc, value);
+    const candidates = entry instanceof PDFArray ? entry.asArray() : [entry];
+    let found: number[] | null = null;
+    for (const candidate of candidates) {
+      // Revision numbers sit between the objects; they are not attribute objects.
+      if (deref(doc, candidate) instanceof PDFNumber) continue;
+      const bbox = bboxOfAttributeObject(doc, resolve(candidate));
+      if (bbox) found = bbox;
+    }
+    return found;
+  };
+
+  const fromA = fromEntry(dict.get(PDFName.of('A')), (v) => v);
+  if (fromA) return fromA;
+
+  if (!classMap) return null;
+  return fromEntry(dict.get(PDFName.of('C')), (name) => {
+    const resolved = deref(doc, name);
+    return resolved instanceof PDFName ? classMap.get(PDFName.of(resolved.decodeText())) : null;
+  });
+}
+
 /** Normalise `/K` — it may be absent, a single object, or an array. */
 function kidsOf(doc: PDFDocument, dict: PDFDict): unknown[] {
   const k = deref(doc, dict.get(PDFName.of('K')));
@@ -144,6 +225,7 @@ function walkElement(
   doc: PDFDocument,
   dict: PDFDict,
   inheritedPg: PDFRef | undefined,
+  classMap: PDFDict | null,
 ): StructElement | null {
   const s = deref(doc, dict.get(PDFName.of('S')));
   if (!(s instanceof PDFName)) return null;
@@ -158,6 +240,7 @@ function walkElement(
     lang: textEntry(doc, dict, 'Lang'),
     contentRefs: [],
     children: [],
+    layoutBBox: layoutBBoxOf(doc, dict, classMap),
   };
 
   for (const kid of kidsOf(doc, dict)) {
@@ -190,7 +273,7 @@ function walkElement(
     // Type == StructElem on purpose: Type is optional in practice and plenty of
     // producers omit it.
     if (resolved.get(PDFName.of('S'))) {
-      const child = walkElement(doc, resolved, pg);
+      const child = walkElement(doc, resolved, pg, classMap);
       if (child) element.children.push(child);
     }
   }
@@ -212,11 +295,16 @@ export function walkStructTree(doc: PDFDocument): StructElement[] | null {
   const root = deref(doc, doc.catalog.get(PDFName.of('StructTreeRoot')));
   if (!(root instanceof PDFDict)) return null;
 
+  // §14.7.6.2: attribute classes named by an element's /C are resolved through
+  // the structure tree root's /ClassMap, so it has to be read before the walk.
+  const classMapValue = deref(doc, root.get(PDFName.of('ClassMap')));
+  const classMap = classMapValue instanceof PDFDict ? classMapValue : null;
+
   const elements: StructElement[] = [];
   for (const kid of kidsOf(doc, root)) {
     const resolved = deref(doc, kid);
     if (resolved instanceof PDFDict && resolved.get(PDFName.of('S'))) {
-      const element = walkElement(doc, resolved, undefined);
+      const element = walkElement(doc, resolved, undefined, classMap);
       if (element) elements.push(element);
     }
   }

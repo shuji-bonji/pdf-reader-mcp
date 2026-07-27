@@ -303,6 +303,23 @@ export function formatStructuredTextMarkdown(result: StructuredTextResult): stri
 
     lines.push(parts.join(' '));
 
+    // The basis is printed with every rectangle, never once in a legend: a
+    // measured text extent and a declared /BBox are different kinds of claim,
+    // and a reader who skims must not carry one over onto the other.
+    for (const box of element.boxes ?? []) {
+      const { x1, y1, x2, y2 } = box.rect;
+      const rect = [x1, y1, x2, y2].map((v) => v.toFixed(1)).join(', ');
+      lines.push(`${indent}  - *bbox* p${box.page} \`(${rect})\` — ${box.basis}`);
+    }
+    if (element.boxNote) {
+      // "none" only when there really is none. An element can have a rectangle
+      // AND a caveat about it — a declared /BBox that contradicts its own text
+      // is exactly that case, and printing "none" over a rectangle that was
+      // just printed would contradict the line above.
+      const lead = element.boxes && element.boxes.length > 0 ? '*bbox:*' : '*bbox:* none —';
+      lines.push(`${indent}  - ${lead} ${element.boxNote}`);
+    }
+
     if (element.rows) {
       lines.push('');
       for (const [rowIndex, row] of element.rows.entries()) {
@@ -313,6 +330,11 @@ export function formatStructuredTextMarkdown(result: StructuredTextResult): stri
       }
       lines.push('');
     }
+  }
+
+  if (result.bboxNotes && result.bboxNotes.length > 0) {
+    lines.push('', '## What the rectangles mean', '');
+    for (const note of result.bboxNotes) lines.push(`- ${note}`);
   }
 
   return lines.join('\n');

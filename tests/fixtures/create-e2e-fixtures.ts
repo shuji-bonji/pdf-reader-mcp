@@ -20,6 +20,7 @@ import { writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import {
   concatTransformationMatrix,
+  degrees,
   drawObject,
   PDFDocument,
   PDFName,
@@ -1172,6 +1173,159 @@ async function createCorruptedPdf(): Promise<void> {
   console.log('Created: corrupted.pdf (invalid, non-PDF bytes)');
 }
 
+/**
+ * Create element-bbox.pdf — the Issue #20 stage 2 fixture (structure → bbox).
+ *
+ * Every case here exists because getting it wrong produces a *plausible*
+ * rectangle rather than an error, which is the failure mode that survives a
+ * green test suite:
+ *
+ *  - **A `/BBox` layout attribute via `/A`** (ISO 32000-2 Table 379) on a Figure
+ *    that draws a rectangle and no text. Nothing can be measured for it, so if
+ *    the declaration is not read the element silently has no location at all.
+ *  - **A `/BBox` via `/C` + `/ClassMap`** (§14.7.6.2). Same attribute, other
+ *    route; a reader that only looks at `/A` loses it without noticing.
+ *  - **A declared `/BBox` that does NOT cover its own text.** The file
+ *    contradicts itself, which must be reported rather than reconciled.
+ *  - **A declared `/BBox` of `-32768 -32768 32767 32767`** — int16 sentinels
+ *    where a rectangle should be. Not invented for the test: this exact value
+ *    is on the cover Figure of BOTH *Well-Tagged PDF 1.0* and the *Tagged PDF
+ *    Best Practice Guide*. Reported without a warning it would be handed to
+ *    `add_annotation` and drawn over the whole coordinate space.
+ *  - **Text rotated 45°.** An axis-aligned `x + width` is wrong here, and wrong
+ *    by a plausible-looking amount. Only building the box along the run's own
+ *    axes gives the real extent.
+ *  - **A page with a `/MediaBox` whose origin is not (0,0) AND `/Rotate 90`.**
+ *    Rectangles are in default user space, so neither may shift them — this is
+ *    what makes the result safe to hand to `add_annotation`.
+ */
+async function createElementBboxPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+
+  const page1 = doc.addPage([400, 400]);
+  // Origin deliberately away from (0,0), and rotated: user space is unaffected
+  // by both, and the fixture is here to prove the output is in user space.
+  const page2 = doc.addPage([400, 400]);
+  page2.node.set(PDFName.of('MediaBox'), context.obj([100, 200, 500, 600]));
+  page2.node.set(PDFName.of('Rotate'), context.obj(90));
+
+  const marked = (page: typeof page1, mcid: number, tag: string, draw: () => void): void => {
+    page.pushOperators(
+      PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [`/${tag}`, `<</MCID ${mcid}>>`]),
+    );
+    draw();
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
+  };
+
+  // ── Page 1 ──
+  marked(page1, 0, 'P', () =>
+    page1.drawText('Measured paragraph', { x: 50, y: 300, size: 12, font }),
+  );
+  // Two Figures: neither draws any text, so a rectangle can only come from the
+  // declaration. One declares it through /A, the other through /C + /ClassMap.
+  marked(page1, 1, 'Figure', () =>
+    page1.drawRectangle({ x: 50, y: 150, width: 60, height: 40, color: rgb(0.2, 0.4, 0.8) }),
+  );
+  marked(page1, 2, 'Figure', () =>
+    page1.drawRectangle({ x: 200, y: 150, width: 60, height: 40, color: rgb(0.8, 0.3, 0.2) }),
+  );
+  // Declares a rectangle nowhere near the text it actually draws.
+  marked(page1, 3, 'P', () => page1.drawText('Overclaimed', { x: 50, y: 80, size: 12, font }));
+  marked(page1, 4, 'P', () =>
+    page1.drawText('Slanted', { x: 250, y: 250, size: 20, font, rotate: degrees(45) }),
+  );
+  // int16 sentinels instead of a rectangle — the real-world case above.
+  marked(page1, 5, 'Figure', () =>
+    page1.drawRectangle({ x: 300, y: 60, width: 40, height: 30, color: rgb(0.3, 0.7, 0.4) }),
+  );
+
+  // ── Page 2 (offset MediaBox, /Rotate 90) ──
+  marked(page2, 0, 'P', () => page2.drawText('Offset page', { x: 150, y: 500, size: 12, font }));
+
+  // ── Structure tree ──
+  doc.catalog.set(PDFName.of('MarkInfo'), context.obj({ Marked: true }));
+
+  const structRootRef = context.nextRef();
+  const docRef = context.nextRef();
+  const ref = () => context.nextRef();
+  const [pMeasured, figA, figC, pOver, pSlant, figSentinel, pOffset] = Array.from(
+    { length: 7 },
+    ref,
+  );
+
+  // Attribute objects. /O /Layout is required: BBox is a *layout* attribute
+  // (§14.8.5.4), and a /BBox under another owner belongs to that owner.
+  const figAttr = context.register(
+    context.obj({ O: PDFName.of('Layout'), BBox: [50, 150, 110, 190] }),
+  );
+  const overAttr = context.register(context.obj({ O: PDFName.of('Layout'), BBox: [0, 0, 10, 10] }));
+  const classAttr = context.register(
+    context.obj({ O: PDFName.of('Layout'), BBox: [200, 150, 260, 190] }),
+  );
+  const classMap = context.register(context.obj({ FigBox: classAttr }));
+  const sentinelAttr = context.register(
+    context.obj({ O: PDFName.of('Layout'), BBox: [-32768, -32768, 32767, 32767] }),
+  );
+
+  const elem = (
+    S: string,
+    parent: ReturnType<typeof ref>,
+    K: unknown,
+    Pg: ReturnType<typeof ref>,
+    extra: Record<string, unknown> = {},
+  ) => context.obj({ Type: 'StructElem', S, P: parent, Pg, K, ...extra });
+
+  context.assign(pMeasured, elem('P', docRef, 0, page1.ref));
+  // /A as a single attribute object.
+  context.assign(figA, elem('Figure', docRef, 1, page1.ref, { A: figAttr }));
+  // /C naming a class, resolved through the structure tree root's /ClassMap.
+  context.assign(figC, elem('Figure', docRef, 2, page1.ref, { C: PDFName.of('FigBox') }));
+  // /A as an ARRAY, with a revision number interleaved (§14.7.6.3) — the form
+  // that a reader expecting a bare dictionary silently drops.
+  context.assign(pOver, elem('P', docRef, 3, page1.ref, { A: [overAttr, 0] }));
+  context.assign(pSlant, elem('P', docRef, 4, page1.ref));
+  context.assign(figSentinel, elem('Figure', docRef, 5, page1.ref, { A: sentinelAttr }));
+  context.assign(pOffset, elem('P', docRef, 0, page2.ref));
+
+  context.assign(
+    docRef,
+    context.obj({
+      Type: 'StructElem',
+      S: 'Document',
+      P: structRootRef,
+      K: [pMeasured, figA, figC, pOver, pSlant, figSentinel, pOffset],
+    }),
+  );
+
+  page1.node.set(PDFName.of('StructParents'), context.obj(0));
+  page2.node.set(PDFName.of('StructParents'), context.obj(1));
+  const parentTree = context.obj({
+    Nums: [0, [pMeasured, figA, figC, pOver, pSlant, figSentinel], 1, [pOffset]],
+  });
+  context.assign(
+    structRootRef,
+    context.obj({
+      Type: 'StructTreeRoot',
+      K: [docRef],
+      ClassMap: classMap,
+      ParentTree: context.register(parentTree),
+      ParentTreeNextKey: 2,
+    }),
+  );
+  doc.catalog.set(PDFName.of('StructTreeRoot'), structRootRef);
+
+  doc.setTitle('Element BBox Test PDF');
+  doc.setProducer('pdf-reader-mcp test suite');
+  doc.setLanguage('en-US');
+
+  await writeFile(`${FIXTURES_DIR}/element-bbox.pdf`, await doc.save());
+  console.log(
+    'Created: element-bbox.pdf (declared /BBox via /A and /C, rotated text, offset page)',
+  );
+}
+
 async function main(): Promise<void> {
   // An optional argv narrows the run to one fixture, so adding a fixture does
   // not force regenerating (and re-committing) every existing one.
@@ -1184,6 +1338,7 @@ async function main(): Promise<void> {
     ['image-kinds', createImageKindsPdf],
     ['structured', createStructuredPdf],
     ['spanning-table', createSpanningTablePdf],
+    ['element-bbox', createElementBboxPdf],
     ['actual-text-span', createActualTextSpanPdf],
     ['encrypted-actualtext', createEncryptedActualTextPdf],
     ['no-metadata', createNoMetadataPdf],

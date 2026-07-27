@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-27
+
+### Added
+
+- **`extract_structured_text` `include_bbox` — structure element → drawing rectangle**
+  ([#20](https://github.com/shuji-bonji/pdf-reader-mcp/issues/20), stage 2). Stage 1
+  (`locate_objects`) answered "where is object 27?", which is what a revision diff hands over.
+  This answers the question the issue was actually filed for: **"where is this paragraph?"** —
+  UC-7's step 4, annotating the element a report points at. Measured end to end: a rectangle from
+  here goes into `add_annotation` unchanged and comes back out of `inspect_annotations` identical.
+
+  Added to the existing tool rather than as a nineteenth: it already resolves MCID → text, so the
+  extra cost is small, and "which element, what it says, where it is" arrives in one call.
+  Off by default; it costs a second pass over every page.
+
+  Each element gains `boxes` — **one rectangle per page**, because an element that spans pages has
+  no single rectangle and merging them would place content on a page it is not on. Rectangles are
+  in PDF default user space (origin bottom-left, pt, normalised), unaffected by `/Rotate` or by a
+  `/CropBox` whose origin is not (0, 0).
+
+  **Each names its `basis`, and the two are different kinds of claim:**
+
+  | basis | what it is |
+  | --- | --- |
+  | `layout-attribute-bbox` | the `/BBox` the file **declares** (ISO 32000-2 Table 379), read through `/A` and through `/C` + `/ClassMap` (§14.7.6.2). A producer's statement about its own geometry — and the only source for content that has no text |
+  | `text-extent` | **measured** from the element's text: the run's baseline origin (§9.4.4's Trm without the device transform) plus the font's ascent/descent. The line box, not the glyph outlines. Images and vector art contribute nothing |
+
+  **A declaration is reported as-is, and cross-checked.** Files state nonsense: the cover `Figure`
+  of *both* Well-Tagged PDF 1.0 and the Tagged PDF Best Practice Guide declares
+  `/BBox [-32768 -32768 32767 32767]` — int16 sentinels where a rectangle should be — and
+  PDF32000_2008 has 131 of its 545 declarations reaching past the page edge. Since the whole point
+  of this output is that it goes straight into `add_annotation`, a declaration is checked against
+  the page box (§7.7.3.3) and against the element's own text; either contradiction is reported in
+  `boxNote`, with the rectangle still returned unaltered. An element with no rectangle says why
+  instead of returning a zero-sized one — a `Figure` holding one image is the usual case
+  (§14.8.4.8.5: such an element "should have a BBox attribute").
+
+  Two things are deliberately not done, because getting them wrong yields a *plausible* rectangle
+  rather than an error: text is measured along the **run's own axes**, not the page's (an
+  axis-aligned `x + width` puts 20 pt text rotated 45° at x2 = 317.8 instead of 300.9); and an
+  element containing **vertical writing** gets no rectangle at all, since pdfjs reports the advance
+  in `height` for those and a box covering only the horizontal part would be wrong, not absent.
+
+  Validated against independent ground truth rather than against fixtures: on *Well-Tagged PDF
+  (WTPDF) 1.0*, the 166 `Link` structure elements were compared with the 173 `Link` **annotation**
+  `/Rect` values the producer placed for the same links — median IoU **0.972**, none disjoint.
+  The invariant "an element that has text has a rectangle" holds over 78,198 elements across
+  WTPDF 1.0, the Tagged PDF Best Practice Guide, PDF32000_2008 and ISO 32000-2.
+
 ## [0.10.0] - 2026-07-27
 
 ### Added

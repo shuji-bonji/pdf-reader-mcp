@@ -45,7 +45,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `inspect_fonts`       | Font inventory (embedded/subset/type detection)                     |
 | `inspect_annotations` | Annotation listing (categorized by subtype)                         |
 | `inspect_signatures`  | Digital signature field structure analysis                          |
-| `extract_structured_text` | Tagged PDF text in **logical content order** (ISO 32000-2 §14.8.2.5), each piece labelled with its structure type (`H1` / `P` / `Table` …). Resolves `/ActualText`, separates `/Alt` and list labels, keeps page-spanning elements whole |
+| `extract_structured_text` | Tagged PDF text in **logical content order** (ISO 32000-2 §14.8.2.5), each piece labelled with its structure type (`H1` / `P` / `Table` …). Resolves `/ActualText`, separates `/Alt` and list labels, keeps page-spanning elements whole. `include_bbox: true` adds **where each element is drawn** — one rectangle per page, in the form `add_annotation` takes |
 | `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns). A table continuing across a page break is ONE table (`pages` array) |
 | `locate_objects`      | Object number → page and rectangle, in the coordinate form [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) `add_annotation` takes. Bridges [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `verify_integrity`'s "which objects changed" to "where they are". Each location names its `basis`: an annotation's own `/Rect` is exact, a content stream can only say "the whole page" |
 
@@ -190,6 +190,46 @@ tree (ISO 32000-2 §14.8.2.5). `/ActualText` replaces the glyphs (§14.9.4),
 separately, and an element spanning a page break stays ONE element. Use
 `roles: ["H1", "H2"]` to pull an outline. Untagged PDFs return
 `isTagged: false` with a reason — nothing is guessed from coordinates.
+
+#### `include_bbox`: where the element is drawn
+
+```
+extract_structured_text({ file_path: "/doc.pdf", roles: ["P"], include_bbox: true })
+→ - **P** (page 1) — Measured paragraph
+    - *bbox* p1 `(50.0, 297.5, 161.4, 308.6)` — text-extent
+  - **Figure** (page 1)
+    - *bbox* p1 `(50.0, 150.0, 110.0, 190.0)` — layout-attribute-bbox
+```
+
+Rectangles are in PDF default user space (origin bottom-left, pt, normalised) —
+exactly what [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp)
+`add_annotation` takes, so "annotate this paragraph" needs no coordinate
+conversion in between. `/Rotate` and a shifted `/CropBox` do not move them.
+
+`basis` says how strong the claim is, and the two are different in kind:
+
+| `basis` | What it is |
+| --- | --- |
+| `layout-attribute-bbox` | The `/BBox` the file **declares** (ISO 32000-2 Table 379), read through `/A` or `/C` + `/ClassMap`. A statement by the producer, reported as-is — and the only source for content that has no text |
+| `text-extent` | **Measured** from the element's text: baseline origin plus the font's ascent/descent. The line box, not the glyph outlines. Images and vector art contribute nothing |
+
+An element spanning pages gets ONE RECTANGLE PER PAGE — merging them would put
+content on a page it is not on. An element with no rectangle says why in
+`boxNote` rather than returning a zero-sized one.
+
+**A declaration is reported as-is, and cross-checked.** Files state nonsense:
+the cover `Figure` of *both* Well-Tagged PDF 1.0 and the Tagged PDF Best Practice
+Guide declares `/BBox [-32768 -32768 32767 32767]` — int16 sentinels where a
+rectangle should be — and PDF32000_2008 has 131 of its 545 declarations reaching
+past the page edge. Since this output is meant to go straight into
+`add_annotation`, a declaration is checked against the page box (§7.7.3.3) and
+against the element's own text; either contradiction is reported in `boxNote`,
+with the rectangle still returned unaltered.
+
+Measured against independent ground truth: on *Well-Tagged PDF (WTPDF) 1.0*, the
+166 `Link` structure elements were compared with the 173 `Link` **annotation**
+`/Rect` values the producer placed for the same links — median IoU **0.972**,
+none disjoint.
 
 ### Extract Tables (Tagged PDF)
 

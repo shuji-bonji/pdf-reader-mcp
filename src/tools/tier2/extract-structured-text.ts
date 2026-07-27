@@ -27,12 +27,13 @@ Args:
   - pages (string, optional): Page range ("1-5", "3", "1,3,5-7"). Omit for all pages.
     An element that touches the range is returned whole, even if it continues outside it.
   - roles (string[], optional): Structure types to include, e.g. ["H1","H2"] for an outline
+  - include_bbox (boolean): Also report where each element is drawn (default: false)
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
 
 Returns:
   isTagged, the document language, and a flat list of elements in logical content order.
   Each element has: role, depth (nesting; top level is 0), text, pages, and optionally
-  alt / label / rows.
+  alt / label / rows / boxes / boxNote.
 
   The list is flat with a depth field rather than nested — a depth-first pre-order plus
   depth encodes the tree exactly, so nothing is lost. Table is the exception and carries
@@ -50,6 +51,28 @@ Key properties:
   - Artifacts (page numbers, running heads) are excluded: §14.8.2.5 NOTE 3 puts them
     outside the logical content order.
 
+With include_bbox (answers "where is this paragraph?", so an annotation can be placed on it):
+  Each element gains boxes — ONE RECTANGLE PER PAGE, because an element that spans pages
+  has no single rectangle. Each is { page, rect: {x1,y1,x2,y2}, basis } in PDF default user
+  space (origin bottom-left, pt, already normalised), which is exactly what pdf-writer-mcp
+  add_annotation takes: no coordinate system has to be reinterpreted in between. /Rotate and
+  a shifted /CropBox do not affect it.
+
+  basis says how strong the claim is, and the two are not the same kind of claim:
+    - layout-attribute-bbox — the /BBox the file DECLARES for the element (ISO 32000-2
+      Table 379). A statement by the producer about its own geometry, reported as-is.
+      This is the only source for content that has no text.
+    - text-extent — MEASURED from the text the element owns: baseline origin plus the
+      font's ascent/descent. That is the line box, not the glyph outlines. Images and
+      vector drawings contribute nothing to it.
+
+  When a declared /BBox does not cover the text measured inside it, that disagreement is
+  reported in boxNote rather than smoothed over.
+
+  An element with no rectangle has no boxes and carries boxNote saying why — a Figure
+  holding one image is the usual case (§14.8.4.8.5: such an element "should have a BBox
+  attribute"). Absent is not zero-sized, and neither is guessed at.
+
 Untagged PDFs return isTagged: false with a reason and no elements. Nothing is guessed
 from coordinates — §14.8.2.5 NOTE 1 is explicit that page order need not match logical
 order, so a guess could not be trusted. To add a structure scaffold, use pdf-writer-mcp
@@ -58,7 +81,11 @@ ensure_tagged and retry.
 Examples:
   - Extract a document outline: { file_path: "/doc.pdf", roles: ["H1","H2","H3"] }
   - Get content for reflow / conversion, structure preserved: { file_path: "/doc.pdf" }
-  - Read the text of a specific section's pages: { file_path: "/doc.pdf", pages: "4-6" }`,
+  - Read the text of a specific section's pages: { file_path: "/doc.pdf", pages: "4-6" }
+  - Find where to put an annotation:
+    { file_path: "/doc.pdf", roles: ["P"], include_bbox: true } → hand a box straight to
+    pdf-writer-mcp add_annotation. To go the other way, from an object number a diff
+    reported to a rectangle, use locate_objects.`,
       inputSchema: ExtractStructuredTextSchema,
       annotations: {
         readOnlyHint: true,
@@ -72,6 +99,7 @@ Examples:
         const result = await extractStructuredText(params.file_path, {
           pages: params.pages,
           roles: params.roles,
+          includeBbox: params.include_bbox,
         });
 
         const raw =

@@ -1010,6 +1010,220 @@ export async function buildDocumentIdToTextMap(
   return merged;
 }
 
+// ─── Marked content → drawing rectangle (Issue #20, stage 2) ────────────────
+
+/** An axis-aligned rectangle accumulated in default user space. */
+export interface RunBox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** What a marked-content sequence's text occupies, and what could not be measured. */
+export interface MarkedContentExtent {
+  /** null when nothing measurable was found inside the sequence. */
+  box: RunBox | null;
+  /**
+   * True when a run in vertical writing mode was seen. Vertical runs are NOT
+   * folded into `box` — pdfjs reports the advance in `height` rather than
+   * `width` for them, and guessing which way the glyphs grow would produce a
+   * rectangle that is wrong rather than absent. The flag makes the caller
+   * suppress the box instead of returning a silently shrunken one.
+   */
+  hasUnmeasurableRun: boolean;
+}
+
+/** A `getTextContent` item, with the geometry fields this module needs. */
+interface PositionedTextItem extends TextContentItemLike {
+  transform?: number[];
+  width?: number;
+  height?: number;
+  fontName?: string;
+}
+
+/** `styles` from `getTextContent`: font metrics, normalised to the em square. */
+export interface TextStyleLike {
+  ascent?: number;
+  descent?: number;
+  vertical?: boolean;
+}
+
+/** Default em-square ascent/descent, used when pdfjs reports none for a font. */
+const FALLBACK_ASCENT = 0.75;
+const FALLBACK_DESCENT = -0.25;
+
+/**
+ * The rectangle one text run occupies, in default user space.
+ *
+ * `item.transform` is the run's mapping from em units to user space — §9.4.4's
+ * Trm without the device transform, so its translation is the baseline origin
+ * and its linear part carries font size, horizontal scaling and any rotation.
+ * Measured against pdfjs-dist 4.10: text drawn at 45° reports
+ * `[14.14, 14.14, -14.14, 14.14, x, y]` for a 20 pt font, i.e. `|(a,b)| = 20`.
+ *
+ * So the box is built along the run's own axes rather than the page's:
+ *
+ *  - **u** = `(a,b)` normalised — the baseline direction; the run extends
+ *    `item.width` along it (pdfjs reports the advance already in user space).
+ *  - **v** = `(c,d)` normalised — the up direction; the run extends from
+ *    `descent × height` to `ascent × height` along it.
+ *
+ * The vertical extent therefore comes from the font's ascent/descent, not from
+ * glyph outlines: a glyph that overshoots its ascent (an accent, a swash) can
+ * exceed this rectangle. It is the line box, measured, not the ink.
+ */
+function runBox(item: PositionedTextItem, style: TextStyleLike | undefined): RunBox | null {
+  const t = item.transform;
+  if (!t || t.length < 6 || t.some((v) => !Number.isFinite(v))) return null;
+
+  const width = item.width ?? 0;
+  const height = item.height ?? 0;
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+
+  const [a, b, c, d, e, f] = t;
+  const baselineLength = Math.hypot(a, b);
+  const upLength = Math.hypot(c, d);
+  // A degenerate matrix draws nothing measurable; a zero-height run is a pdfjs
+  // spacing artefact (str: " " with height 0), not visible content.
+  if (baselineLength === 0 || upLength === 0 || height === 0) return null;
+
+  const ux = a / baselineLength;
+  const uy = b / baselineLength;
+  const vx = c / upLength;
+  const vy = d / upLength;
+
+  const ascent = style?.ascent ?? FALLBACK_ASCENT;
+  const descent = style?.descent ?? FALLBACK_DESCENT;
+  const top = ascent * height;
+  const bottom = descent * height;
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  for (const along of [0, width]) {
+    for (const up of [bottom, top]) {
+      xs.push(e + ux * along + vx * up);
+      ys.push(f + uy * along + vy * up);
+    }
+  }
+
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs),
+    maxY: Math.max(...ys),
+  };
+}
+
+function mergeBox(into: RunBox | null, add: RunBox): RunBox {
+  if (!into) return { ...add };
+  return {
+    minX: Math.min(into.minX, add.minX),
+    minY: Math.min(into.minY, add.minY),
+    maxX: Math.max(into.maxX, add.maxX),
+    maxY: Math.max(into.maxY, add.maxY),
+  };
+}
+
+/**
+ * Build a map from a marked-content `id` to the rectangle its text occupies.
+ *
+ * The same walk as `buildIdToTextMap`, and deliberately the same skips, so that
+ * "the text of this element" and "where that text is" cannot disagree: nested
+ * sequences count toward every active id, and `Artifact` sequences are excluded
+ * (§14.8.2.5 NOTE 3 puts artifacts outside the logical content order).
+ *
+ * Two further exclusions belong to geometry rather than text:
+ *
+ *  - **Whitespace-only runs.** Table 379 defines `BBox` as the rectangle that
+ *    "completely encloses its **visible** content", and a run of spaces is not
+ *    visible. pdfjs does emit wide ones for inter-cell gaps: measured on
+ *    `spanning-table.pdf`, a `TH` carries a 75 pt run of spaces that reaches
+ *    into the neighbouring column. That particular one arrives with
+ *    `height: 0` and `runBox` rejects it on those grounds alone; this check is
+ *    what covers a spacer that comes with a height.
+ *  - **EOL markers** (`str: ''`, `hasEOL: true`), which carry no geometry.
+ */
+export function buildIdToBoxMap(
+  items: PositionedTextItem[],
+  styles: Record<string, TextStyleLike> = {},
+): Map<string, MarkedContentExtent> {
+  const map = new Map<string, MarkedContentExtent>();
+  const stack: { id: string | null; isArtifact: boolean }[] = [];
+
+  const touch = (id: string): MarkedContentExtent => {
+    const existing = map.get(id);
+    if (existing) return existing;
+    const created: MarkedContentExtent = { box: null, hasUnmeasurableRun: false };
+    map.set(id, created);
+    return created;
+  };
+
+  for (const item of items) {
+    const t = item.type;
+    if (t === 'beginMarkedContent' || t === 'beginMarkedContentProps') {
+      stack.push({ id: item.id ?? null, isArtifact: item.tag === 'Artifact' });
+      continue;
+    }
+    if (t === 'endMarkedContent') {
+      stack.pop();
+      continue;
+    }
+    if (t !== undefined) continue; // unknown marker
+    if (stack.some((s) => s.isArtifact)) continue;
+    if (item.hasEOL) continue;
+    const str = item.str ?? '';
+    if (str.trim() === '') continue;
+
+    const style = item.fontName ? styles[item.fontName] : undefined;
+    if (style?.vertical) {
+      for (const frame of stack) {
+        if (frame.id) touch(frame.id).hasUnmeasurableRun = true;
+      }
+      continue;
+    }
+
+    const box = runBox(item, style);
+    if (!box) continue;
+    for (const frame of stack) {
+      if (frame.id) {
+        const extent = touch(frame.id);
+        extent.box = mergeBox(extent.box, box);
+      }
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Build the marked-content id → rectangle map across the whole document.
+ *
+ * Document-wide for the same reason as `buildDocumentIdToTextMap`: a structure
+ * element can own content on several pages (§14.8.2.5 NOTE 2), and the ids are
+ * globally unique because pdfjs builds them from the page object number.
+ */
+export async function buildDocumentIdToBoxMap(
+  doc: PDFDocumentProxy,
+): Promise<Map<string, MarkedContentExtent>> {
+  const perPage = await Promise.all(
+    Array.from({ length: doc.numPages }, async (_, i) => {
+      const page = await doc.getPage(i + 1);
+      const content = await page.getTextContent({ includeMarkedContent: true });
+      return buildIdToBoxMap(
+        content.items as PositionedTextItem[],
+        content.styles as Record<string, TextStyleLike>,
+      );
+    }),
+  );
+
+  const merged = new Map<string, MarkedContentExtent>();
+  for (const map of perPage) {
+    for (const [id, extent] of map) merged.set(id, extent);
+  }
+  return merged;
+}
+
 /**
  * Normalise raw cell text:
  *   0. Resolve line breaks (CJK-aware) — a break between two CJK characters is

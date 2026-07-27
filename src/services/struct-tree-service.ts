@@ -39,7 +39,9 @@
 
 import { PDFDict, PDFHexString, PDFName, PDFString } from 'pdf-lib';
 import type {
+  ElementBox,
   ExtractedTable,
+  ObjectRect,
   StructuredElement,
   StructuredTableCell,
   StructuredTextResult,
@@ -50,10 +52,13 @@ import type {
 } from '../types.js';
 import { resolvePageNumbers } from '../utils/pdf-helpers.js';
 import {
+  buildDocumentIdToBoxMap,
   buildDocumentIdToTextMap,
   compactCellText,
   LINE_BREAK,
   loadDocument,
+  type MarkedContentExtent,
+  type RunBox,
   resolveLineBreaks,
 } from './pdfjs-service.js';
 import { loadWithPdfLib } from './pdflib-service.js';
@@ -151,6 +156,204 @@ function pagesOf(element: StructElement, pageNumByObjNum: Map<number, number>): 
   return seen.sort((a, b) => a - b);
 }
 
+// ─── Structure element → drawing rectangle (Issue #20, stage 2) ─────────────
+
+/**
+ * What every rectangle in the result does and does not mean.
+ *
+ * Returned with the result rather than left to the tool description, because
+ * the rectangle is about to be handed to `add_annotation`, and the caller that
+ * does the handing over is the one that has to know what it is holding.
+ */
+export const BBOX_NOTES: string[] = [
+  'Rectangles are in PDF default user space: origin bottom-left, pt, normalised (x1 < x2, ' +
+    'y1 < y2). This is the same space pdf-writer-mcp add_annotation takes, and it is not ' +
+    'affected by /Rotate or by a /CropBox whose origin is not (0, 0).',
+  'basis "text-extent" is measured from the element\'s text only. The vertical edges come ' +
+    "from the font's ascent and descent times the run's size — the line box, not the glyph " +
+    'outlines, so a glyph that overshoots can exceed it. Images and vector drawings ' +
+    'contribute nothing at all.',
+  'basis "layout-attribute-bbox" is the /BBox the file declares for the element ' +
+    '(ISO 32000-2 Table 379). It is a declaration, not a measurement — reported as the ' +
+    'file states it, and files do state nonsense. It is cross-checked against the page box ' +
+    "and against the element's own text; read boxNote before passing one to add_annotation.",
+  'An element with no rectangle carries boxNote saying why. Absent is not the same as ' +
+    'zero-sized, and neither is guessed at.',
+];
+
+/**
+ * Normalise a rectangle written as two opposite corners.
+ *
+ * ISO 32000-2 §7.9.5 allows the corners in either order and requires
+ * normalisation before use; `add_annotation` requires `x1 < x2`, `y1 < y2`, so
+ * this is what makes the rectangle directly usable there. Same treatment as
+ * `locate_objects` (stage 1) gives `/Rect`, deliberately: the two stages must
+ * hand over the same shape.
+ */
+function normaliseRect(values: number[]): ObjectRect | null {
+  if (values.length !== 4 || values.some((v) => !Number.isFinite(v))) return null;
+  const [a, b, c, d] = values;
+  return { x1: Math.min(a, c), y1: Math.min(b, d), x2: Math.max(a, c), y2: Math.max(b, d) };
+}
+
+function rectOfRunBox(box: RunBox): ObjectRect {
+  return { x1: box.minX, y1: box.minY, x2: box.maxX, y2: box.maxY };
+}
+
+/** Does `outer` contain `inner`, allowing a small slack for rounding? */
+function contains(outer: ObjectRect, inner: ObjectRect, slack = 1): boolean {
+  return (
+    inner.x1 >= outer.x1 - slack &&
+    inner.y1 >= outer.y1 - slack &&
+    inner.x2 <= outer.x2 + slack &&
+    inner.y2 <= outer.y2 + slack
+  );
+}
+
+/** The measured extent of an element's text, per page, plus what went unmeasured. */
+function measureText(
+  element: StructElement,
+  idToBox: Map<string, MarkedContentExtent>,
+  pageNumByObjNum: Map<number, number>,
+): { byPage: Map<number, RunBox>; sawUnmeasurable: boolean; sawContent: boolean } {
+  const byPage = new Map<number, RunBox>();
+  let sawUnmeasurable = false;
+  let sawContent = false;
+
+  for (const ref of collectContentRefs(element)) {
+    sawContent = true;
+    const extent = idToBox.get(pdfjsMarkedContentId(ref));
+    if (!extent) continue;
+    if (extent.hasUnmeasurableRun) sawUnmeasurable = true;
+    if (!extent.box) continue;
+    const pageNum = pageNumByObjNum.get(ref.pageObjNum);
+    if (pageNum === undefined) continue;
+    const current = byPage.get(pageNum);
+    byPage.set(
+      pageNum,
+      current
+        ? {
+            minX: Math.min(current.minX, extent.box.minX),
+            minY: Math.min(current.minY, extent.box.minY),
+            maxX: Math.max(current.maxX, extent.box.maxX),
+            maxY: Math.max(current.maxY, extent.box.maxY),
+          }
+        : { ...extent.box },
+    );
+  }
+
+  return { byPage, sawUnmeasurable, sawContent };
+}
+
+/**
+ * Where an element is drawn, and what that rectangle does not cover.
+ *
+ * Two bases, and they are not the same kind of claim:
+ *
+ *  - **`layout-attribute-bbox`** — the `/BBox` the file declares (Table 379).
+ *    It is the producer's statement about its own geometry. Preferred when
+ *    present, because it is the only source that can describe content with no
+ *    text: a `Figure` holding one image has an MCID but no text runs, so
+ *    nothing can be measured for it. §14.8.4.8.5 says a Figure "should have a
+ *    BBox attribute" for exactly this reason.
+ *  - **`text-extent`** — measured from the runs the element owns. Real, but
+ *    only of the *text*: images and vector art contribute nothing to it.
+ *
+ * When both exist and the declared rectangle does not cover the measured one,
+ * that disagreement is reported rather than smoothed over. A declaration that
+ * does not match what is drawn is a finding, not a rounding error.
+ */
+function boxesOf(
+  element: StructElement,
+  idToBox: Map<string, MarkedContentExtent>,
+  pageNumByObjNum: Map<number, number>,
+  pageBoxByNumber: Map<number, ObjectRect>,
+): { boxes: ElementBox[]; note?: string } {
+  const { byPage, sawUnmeasurable, sawContent } = measureText(element, idToBox, pageNumByObjNum);
+  const pages = pagesOf(element, pageNumByObjNum);
+
+  const declared = element.layoutBBox ? normaliseRect(element.layoutBBox) : null;
+  if (declared && pages.length > 0) {
+    const page = pages[0];
+    const boxes: ElementBox[] = [{ page, rect: declared, basis: 'layout-attribute-bbox' }];
+    const complaints: string[] = [];
+
+    // Does the declaration reach outside the page it is on? Table 379 defines
+    // BBox as enclosing the element's *visible* content, and content outside the
+    // crop box is not visible (§7.7.3.3), so a rectangle that leaves the page
+    // cannot be the one that clause describes.
+    //
+    // This is not hypothetical. `-32768 -32768 32767 32767` — a producer writing
+    // int16 sentinels instead of a rectangle — is present on the cover Figure of
+    // BOTH Well-Tagged PDF 1.0 and the Tagged PDF Best Practice Guide, and
+    // PDF32000_2008 has 131 of its 545 declarations reaching past the page edge.
+    // Handed to add_annotation unqualified, the first of those draws over the
+    // entire coordinate space.
+    const pageBox = pageBoxByNumber.get(page);
+    if (pageBox && !contains(pageBox, declared)) {
+      const box = [pageBox.x1, pageBox.y1, pageBox.x2, pageBox.y2]
+        .map((v) => v.toFixed(1))
+        .join(', ');
+      complaints.push(
+        `it reaches outside page ${page}, whose box is (${box}) — so it cannot be the ` +
+          "rectangle enclosing the element's visible content. Do NOT pass it to " +
+          'add_annotation without checking it',
+      );
+    }
+
+    const measured = byPage.get(page);
+    if (measured && !contains(declared, rectOfRunBox(measured))) {
+      complaints.push(
+        'it does not cover the text measured inside the element ' +
+          `(measured on page ${page}: ` +
+          `${[measured.minX, measured.minY, measured.maxX, measured.maxY]
+            .map((v) => v.toFixed(1))
+            .join(', ')})`,
+      );
+    }
+
+    if (complaints.length > 0) {
+      return {
+        boxes,
+        note:
+          `The /BBox this element declares is reported as-is, but ${complaints.join('; and ')}. ` +
+          'It is what the file says, not what was measured.',
+      };
+    }
+    return { boxes };
+  }
+
+  if (sawUnmeasurable) {
+    return {
+      boxes: [],
+      note:
+        'Some of this element is drawn in vertical writing mode, whose advance direction ' +
+        'this measurement does not resolve. A rectangle covering only the horizontal part ' +
+        'would be wrong rather than absent, so none is reported. A /BBox layout attribute ' +
+        '(ISO 32000-2 Table 379) would settle it.',
+    };
+  }
+
+  const boxes: ElementBox[] = [];
+  for (const page of pages) {
+    const box = byPage.get(page);
+    if (box) boxes.push({ page, rect: rectOfRunBox(box), basis: 'text-extent' });
+  }
+
+  if (boxes.length > 0) return { boxes };
+
+  return {
+    boxes: [],
+    note: sawContent
+      ? 'No text was measured inside this element, so its extent could not be derived. ' +
+        'Images and vector drawings are not measured — a Figure that holds one image is ' +
+        'the usual case, and ISO 32000-2 §14.8.4.8.5 says such an element "should have a ' +
+        'BBox attribute". This one declares none.'
+      : 'This element owns no marked content of its own or in its descendants, so there is ' +
+        'nothing on a page to measure.',
+  };
+}
+
 /** Build `rows` for a `Table` element by walking TR → TH/TD. */
 function tableRows(element: StructElement, idToText: Map<string, string>): StructuredTableCell[][] {
   const rows: StructuredTableCell[][] = [];
@@ -188,6 +391,8 @@ function flatten(
   idToText: Map<string, string>,
   pageNumByObjNum: Map<number, number>,
   out: StructuredElement[],
+  idToBox: Map<string, MarkedContentExtent> | null,
+  pageBoxByNumber: Map<number, ObjectRect>,
 ): void {
   // A list label belongs to its LI, not to the flow of text.
   if (element.role === LABEL_ROLE) return;
@@ -227,13 +432,19 @@ function flatten(
   if (element.alt !== null) entry.alt = element.alt;
   if (element.lang !== null) entry.lang = element.lang;
 
+  if (idToBox) {
+    const { boxes, note } = boxesOf(element, idToBox, pageNumByObjNum, pageBoxByNumber);
+    if (boxes.length > 0) entry.boxes = boxes;
+    if (note) entry.boxNote = note;
+  }
+
   out.push(entry);
 
   // Table rows and LI bodies are already represented; don't emit them again.
   if (isTable || element.role === 'LI') return;
 
   for (const child of element.children) {
-    flatten(child, depth + 1, idToText, pageNumByObjNum, out);
+    flatten(child, depth + 1, idToText, pageNumByObjNum, out, idToBox, pageBoxByNumber);
   }
 }
 
@@ -247,10 +458,18 @@ export function buildStructuredText(
   roots: StructElement[],
   idToText: Map<string, string>,
   pageNumByObjNum: Map<number, number>,
-  options: { roles?: string[]; pages?: number[] } = {},
+  options: {
+    roles?: string[];
+    pages?: number[];
+    idToBox?: Map<string, MarkedContentExtent> | null;
+    pageBoxByNumber?: Map<number, ObjectRect>;
+  } = {},
 ): StructuredElement[] {
   const out: StructuredElement[] = [];
-  for (const root of roots) flatten(root, 0, idToText, pageNumByObjNum, out);
+  const pageBoxes = options.pageBoxByNumber ?? new Map<number, ObjectRect>();
+  for (const root of roots) {
+    flatten(root, 0, idToText, pageNumByObjNum, out, options.idToBox ?? null, pageBoxes);
+  }
 
   let filtered = out;
   if (options.roles && options.roles.length > 0) {
@@ -352,7 +571,7 @@ export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
  */
 export async function extractStructuredText(
   filePath: string,
-  options: { pages?: string; roles?: string[] } = {},
+  options: { pages?: string; roles?: string[]; includeBbox?: boolean } = {},
 ): Promise<StructuredTextResult> {
   const libDoc = await loadWithPdfLib(filePath);
 
@@ -398,13 +617,40 @@ export async function extractStructuredText(
       ? resolvePageNumbers(options.pages, jsDoc.numPages)
       : undefined;
 
+    const idToBox = options.includeBbox ? await buildDocumentIdToBoxMap(jsDoc) : null;
+
+    // Page boxes, so a declared /BBox can be checked against the page it claims
+    // to be on. pdf-lib's getCropBox already falls back to the media box when
+    // there is no crop box, which is the inheritance rule of §7.7.3.3 — same
+    // treatment as locate_objects gives, so the two stages agree on "the page".
+    const pageBoxByNumber = new Map<number, ObjectRect>();
+    if (options.includeBbox) {
+      for (let i = 0; i < pages.length; i++) {
+        try {
+          const box = pages[i].getCropBox();
+          pageBoxByNumber.set(i + 1, {
+            x1: box.x,
+            y1: box.y,
+            x2: box.x + box.width,
+            y2: box.y + box.height,
+          });
+        } catch {
+          // A page whose box cannot be read simply goes unchecked; the
+          // declaration is still reported, just without that cross-check.
+        }
+      }
+    }
+
     return {
       isTagged: true,
       lang,
       elements: buildStructuredText(roots, idToText, pageNumByObjNum, {
         roles: options.roles,
         pages: pageFilter,
+        idToBox,
+        pageBoxByNumber,
       }),
+      ...(options.includeBbox ? { bboxNotes: BBOX_NOTES } : {}),
     };
   } finally {
     await jsDoc.destroy();

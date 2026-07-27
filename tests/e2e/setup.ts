@@ -46,6 +46,13 @@ export const FIXTURES = {
    */
   spanningTable: resolve(FIXTURES_DIR, 'spanning-table.pdf'),
   /**
+   * Structure element → drawing rectangle (#20 stage 2).
+   * Declared `/BBox` through `/A` and through `/C` + `/ClassMap`, a declaration
+   * that contradicts its own text, text rotated 45°, and a page whose MediaBox
+   * origin is not (0,0) and which is `/Rotate 90`.
+   */
+  elementBbox: resolve(FIXTURES_DIR, 'element-bbox.pdf'),
+  /**
    * `/ActualText` on marked-content sequences, in an UNTAGGED document (#18).
    * Page 1 is the ISO 32000-2 §14.9.4 EXAMPLE ("Druk-"/"ker" → "Drucker");
    * page 2 has two consecutive Spans with ActualText, for R-14.9.4-3.
