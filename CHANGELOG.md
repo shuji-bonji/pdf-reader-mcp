@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-07-27
+
+### Fixed
+
+- **`instructions` said this server cannot map objects to coordinates — it has been able to
+  since v0.10.0.** The "what it does NOT do" list still read "no object-ID-to-coordinate
+  mapping", a line that went stale the moment `locate_objects` shipped and stayed wrong through
+  `include_bbox`.
+
+  This is worse than a stale README. `instructions` is returned from `initialize` and lands in
+  the client's system context **before any tool is considered** — which is exactly why the
+  family adopted it (PDFfamily specs/06 §2.10). So the one text that is read first was telling
+  every client that the two newest features do not exist, suppressing their use.
+
+  Replaced with what is actually true: `locate_objects` turns an object number into a page and a
+  rectangle, `extract_structured_text` with `include_bbox` does the same for a structure element,
+  and both answer in the form `add_annotation` takes. The incremental-update line now points at
+  `pdf-verify-mcp` `verify_integrity` rather than simply denying the capability exists anywhere.
+
+  No API change; the published 0.11.0 behaves identically.
+
 ## [0.11.0] - 2026-07-27
 
 ### Added

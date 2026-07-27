@@ -3,11 +3,26 @@
 | 項目 | 内容 |
 |------|------|
 | 作成日 | 2026-07-16 |
-| 最終更新 | 2026-07-27（**v0.11.0 = #20 第 2 段階 = `extract_structured_text` の `include_bbox`**） |
-| 現状 | **v0.11.0**・**18 ツール**（3 tier）。ツールは増やさず既存に `include_bbox` を追加。未処理は次メジャーでの `validate_*` 削除 |
+| 最終更新 | 2026-07-27（**v0.11.1 = `instructions` の陳腐化修正**。v0.11.0 = #20 第 2 段階 = `include_bbox`） |
+| 現状 | **v0.11.1**・**18 ツール**（3 tier）。ツールは増やさず既存に `include_bbox` を追加。未処理は次メジャーでの `validate_*` 削除 |
 | 基準 | `mcps/pdf-family-role-architecture.md`（責務分担提案）／ `Document-Note/mcps/PDFfamily/` |
 | 備考 | pdf-verify-mcp v0.6.0 / pdf-writer-mcp v0.4.0 の作業で判明した課題を含む |
-| **次の最優先** | **#20 は 2 段階とも完了**（第 1 = v0.10.0 `locate_objects` / 第 2 = v0.11.0 `include_bbox`）。テスト全緑・ビルド・実機試用まで完了。**残るは tag → publish → npx 公開版で検証**。その後は B-20（PDF/A-4）や第 3 ドメイン写像へ |
+| **次の最優先** | **#20 は 2 段階とも完了**（第 1 = v0.10.0 `locate_objects` / 第 2 = v0.11.0 `include_bbox`）。**v0.11.1 で `instructions` の陳腐化を是正 → publish**。その後は周辺リポジトリの追従（claude-plugins / pdf-family-site / pdf-specialist-plugin / Document-Note specs/12）→ B-20（PDF/A-4）や第 3 ドメイン写像へ |
+
+## v0.11.1 — `instructions` が「できない」と言い続けていた（2026-07-27）
+
+`instructions` の "What it does NOT do" に **`no object-ID-to-coordinate mapping`** が残っていた。
+**v0.10.0 で `locate_objects` を出した瞬間に嘘になった行**で、`include_bbox` を足しても直っていなかった。
+
+**README の陳腐化より悪い**。`instructions` は `initialize` の応答としてクライアントのシステム
+コンテキストに載る＝**ツールを 1 つも検討しないうちに読まれる**（それが family がこれを採用した理由 =
+PDFfamily specs/06 §2.10）。**最初に読まれる文章が、最新機能 2 つの存在を否定していた**ことになる。
+
+**教訓**: `instructions` は「しないこと」を書く場所なので、**機能を足したときに真っ先に腐る**。
+新ツール追加時のチェックリストに `src/index.ts` の `INSTRUCTIONS` を入れる
+（ツール数表記・README・CHANGELOG と同列）。
+なお同種の点検を verify / writer / spec にも実施したが、**否定形が偽になっているのは reader だけ**だった
+（verify は v0.10.0 のオブジェクト差分に言及が無いだけ = 記載漏れであって嘘ではない）。
 
 ## #20 — オブジェクト ID → 座標（G-A・2026-07-27 実装）
 

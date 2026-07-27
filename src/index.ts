@@ -39,7 +39,13 @@ What it does NOT do:
     (verify_signatures / verify_integrity).
   - No conformance judgement. validate_tagged / validate_metadata are deprecated in favour of
     pdf-verify-mcp's validate_conformance, which delegates to veraPDF.
-  - No incremental-update history, no object-ID-to-coordinate mapping, no OCR.
+  - No incremental-update history (that is pdf-verify-mcp verify_integrity), and no OCR.
+
+It DOES map content to coordinates: locate_objects turns an object number into a page and a
+rectangle, and extract_structured_text with include_bbox does the same for a structure element.
+Both answer in the form pdf-writer-mcp add_annotation takes, so "annotate the thing that
+changed" needs no coordinate conversion in between. Every rectangle names its basis — a
+measurement and a rectangle the file merely declares are not the same claim.
 
 Where an observation here and a verdict from pdf-verify-mcp disagree, the verdict wins —
 this server reads the file, the validator applies the rules.
