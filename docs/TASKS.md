@@ -3,11 +3,29 @@
 | 項目 | 内容 |
 |------|------|
 | 作成日 | 2026-07-16 |
-| 最終更新 | 2026-07-27（**v0.11.1 = `instructions` の陳腐化修正**。v0.11.0 = #20 第 2 段階 = `include_bbox`） |
-| 現状 | **v0.11.1**・**18 ツール**（3 tier）。ツールは増やさず既存に `include_bbox` を追加。未処理は次メジャーでの `validate_*` 削除 |
+| 最終更新 | 2026-08-13（**v0.11.2 = `instructions` が版数を名乗る**。v0.11.1 = `instructions` の陳腐化修正） |
+| 現状 | **v0.11.2**・**18 ツール**（3 tier）。ツールは増やさず既存に `include_bbox` を追加。未処理は次メジャーでの `validate_*` 削除 |
 | 基準 | `mcps/pdf-family-role-architecture.md`（責務分担提案）／ `Document-Note/mcps/PDFfamily/` |
 | 備考 | pdf-verify-mcp v0.6.0 / pdf-writer-mcp v0.4.0 の作業で判明した課題を含む |
 | **次の最優先** | **#20 は 2 段階とも完了**（第 1 = v0.10.0 `locate_objects` / 第 2 = v0.11.0 `include_bbox`）。**v0.11.1 で `instructions` の陳腐化を是正 → publish**。その後は周辺リポジトリの追従（claude-plugins / pdf-family-site / pdf-specialist-plugin / Document-Note specs/12）→ B-20（PDF/A-4）や第 3 ドメイン写像へ |
+
+## v0.11.2 — `instructions` が「どの版が答えているか」を言っていなかった（2026-08-13）
+
+v0.11.1 は `instructions` の**内容**が古いという欠陥だった。今回はその裏側で、
+**内容が新しくても、読んでいる側は自分が新しい版を読んでいるか判断できない**という穴である。
+
+`npx -y @shuji-bonji/pdf-reader-mcp@latest` は解決済みのツリーをキャッシュするので、
+クライアントは何版か前のビルドを動かしたまま、文書だけ最新を読むことができる。
+`instructions` の先頭で名前と版数を名乗れば、ツールを 1 つも呼ばずにそれが見える。
+
+family での順序: pdf-verify-mcp 0.15.0 → pdf-writer-mcp 0.19.0 → **本 0.11.2** →
+pdf-spec-mcp 0.4.6 で 4 サーバ揃う。**中途半端に入れると診断器として逆効果**で、
+版数行が無いのを見た人は「古い」と「元から無い」を区別できない。
+
+あわせて `scripts/sync-plugin-version.mjs` を移植した（`npm version` フック +
+`prepublishOnly --check`）。verify で 2 度・writer で 1 度、tag の後に `plugin.json` を
+追いコミットで直しており、**tag が指す木には間違った manifest が入ったまま**だった。
+本 repo では未発生で、予防として入れる。
 
 ## v0.11.1 — `instructions` が「できない」と言い続けていた（2026-07-27）
 

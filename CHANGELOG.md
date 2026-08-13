@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-08-13
+
+### Changed
+
+- **`instructions` now open with the running build's name and version.** The text is returned
+  from `initialize` and lands in the client's system context, so it is read before any tool is
+  considered — which makes it the one place where a stale install can be noticed without
+  spending a call. The line names the package and points at `npm view` for comparison.
+
+  Why this matters more than it sounds: this server is installed through
+  `npx -y @shuji-bonji/pdf-reader-mcp@latest`, and npx caches a resolved tree. A client can
+  therefore run a build several releases behind while every document about it describes the
+  newest one. Until now nothing in the protocol surface said which build was answering — and
+  0.11.1 exists precisely because `instructions` had gone stale about this server's own
+  capabilities, which is the same failure seen from the other side.
+
+  pdf-verify-mcp did this in 0.15.0 and pdf-writer-mcp in 0.19.0; **this release and
+  pdf-spec-mcp 0.4.6 complete the family**, which matters because a half-applied diagnostic is
+  worse than none: a reader who sees no version line cannot tell "old build" from "build that
+  never had the line".
+
+  No tool, schema or behaviour changed.
+
+### Build
+
+- `scripts/sync-plugin-version.mjs` keeps `.claude-plugin/plugin.json` in step with
+  `package.json`, wired to the `npm version` hook so the release commit — the tree the tag
+  points at — carries the right plugin manifest, and to `prepublishOnly --check` as a
+  backstop. Preventive: the drift has happened twice in pdf-verify-mcp and once in
+  pdf-writer-mcp, never here, and in each case the fix landed in a commit *after* the tag,
+  leaving the tagged tree wrong.
+
 ## [0.11.1] - 2026-07-27
 
 ### Fixed

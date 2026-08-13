@@ -1,6 +1,6 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",
   "main": "dist/index.js",
@@ -34,7 +34,8 @@
     "check": "biome check ./src ./tests",
     "check:fix": "biome check --fix ./src ./tests",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "node scripts/sync-plugin-version.mjs --check && npm run build",
+    "version": "node scripts/sync-plugin-version.mjs && git add .claude-plugin/plugin.json"
   },
   "publishConfig": {
     "access": "public",

@@ -27,7 +27,9 @@ import { registerAllTools } from './tools/index.js';
  * 呼ばないうちに読まれる — 射程を伝える位置としてはここが最も早い。
  * 先例は pdf-spec-mcp v0.4.5（Issue #13）。
  */
-const INSTRUCTIONS = `This server OBSERVES what is inside a PDF. It does not judge whether it is correct.
+const INSTRUCTIONS = `${SERVER_NAME} v${SERVER_VERSION} — the running build identifies itself here so a stale install is visible without a tool call; compare against \`npm view @shuji-bonji/pdf-reader-mcp version\` when freshness matters.
+
+This server OBSERVES what is inside a PDF. It does not judge whether it is correct.
 
 Everything it returns is an observation: extracted text, tables, the structure tree, fonts,
 annotations, images, and the *structure* of signature fields. Treat the output as evidence,
