@@ -108,12 +108,18 @@ export interface SearchResult {
   unsearchablePages?: PageExtractability[];
 }
 
-/** An extracted image from a PDF page */
+/** An extracted image from a PDF page, encoded as a real image file (#22). */
 export interface ExtractedImage {
   page: number;
   index: number;
+  /** Width of the image as returned, after any downscale. */
   width: number;
+  /** Height of the image as returned, after any downscale. */
   height: number;
+  /** The image's own width in the file, before any downscale. */
+  sourceWidth: number;
+  /** The image's own height in the file, before any downscale. */
+  sourceHeight: number;
   /**
    * Colour space of the decoded buffer: 'Grayscale' | 'RGB' | 'RGBA'
    * ('Unknown' if pdfjs reports a kind we do not recognise).
@@ -123,7 +129,23 @@ export interface ExtractedImage {
   colorSpace: string;
   /** Bits per component of the decoded buffer: 1 for Grayscale, 8 for RGB/RGBA. */
   bitsPerComponent: number;
+  /** `image/png` or `image/jpeg` — what `dataBase64` actually contains. */
+  mimeType: string;
+  /** Size in bytes of the encoded image, before base64. */
+  encodedBytes: number;
+  /** True when `max_width` / `max_height` reduced the image. */
+  downscaled: boolean;
+  /** Base64 of a complete PNG or JPEG file — not raw pixels. */
   dataBase64: string;
+}
+
+/** An image that was decoded but left out of the response, and why. */
+export interface OmittedImage {
+  page: number;
+  index: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  reason: string;
 }
 
 /** Result of image extraction including detected vs extracted counts */
@@ -132,6 +154,10 @@ export interface ImageExtractionResult {
   detectedCount: number;
   extractedCount: number;
   skippedCount: number;
+  /** Decoded but not returned — over the response budget, or too large to encode. */
+  omitted: OmittedImage[];
+  /** Total encoded bytes of the images that ARE returned. */
+  totalEncodedBytes: number;
 }
 
 /** Summary report of a PDF document */

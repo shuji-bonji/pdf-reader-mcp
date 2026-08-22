@@ -16,6 +16,29 @@ export const MAX_FILE_SIZE = 50 * 1024 * 1024;
 /** Default page limit for text extraction */
 export const DEFAULT_PAGE_LIMIT = 50;
 
+/**
+ * Ceiling on the ENCODED image bytes one `read_images` response may carry (#22).
+ *
+ * A 200 dpi A4 scan decodes to 1654×2339×3 = 11.6 MB of pixels, which is ~15.5 MB
+ * once base64'd — a single image can therefore exceed anything a client will
+ * accept. `read_text` has had a character limit since the beginning; images had
+ * none, which is the asymmetry this closes. Images beyond the budget are named
+ * and omitted rather than silently dropped.
+ */
+export const MAX_IMAGE_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Ceiling on the pixels of a single image this server will re-encode.
+ *
+ * The encoders are plain JavaScript. Above this size the cost is measured in
+ * seconds, and a caller who wants such an image should say what size they want
+ * it at (`max_width` / `max_height`) rather than wait for the full one.
+ */
+export const MAX_IMAGE_PIXELS = 40_000_000;
+
+/** Default JPEG quality for `read_images` when `format: "jpeg"` is asked for. */
+export const DEFAULT_IMAGE_QUALITY = 80;
+
 /** Maximum number of search results to return */
 export const MAX_SEARCH_RESULTS = 100;
 

@@ -3,7 +3,7 @@
  */
 
 import { z } from 'zod';
-import { DEFAULT_SEARCH_CONTEXT, MAX_SEARCH_RESULTS } from '../constants.js';
+import { DEFAULT_IMAGE_QUALITY, DEFAULT_SEARCH_CONTEXT, MAX_SEARCH_RESULTS } from '../constants.js';
 import { FilePathSchema, PagesSchema, ResponseFormatSchema, UrlSchema } from './common.js';
 
 /** get_page_count */
@@ -103,11 +103,52 @@ export const SearchTextSchema = z
   })
   .strict();
 
-/** read_images */
+/**
+ * `read_images` — Issue #22: the response is now real image files, and its size
+ * is bounded.
+ *
+ * `format` defaults to PNG because PNG is lossless: an image extracted for
+ * inspection should not have JPEG artefacts added on the way out. `quality`
+ * exists for the case where the caller would rather have a smaller response,
+ * and is ignored for PNG rather than silently doing nothing surprising.
+ */
 export const ReadImagesSchema = z
   .object({
     file_path: FilePathSchema,
     pages: PagesSchema,
+    format: z
+      .enum(['png', 'jpeg'])
+      .optional()
+      .describe(
+        'Encoding of the returned images. png (default) is lossless; jpeg is smaller and ' +
+          'drops alpha (composited over white).',
+      ),
+    quality: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(
+        `JPEG quality 1-100 (default ${DEFAULT_IMAGE_QUALITY}). Ignored when format is png.`,
+      ),
+    max_width: z
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .optional()
+      .describe(
+        'Downscale images wider than this, averaging over the source pixels. Images are ' +
+          'never enlarged. Omit to return each image at its own size.',
+      ),
+    max_height: z
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .optional()
+      .describe('Downscale images taller than this. Never enlarges.'),
   })
   .strict();
 

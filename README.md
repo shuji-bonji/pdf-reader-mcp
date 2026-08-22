@@ -32,7 +32,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
 | `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). Reports **text extractability** per page (§9.10.1) so an empty result is never mistaken for an empty page. For **logical** order in tagged PDFs, prefer `extract_structured_text` |
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
-| `read_images`    | Image extraction as base64 with metadata                 |
+| `read_images`    | Embedded image XObjects as **PNG or JPEG files**, returned as MCP image content blocks so a vision model can read them. `max_width` / `max_height` downscale by area average; the response has a byte budget and names anything it leaves out |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
 | `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
@@ -56,6 +56,27 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
 | `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+### Images come back as image files (#22)
+
+`read_images` used to base64 `imgData.data` — pdfjs's *decoded pixels*. An 8×8 RGB image was
+192 bytes with no PNG or JPEG signature anywhere in it, so the result could not be opened by
+any viewer and could not be read by a vision model, which is the reason to extract an image in
+the first place.
+
+Images are now encoded (PNG by default, lossless; `format: "jpeg"` with `quality` when smaller
+matters) and returned as MCP `image` content blocks, with the metadata alongside in a text
+block. Both encoders are written out here — no native addon, no per-platform binary.
+
+The response is bounded at 4 MB of encoded image data. A 200 dpi A4 scan is ~11.6 MB of pixels
+on its own, so images past the budget are **named with the reason** rather than dropped:
+
+```
+read_images({ file_path: "/path/to/scan.pdf", pages: "1", max_width: 1200, format: "jpeg" })
+```
+
+`read_images` returns the image XObjects a page draws. It is not a picture of the page — vector
+drawings and text are not covered by it.
 
 ### Text extractability — three states, not two (#21)
 

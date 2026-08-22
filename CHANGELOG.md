@@ -54,8 +54,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a Type0 with no `/DescendantFonts`) could not serve — pdfjs abandons the whole page over it,
   so the Helvetica text disappears too and there is no "partial" left to observe.
 
+- **`read_images` returns PNG or JPEG files, in MCP image content blocks (#22).** It used to
+  base64 `imgData.data`, which is pdfjs's *decoded pixel array*: 192 bytes for an 8×8 RGB
+  image, 256 for 8×8 RGBA, 8 for an 8×8 1 bpp greyscale — measured on `image-kinds.pdf`, with
+  no PNG or JPEG signature in any of them. The response looked like an image and was not one,
+  so no viewer could open it and no vision model could read it.
+
+  Both encoders are written out in `src/services/image-encoder.ts`: PNG through
+  `zlib.deflateSync`, and baseline JPEG per ISO/IEC 10918-1 with the example tables of its
+  Annex K. No dependency is added — the standing reason (#21) is that a native addon ships
+  per-platform binaries and breaks the post-release check of the published package.
+
+  New arguments: `format` (`png` default, `jpeg`), `quality` (JPEG only), `max_width` and
+  `max_height` (area-averaged downscale, never enlarges).
+
+- **`read_images` has a response budget, and says what it left out.** `read_text` has had a
+  character limit since the beginning; `read_images` had none, and a 200 dpi A4 scan is
+  1654×2339×3 = 11.6 MB of pixels on its own. At most 4 MB of encoded image data is returned
+  per call. Images past the budget, or over the 40 Mpx encoding limit, are listed in `omitted`
+  with the reason and the argument that would fetch them — they are not dropped silently.
+
 ### Changed
 
+- `ExtractedImage` gained `sourceWidth`, `sourceHeight`, `mimeType`, `encodedBytes` and
+  `downscaled`; `ImageExtractionResult` gained `omitted` and `totalEncodedBytes`. `dataBase64`
+  now holds a complete image file rather than raw samples.
+- `skippedCount` keeps its meaning — detected but not decodable by pdf.js. "Decoded but not
+  returned" is `omitted`, a separate count: folding the two would make a response the caller
+  asked to bound look like a file that failed to decode.
 - `PageText` gained an optional `extractability` record, `PdfSummary` gained
   `textExtractability` and `unreadablePages`, `SearchResult` gained `unsearchablePages`, and
   `StructuredTextResult` gained `extractability`. All are additive.

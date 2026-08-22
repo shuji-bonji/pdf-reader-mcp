@@ -32,7 +32,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `get_metadata`   | メタデータ抽出（タイトル、著者、PDF版、タグ有無等）   |
 | `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。ページごとに**テキスト抽出可能性**（§9.10.1）を併記するので、空の結果が「空のページ」と取り違えられない。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
-| `read_images`    | 画像抽出（base64、メタデータ付き）                    |
+| `read_images`    | 埋め込み画像 XObject を **PNG / JPEG ファイル**として抽出し、MCP の image コンテンツブロックで返す（視覚モデルがそのまま読める）。`max_width` / `max_height` で面積平均による縮小。応答にはバイト予算があり、返さなかった画像は理由付きで名指しする |
 | `read_url`       | URLからリモートPDFを取得して処理                      |
 | `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
@@ -56,6 +56,28 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `validate_tagged`   | **非推奨** — ISO 規格への合否判定は [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`（`flavour: "pdfua-1"`）へ移管。次のメジャーまで残置 |
 | `validate_metadata` | **非推奨** — 移管先は上と同じ。次のメジャーまで残置 |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+
+### 画像は画像ファイルとして返る（#22）
+
+`read_images` は `imgData.data`（pdfjs が**デコードしたピクセル**）をそのまま base64 に
+していた。8×8 RGB なら 192 バイトで、PNG/JPEG のシグネチャはどこにも無い。どのビューアも
+開けず、画像を取り出す目的そのものである視覚モデルも読めなかった。
+
+現在は PNG（既定・可逆）または JPEG（`format: "jpeg"` と `quality`）にエンコードし、
+MCP の `image` コンテンツブロックで返す。メタデータは従来どおり text ブロックに併記する。
+エンコーダは両方ともこのリポジトリ内に書いてある（ネイティブアドオン無し・
+プラットフォーム別バイナリ無し）。
+
+応答は 4 MB のエンコード済み画像バイトで頭打ちにする。200dpi A4 のスキャンは
+それだけで約 11.6 MB のピクセルになるため、予算を超えた画像は**理由付きで名指し**し、
+黙って落とさない。
+
+```
+read_images({ file_path: "/path/to/scan.pdf", pages: "1", max_width: 1200, format: "jpeg" })
+```
+
+`read_images` が返すのはページが描く画像 XObject であって、ページの絵ではない。
+ベクタ図形やテキストはこのツールの射程外。
 
 ### テキスト抽出可能性 — 2 値ではなく 3 値（#21）
 

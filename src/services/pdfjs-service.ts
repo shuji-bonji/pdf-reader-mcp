@@ -12,12 +12,18 @@ import {
   type PDFDocumentProxy,
   type PDFPageProxy,
 } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { DEFAULT_SEARCH_CONTEXT } from '../constants.js';
+import {
+  DEFAULT_IMAGE_QUALITY,
+  DEFAULT_SEARCH_CONTEXT,
+  MAX_IMAGE_PIXELS,
+  MAX_IMAGE_RESPONSE_BYTES,
+} from '../constants.js';
 import type {
   AnnotationInfo,
   AnnotationsAnalysis,
   ExtractedImage,
   ImageExtractionResult,
+  OmittedImage,
   PageText,
   PdfMetadata,
   SearchMatch,
@@ -31,6 +37,13 @@ import {
   foldActualText,
   type PositionedText,
 } from './actual-text-service.js';
+import { encodeJpeg, encodePng } from './image-encoder.js';
+import {
+  downscale,
+  expandGrayscale1Bpp,
+  flattenAlphaOverWhite,
+  type Samples,
+} from './image-resampler.js';
 import { detectEncryption, loadWithPdfLib } from './pdflib-service.js';
 
 /**
@@ -458,26 +471,78 @@ function getImageObject(
   });
 }
 
+/** Options for {@link extractImages} (#22). */
+export interface ExtractImagesOptions {
+  /** Encoding of the returned image files. Default `png`. */
+  format?: 'png' | 'jpeg';
+  /** JPEG quality 1–100. Ignored for PNG, which is lossless. */
+  quality?: number;
+  /** Longest width to return; larger images are area-averaged down. */
+  maxWidth?: number;
+  /** Longest height to return; larger images are area-averaged down. */
+  maxHeight?: number;
+  /** Ceiling on the total encoded bytes of the response. */
+  maxTotalBytes?: number;
+}
+
+/** Normalise pdfjs's three decoded shapes into 8-bit samples (#22). */
+function toSamples(image: PdfjsImageData): Samples | null {
+  // A Uint8ClampedArray may be a view into a larger buffer, so the offset and
+  // length have to come along; `new Uint8Array(view.buffer)` would silently
+  // read the whole pool.
+  const data =
+    image.data instanceof Uint8Array
+      ? image.data
+      : new Uint8Array(image.data.buffer, image.data.byteOffset, image.data.byteLength);
+  switch (image.kind) {
+    case ImageKind.GRAYSCALE_1BPP:
+      return expandGrayscale1Bpp(image.width, image.height, data);
+    case ImageKind.RGB_24BPP:
+      return { width: image.width, height: image.height, channels: 3, data };
+    case ImageKind.RGBA_32BPP:
+      return { width: image.width, height: image.height, channels: 4, data };
+    default:
+      // An unrecognised kind means the byte layout is unknown. Encoding it as
+      // if it were RGB would produce a picture that is confidently wrong, which
+      // is worse than saying the image could not be encoded.
+      return null;
+  }
+}
+
 /**
- * Extract images from specified pages as base64.
- * Returns both extracted images and counts of detected/skipped images.
+ * Extract images from the specified pages, encoded as PNG or JPEG files (#22).
+ *
+ * Previously this base64'd `imgData.data` directly. That buffer is *decoded
+ * pixels* — an 8×8 RGB image is 192 bytes with no PNG or JPEG signature — so
+ * the result could not be opened by anything, including the vision models the
+ * output exists for. Both encoders live in `image-encoder.ts` and add no
+ * dependency.
+ *
+ * Images are returned in page order until `maxTotalBytes` is reached; the rest
+ * are reported in `omitted` with the reason. Nothing is dropped silently.
  */
 export async function extractImages(
   filePath: string,
   pages?: string,
+  options: ExtractImagesOptions = {},
 ): Promise<ImageExtractionResult> {
   const doc = await loadDocument(filePath);
+
+  const format = options.format ?? 'png';
+  const quality = options.quality ?? DEFAULT_IMAGE_QUALITY;
+  const budget = options.maxTotalBytes ?? MAX_IMAGE_RESPONSE_BYTES;
 
   try {
     const pageNumbers = resolvePageNumbers(pages, doc.numPages);
 
-    // 全ページの画像抽出を並列実行
+    // Decoding is parallel; the byte budget is spent afterwards, in page order,
+    // so which images come back does not depend on which worker finished first.
     const pageResults = await Promise.all(
       pageNumbers.map(async (pageNum) => {
         const page = await doc.getPage(pageNum);
         const opList = await page.getOperatorList();
 
-        const pageImages: ExtractedImage[] = [];
+        const decoded: Array<{ index: number; image: PdfjsImageData }> = [];
         let pageDetected = 0;
         let imageIndex = 0;
 
@@ -487,41 +552,115 @@ export async function extractImages(
             pageDetected++;
             const imgName = opList.argsArray[i][0] as string;
             const imgData = await getImageObject(page, imgName);
-
-            if (imgData?.data) {
-              const base64 = Buffer.from(imgData.data).toString('base64');
-              const { colorSpace, bitsPerComponent } = describeImageKind(imgData.kind);
-
-              pageImages.push({
-                page: pageNum,
-                index: imageIndex,
-                width: imgData.width,
-                height: imgData.height,
-                colorSpace,
-                bitsPerComponent,
-                dataBase64: base64,
-              });
-            }
+            if (imgData?.data) decoded.push({ index: imageIndex, image: imgData });
             imageIndex++;
           }
         }
-        return { pageImages, pageDetected };
+        return { pageNum, decoded, pageDetected };
       }),
     );
 
-    // 各ページの結果を集約
-    const images = pageResults.flatMap((r) => r.pageImages);
-    const detectedCount = pageResults.reduce((sum, r) => sum + r.pageDetected, 0);
+    const images: ExtractedImage[] = [];
+    const omitted: OmittedImage[] = [];
+    let detectedCount = 0;
+    let decodedCount = 0;
+    let totalEncodedBytes = 0;
+
+    for (const { pageNum, decoded, pageDetected } of pageResults) {
+      detectedCount += pageDetected;
+      decodedCount += decoded.length;
+
+      for (const { index, image } of decoded) {
+        const { colorSpace, bitsPerComponent } = describeImageKind(image.kind);
+        const common = {
+          page: pageNum,
+          index,
+          sourceWidth: image.width,
+          sourceHeight: image.height,
+        };
+
+        if (image.width * image.height > MAX_IMAGE_PIXELS) {
+          omitted.push({
+            ...common,
+            reason:
+              `${image.width}×${image.height} exceeds the ${MAX_IMAGE_PIXELS.toLocaleString()} ` +
+              'pixel encoding limit. Pass max_width or max_height to get it at a size that fits.',
+          });
+          continue;
+        }
+
+        const samples = toSamples(image);
+        if (!samples) {
+          omitted.push({
+            ...common,
+            reason: `pdfjs reported image kind ${image.kind}, whose byte layout this server does not know`,
+          });
+          continue;
+        }
+
+        const resized = downscale(samples, options.maxWidth, options.maxHeight);
+        const encoded =
+          format === 'jpeg' ? encodeJpegSamples(resized, quality) : encodePngSamples(resized);
+
+        if (totalEncodedBytes + encoded.bytes.length > budget) {
+          omitted.push({
+            ...common,
+            reason:
+              `${encoded.bytes.length.toLocaleString()} bytes would take the response past the ` +
+              `${budget.toLocaleString()}-byte image budget. Narrow \`pages\`, or pass ` +
+              'max_width / max_height.',
+          });
+          continue;
+        }
+
+        totalEncodedBytes += encoded.bytes.length;
+        images.push({
+          ...common,
+          width: resized.width,
+          height: resized.height,
+          colorSpace,
+          bitsPerComponent,
+          mimeType: encoded.mimeType,
+          encodedBytes: encoded.bytes.length,
+          downscaled: resized.width !== image.width || resized.height !== image.height,
+          dataBase64: encoded.bytes.toString('base64'),
+        });
+      }
+    }
 
     return {
       images,
       detectedCount,
       extractedCount: images.length,
-      skippedCount: detectedCount - images.length,
+      skippedCount: detectedCount - decodedCount,
+      omitted,
+      totalEncodedBytes,
     };
   } finally {
     await doc.destroy();
   }
+}
+
+function encodePngSamples(samples: Samples): { bytes: Buffer; mimeType: string } {
+  const colorType = samples.channels === 4 ? 6 : samples.channels === 3 ? 2 : 0;
+  return {
+    bytes: encodePng(samples.width, samples.height, colorType, 8, samples.data),
+    mimeType: 'image/png',
+  };
+}
+
+function encodeJpegSamples(samples: Samples, quality: number): { bytes: Buffer; mimeType: string } {
+  const opaque = flattenAlphaOverWhite(samples);
+  return {
+    bytes: encodeJpeg(
+      opaque.width,
+      opaque.height,
+      opaque.channels === 1 ? 1 : 3,
+      opaque.data,
+      quality,
+    ),
+    mimeType: 'image/jpeg',
+  };
 }
 
 // ─── Internal helpers ────────────────────────────────────────
