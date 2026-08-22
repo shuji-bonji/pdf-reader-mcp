@@ -6,6 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type SearchTextInput, SearchTextSchema } from '../../schemas/tier1.js';
 import { searchText } from '../../services/pdfjs-service.js';
+import { observeExtractability } from '../../services/text-extractability-service.js';
 import type { SearchResult } from '../../types.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSearchResultMarkdown } from '../../utils/formatter.js';
@@ -45,11 +46,14 @@ Examples:
     },
     async (params: SearchTextInput) => {
       try {
-        const {
-          matches: allMatches,
-          unresolvedPages,
-          unresolvedReason,
-        } = await searchText(params.file_path, params.query, params.context_chars, params.pages);
+        const [{ matches: allMatches, unresolvedPages, unresolvedReason }, observations] =
+          await Promise.all([
+            searchText(params.file_path, params.query, params.context_chars, params.pages),
+            // #21: zero hits on a page whose characters do not convert to Unicode
+            // is "not found in what could be read", not "not in the document".
+            observeExtractability(params.file_path, params.pages),
+          ]);
+        const unsearchable = observations.filter((page) => page.state !== 'extracted');
 
         const truncated = allMatches.length > params.max_results;
         const matches = allMatches.slice(0, params.max_results);
@@ -59,6 +63,7 @@ Examples:
           totalMatches: allMatches.length,
           matches,
           truncated,
+          ...(unsearchable.length > 0 ? { unsearchablePages: unsearchable } : {}),
         };
 
         // #18 resolves /ActualText, so the blanket #15 warning no longer
@@ -67,7 +72,13 @@ Examples:
         // it is: they call for different next steps, and pointing an encrypted
         // document at extract_structured_text would waste the caller's time
         // (that tool reads its replacement text through pdf-lib as well).
-        if (allMatches.length === 0 && unresolvedPages.length > 0) {
+        if (allMatches.length === 0 && unresolvedPages.length === 0 && unsearchable.length > 0) {
+          result.note =
+            `No matches. ${unsearchable.length} of the ${observations.length} page(s) searched ` +
+            'do not yield text that can be converted to Unicode (ISO 32000-2 §9.10.1), so this ' +
+            'result says the query was not found in what could be read — not that it is absent ' +
+            'from the document. See the per-page states above.';
+        } else if (allMatches.length === 0 && unresolvedPages.length > 0) {
           result.note =
             unresolvedReason === 'encrypted'
               ? 'No matches. This document is encrypted, so replacement text (/ActualText, ' +

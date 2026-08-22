@@ -53,6 +53,23 @@ export const FIXTURES = {
    */
   elementBbox: resolve(FIXTURES_DIR, 'element-bbox.pdf'),
   /**
+   * Image-only pages, no text-showing operator (#21).
+   * The `no_text_layer` specimen: `image-kinds.pdf` cannot serve, because it
+   * draws body text as well.
+   */
+  noTextLayer: resolve(FIXTURES_DIR, 'no-text-layer.pdf'),
+  /**
+   * Identity-H with a correct `/ToUnicode` CMap (#21).
+   * The `extracted` control for composite fonts — without it a rule that
+   * answered `not_extractable` for every Type0 font would still pass.
+   */
+  toUnicodeCid: resolve(FIXTURES_DIR, 'tounicode-cid.pdf'),
+  /**
+   * A page drawn ONLY with an Identity-H font that has no `/ToUnicode` (#21).
+   * The total-loss specimen; `cid-font.pdf` is the partial one.
+   */
+  brokenCidOnly: resolve(FIXTURES_DIR, 'broken-cid-only.pdf'),
+  /**
    * `/ActualText` on marked-content sequences, in an UNTAGGED document (#18).
    * Page 1 is the ISO 32000-2 §14.9.4 EXAMPLE ("Druk-"/"ker" → "Drucker");
    * page 2 has two consecutive Spans with ActualText, for R-14.9.4-3.

@@ -51,7 +51,13 @@ async function withSuppressedPdfLibLogs<T>(fn: () => Promise<T>): Promise<T> {
  * The actual page-tree access may still throw — see `trySilently` below.
  */
 export async function loadWithPdfLib(filePath: string): Promise<PDFDocument> {
-  const data = await readPdfFile(filePath);
+  return loadWithPdfLibFromData(await readPdfFile(filePath));
+}
+
+/**
+ * The same, for bytes already in memory — `read_url` has the PDF but no path.
+ */
+export async function loadWithPdfLibFromData(data: Uint8Array): Promise<PDFDocument> {
   return withSuppressedPdfLibLogs(() =>
     PDFDocument.load(data, {
       ignoreEncryption: true,

@@ -64,6 +64,34 @@ export interface MarkedContentEvent {
 }
 
 /**
+ * What a text-showing operator referenced, collected alongside the
+ * marked-content walk (#21).
+ *
+ * ISO 32000-2 §9.10.1 makes the question "can this page's characters be
+ * converted to Unicode?" answerable from the file: it depends on the operators
+ * that show text and on the fonts those operators had selected. Both live in the
+ * content stream, so they are gathered by the same scan rather than by a second
+ * one that could disagree with it.
+ *
+ * `usedFonts` is keyed by the `Tf` resource name and holds the font dictionary
+ * that name resolved to in the resource dictionary then in effect — `null` when
+ * the name resolves to nothing, which is itself an observation (the text was
+ * shown with a font the file does not describe).
+ */
+export interface TextOperatorTally {
+  /** `Tj` / `TJ` / `'` / `"` occurrences. */
+  textShowingOperators: number;
+  /** `Do` on an Image XObject, plus `BI` inline images. */
+  imageOperators: number;
+  usedFonts: Map<string, PDFDict | null>;
+}
+
+/** Mutable scan state for {@link TextOperatorTally}; `currentFont` is the `Tf` in effect. */
+interface TextSink extends TextOperatorTally {
+  currentFont: string | null;
+}
+
+/**
  * How deep `Do` on a Form XObject is followed.
  *
  * A form may legitimately draw another form; a *cycle* is malformed but does
@@ -155,6 +183,7 @@ function scanStream(
   out: MarkedContentEvent[],
   visiting: Set<string>,
   depth: number,
+  text?: TextSink,
 ): void {
   const n = bytes.length;
   let i = 0;
@@ -350,13 +379,39 @@ function scanStream(
       case 'Do': {
         const name = operands.at(-1);
         if (name?.type === 'name')
-          scanFormXObject(doc, name.value, resources, out, visiting, depth);
+          scanFormXObject(doc, name.value, resources, out, visiting, depth, text);
         break;
       }
       case 'BI':
         // Inline image (§8.9.7): the bytes between `ID` and `EI` are arbitrary
         // binary and cannot be tokenized, so skip the object wholesale.
+        if (text) text.imageOperators++;
         i = skipInlineImage(bytes, i);
+        break;
+      case 'Tf': {
+        // `Tf` takes the font's *resource* name and a size (§9.3.1). The name is
+        // recorded rather than the dictionary: the same name means a different
+        // font inside a Form XObject with its own /Resources, so it is resolved
+        // at the point of use, below.
+        // Recorded, not counted: a `Tf` with no text-showing operator after it
+        // selects a font that never converts anything, and counting it would
+        // report loss on a page that shows nothing. The font is registered at
+        // the point text is actually shown, below.
+        if (text) {
+          const name = operands.at(-2);
+          text.currentFont = name?.type === 'name' ? name.value : null;
+        }
+        break;
+      }
+      case 'Tj':
+      case 'TJ':
+      case "'":
+      case '"':
+        // The four text-showing operators of §9.4.3 Table 107.
+        if (text) {
+          text.textShowingOperators++;
+          if (text.currentFont) noteFontUse(doc, text, text.currentFont, resources);
+        }
         break;
       default:
         break;
@@ -416,6 +471,26 @@ function resolveActualText(
   return undefined;
 }
 
+/**
+ * Record the font a `Tf` selected, resolved through the resource dictionary in
+ * effect (§7.8.3 `/Font`).
+ *
+ * A name that resolves to nothing is stored as `null` rather than dropped: text
+ * shown with a font the file does not describe is a real observation, and
+ * silently omitting it would make the page look fully mappable.
+ */
+function noteFontUse(
+  doc: PDFDocument,
+  text: TextSink,
+  name: string,
+  resources: PDFDict | undefined,
+): void {
+  if (text.usedFonts.has(name)) return;
+  const fonts = resources ? deref(doc, resources.get(PDFName.of('Font'))) : undefined;
+  const dict = fonts instanceof PDFDict ? deref(doc, fonts.get(PDFName.of(name))) : undefined;
+  text.usedFonts.set(name, dict instanceof PDFDict ? dict : null);
+}
+
 /** Follow `Do` into a Form XObject, in place, like pdfjs's `paintXObject`. */
 function scanFormXObject(
   doc: PDFDocument,
@@ -424,6 +499,7 @@ function scanFormXObject(
   out: MarkedContentEvent[],
   visiting: Set<string>,
   depth: number,
+  text?: TextSink,
 ): void {
   if (depth >= MAX_XOBJECT_DEPTH || !resources) return;
 
@@ -437,7 +513,12 @@ function scanFormXObject(
   const stream = deref(doc, ref);
   if (!(stream instanceof PDFStream)) return;
   const subtype = deref(doc, stream.dict.get(PDFName.of('Subtype')));
-  if (!(subtype instanceof PDFName) || subtype.decodeText() !== 'Form') return;
+  if (!(subtype instanceof PDFName)) return;
+  if (subtype.decodeText() === 'Image') {
+    if (text) text.imageOperators++;
+    return;
+  }
+  if (subtype.decodeText() !== 'Form') return;
 
   const contents = decodeStream(stream);
   if (!contents) return;
@@ -452,6 +533,7 @@ function scanFormXObject(
       out,
       visiting,
       depth + 1,
+      text,
     );
   } finally {
     visiting.delete(key);
@@ -521,6 +603,32 @@ export function scanPageMarkedContent(
   doc: PDFDocument,
   pageIndex: number,
 ): MarkedContentEvent[] | null {
+  return scanPage(doc, pageIndex)?.events ?? null;
+}
+
+/**
+ * The same scan, with the text-showing tally #21 needs kept as well.
+ *
+ * Returns `null` for the same reasons `scanPageMarkedContent` does — an
+ * encrypted document, a missing or undecodable content stream. A `null` here is
+ * "not observed", never "no text": the difference is the whole point of #21.
+ */
+export function scanPageTextOperators(
+  doc: PDFDocument,
+  pageIndex: number,
+): { tally: TextOperatorTally; actualTextEntries: number } | null {
+  const scanned = scanPage(doc, pageIndex);
+  if (!scanned) return null;
+  return {
+    tally: scanned.text,
+    actualTextEntries: scanned.events.filter((e) => e.actualText !== undefined).length,
+  };
+}
+
+function scanPage(
+  doc: PDFDocument,
+  pageIndex: number,
+): { events: MarkedContentEvent[]; text: TextSink } | null {
   // An encrypted document's content streams are ciphertext to pdf-lib, which
   // loads with `ignoreEncryption` and so never decrypts them (§7.6.2 encrypts
   // strings and streams). Inflate would fail anyway — "Unknown compression
@@ -535,7 +643,16 @@ export function scanPageMarkedContent(
   }
 
   const contents = node.Contents();
-  if (!contents) return null;
+  if (!contents) {
+    // §7.7.3.3 makes /Contents optional, and its absence has a definite
+    // meaning: the page is empty. That is an observation, not a failure to
+    // observe — returning `null` here would report a blank page as "could not
+    // be read", which is the confusion #21 is about.
+    return {
+      events: [],
+      text: { textShowingOperators: 0, imageOperators: 0, usedFonts: new Map(), currentFont: null },
+    };
+  }
 
   const streams: Uint8Array[] = [];
   if (contents instanceof PDFArray) {
@@ -554,14 +671,20 @@ export function scanPageMarkedContent(
 
   const resources = node.Resources();
   const events: MarkedContentEvent[] = [];
+  const text: TextSink = {
+    textShowingOperators: 0,
+    imageOperators: 0,
+    usedFonts: new Map(),
+    currentFont: null,
+  };
   try {
     // §7.8.2: the parts of a /Contents array form one stream, and the division
     // may occur only between lexical tokens — a single separator restores it.
-    scanStream(doc, joinWithNewline(streams), resources ?? undefined, events, new Set(), 0);
+    scanStream(doc, joinWithNewline(streams), resources ?? undefined, events, new Set(), 0, text);
   } catch {
     return null;
   }
-  return events;
+  return { events, text };
 }
 
 function joinWithNewline(streams: Uint8Array[]): Uint8Array {

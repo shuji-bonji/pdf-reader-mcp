@@ -6,6 +6,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadTextInput, ReadTextSchema } from '../../schemas/tier1.js';
 import { extractText } from '../../services/pdfjs-service.js';
+import {
+  byPage,
+  observeExtractability,
+  summarizeExtractability,
+} from '../../services/text-extractability-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
@@ -33,8 +38,10 @@ Args:
   - split_columns (1 | 2 | 3, optional): Column-aware reordering for untagged multi-column PDFs. Default 1 = existing Y-sort.
   - compact_whitespace (boolean, optional): Collapse whitespace runs (incl. U+3000) to one ASCII space and trim each line. Default false.
 
+Every page also reports how much of its text could be converted to Unicode (ISO 32000-2 §9.10.1): \`extracted\`, \`no_text_layer\` (no text-showing operator, image content present — reading it needs OCR or a rendered page), \`not_extractable\` (a font used here offers no route to Unicode, so text is missing or wrong), or \`not_observed\` (encrypted or unreadable content stream). An empty result is therefore never by itself evidence that a page has no text.
+
 Returns:
-  Extracted text organized by page number. With \`split_columns >= 2\`, columns are separated by a blank line so a downstream LLM can tell them apart.
+  Extracted text organized by page number, preceded by the extractability tally. With \`split_columns >= 2\`, columns are separated by a blank line so a downstream LLM can tell them apart.
 
 Examples:
   - Extract all text: { file_path: "/path/to/doc.pdf" }
@@ -50,16 +57,29 @@ Examples:
     },
     async (params: ReadTextInput) => {
       try {
-        const pages = await extractText(params.file_path, params.pages, {
-          splitColumns: params.split_columns,
-          compactWhitespace: params.compact_whitespace,
-        });
+        const [extracted, observations] = await Promise.all([
+          extractText(params.file_path, params.pages, {
+            splitColumns: params.split_columns,
+            compactWhitespace: params.compact_whitespace,
+          }),
+          // #21: an empty (or shortened) result is not evidence that the page
+          // has no text. The state says which of the three §9.10.1 conditions
+          // produced what is above it.
+          observeExtractability(params.file_path, params.pages),
+        ]);
+
+        const observed = byPage(observations);
+        const pages = extracted.map((page) => ({
+          ...page,
+          ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
+        }));
 
         let text: string;
         if (params.response_format === ResponseFormat.JSON) {
           text = JSON.stringify(pages, null, 2);
         } else {
-          text = formatPageTextsMarkdown(pages);
+          const banner = summarizeExtractability(observations);
+          text = [...banner, '', formatPageTextsMarkdown(pages)].join('\n');
         }
 
         const { text: finalText } = truncateIfNeeded(text);

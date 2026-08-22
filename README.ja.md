@@ -30,11 +30,11 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | ---------------- | ----------------------------------------------------- |
 | `get_page_count` | ページ数の軽量取得                                    |
 | `get_metadata`   | メタデータ抽出（タイトル、著者、PDF版、タグ有無等）   |
-| `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
+| `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。ページごとに**テキスト抽出可能性**（§9.10.1）を併記するので、空の結果が「空のページ」と取り違えられない。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
 | `read_images`    | 画像抽出（base64、メタデータ付き）                    |
 | `read_url`       | URLからリモートPDFを取得して処理                      |
-| `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数）    |
+| `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
 ### Tier 2: 構造解析
 
@@ -56,6 +56,27 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `validate_tagged`   | **非推奨** — ISO 規格への合否判定は [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`（`flavour: "pdfua-1"`）へ移管。次のメジャーまで残置 |
 | `validate_metadata` | **非推奨** — 移管先は上と同じ。次のメジャーまで残置 |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+
+### テキスト抽出可能性 — 2 値ではなく 3 値（#21）
+
+`read_text` はこれまで「抽出できたテキスト」か「空」かの 2 値しか返さず、空が 3 つの別々の
+状態を指していた。ISO 32000-2 §9.10.1 はそれらを区別しているので、本サーバも区別する。
+テキストを返す全ツール（`read_text` / `read_url` / `search_text` /
+`extract_structured_text` / `summarize`）が、ページごとに次を返す。
+
+| 状態 | 条件 | 次の一手 |
+| --- | --- | --- |
+| `extracted` | 使われた全フォントが §9.10.2 の方式のいずれかで Unicode に変換できる | そのまま使ってよい |
+| `no_text_layer` | text-showing 演算子（`Tj` `TJ` `'` `"`）が無く、画像が描かれている | ページは画素。OCR かページ画像が要る（本サーバはどちらも行わない） |
+| `not_extractable` | `/ToUnicode` も標準エンコーディングも既知の CID コレクションも持たないフォントが使われている | 一部または全部が欠落している。原因フォント名と根拠条項を併記する |
+| `not_observed` | 暗号化されている、またはコンテンツストリームが読めない | 何も測っていない。「無い」とは別 |
+
+`not_extractable` は**フォント単位**で報告するので、読めるフォントと読めないフォントが
+同じページに混在する場合は「部分的な欠落」としてそう言う。完全な抽出結果には化けない。
+
+判定は pdf.js の出力ではなく**ファイル**から行う。pdf.js は読み込んだ全フォントについて
+`toUnicode` を合成するため、pdf.js に「このフォントは `/ToUnicode` を持つか」と尋ねると、
+辞書に `/ToUnicode` が無いフォントでも「持つ」と答える。
 
 ## インストール
 

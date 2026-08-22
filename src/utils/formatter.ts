@@ -3,12 +3,14 @@
  */
 
 import { CHARACTER_LIMIT } from '../constants.js';
+import { describeExtractability } from '../services/text-extractability-service.js';
 import type {
   AnnotationsAnalysis,
   ExtractedTable,
   FontsAnalysis,
   MetadataValidation,
   ObjectLocationResult,
+  PageExtractability,
   PageText,
   PdfMetadata,
   PdfSummary,
@@ -80,7 +82,15 @@ export function formatPageTextsMarkdown(pages: PageText[]): string {
   const lines: string[] = [];
 
   for (const page of pages) {
-    lines.push(`## Page ${page.page}`, '', page.text, '');
+    lines.push(`## Page ${page.page}`, '');
+    // #21: the state goes next to the text it qualifies. A page whose text is
+    // partly or wholly missing must not read as a complete page that happens to
+    // be short.
+    const state = page.extractability?.state;
+    if (state && state !== 'extracted') {
+      lines.push(`> ${describeExtractability(page.extractability as PageExtractability)}`, '');
+    }
+    lines.push(page.text, '');
   }
 
   return lines.join('\n');
@@ -110,6 +120,15 @@ export function formatSearchResultMarkdown(result: SearchResult): string {
     lines.push('---', '⚠️ Results truncated. Use page range parameters to narrow the search.');
   }
 
+  // #21: a hit count of zero over pages whose text does not convert to Unicode
+  // is not the same claim as "the document does not contain this".
+  if (result.unsearchablePages && result.unsearchablePages.length > 0) {
+    lines.push('', '## Pages this search could not read', '');
+    for (const page of result.unsearchablePages) {
+      lines.push(`- Page ${page.page}: ${describeExtractability(page)}`);
+    }
+  }
+
   if (result.note) {
     lines.push('', '## Note', '', `> ${result.note}`);
   }
@@ -134,11 +153,22 @@ export function formatSummaryMarkdown(summary: PdfSummary): string {
     `| Encrypted | ${meta.isEncrypted ? 'Yes' : 'No'} |`,
     `| Signatures | ${meta.hasSignatures ? 'Yes' : 'No'} |`,
     `| Has Text | ${summary.hasText ? 'Yes' : 'No'} |`,
+    `| Text extractability | ${summary.textExtractability} |`,
     `| Images | ${summary.imageCount} |`,
   ];
 
   if (meta.title) lines.push(`| Title | ${meta.title} |`);
   if (meta.author) lines.push(`| Author | ${meta.author} |`);
+
+  // #21: `Has Text` alone cannot say why text is absent. Name the pages that
+  // are not `extracted` so the caller can go straight to them instead of
+  // inferring from an empty preview.
+  if (summary.unreadablePages.length > 0) {
+    lines.push('', '## Pages that are not fully extractable', '');
+    for (const page of summary.unreadablePages) {
+      lines.push(`- Page ${page.page}: ${describeExtractability(page)}`);
+    }
+  }
 
   if (summary.textPreview) {
     lines.push('', '## Text Preview (first page)', '', summary.textPreview);

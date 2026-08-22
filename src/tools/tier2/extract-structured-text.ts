@@ -9,6 +9,10 @@ import {
   ExtractStructuredTextSchema,
 } from '../../schemas/tier2.js';
 import { extractStructuredText } from '../../services/struct-tree-service.js';
+import {
+  observeExtractability,
+  summarizeExtractability,
+} from '../../services/text-extractability-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatStructuredTextMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
@@ -96,16 +100,28 @@ Examples:
     },
     async (params: ExtractStructuredTextInput) => {
       try {
-        const result = await extractStructuredText(params.file_path, {
-          pages: params.pages,
-          roles: params.roles,
-          includeBbox: params.include_bbox,
-        });
+        const [result, observations] = await Promise.all([
+          extractStructuredText(params.file_path, {
+            pages: params.pages,
+            roles: params.roles,
+            includeBbox: params.include_bbox,
+          }),
+          // #21: logical order does not make characters convertible. A tagged
+          // page drawn with an Identity-H font that has no /ToUnicode returns a
+          // correct tree over unreadable text, and that has to be visible here
+          // too — otherwise this is the one path that still hides it.
+          observeExtractability(params.file_path, params.pages),
+        ]);
+        result.extractability = observations;
 
         const raw =
           params.response_format === ResponseFormat.JSON
             ? JSON.stringify(result, null, 2)
-            : formatStructuredTextMarkdown(result);
+            : [
+                ...summarizeExtractability(observations),
+                '',
+                formatStructuredTextMarkdown(result),
+              ].join('\n');
 
         const { text } = truncateIfNeeded(raw);
         return { content: [{ type: 'text' as const, text }] };

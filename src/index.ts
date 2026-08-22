@@ -41,7 +41,11 @@ What it does NOT do:
     (verify_signatures / verify_integrity).
   - No conformance judgement. validate_tagged / validate_metadata are deprecated in favour of
     pdf-verify-mcp's validate_conformance, which delegates to veraPDF.
-  - No incremental-update history (that is pdf-verify-mcp verify_integrity), and no OCR.
+  - No incremental-update history (that is pdf-verify-mcp verify_integrity), and no OCR. It
+    does DETECT that OCR is needed and say so: every text-returning tool reports, per page,
+    whether the characters could be converted to Unicode at all (ISO 32000-2 §9.10.1) —
+    extracted / no_text_layer / not_extractable / not_observed. An empty extraction result is
+    therefore never on its own evidence that a page has no text.
 
 It DOES map content to coordinates: locate_objects turns an object number into a page and a
 rectangle, and extract_structured_text with include_bbox does the same for a structure element.

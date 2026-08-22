@@ -30,11 +30,11 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | ---------------- | -------------------------------------------------------- |
 | `get_page_count` | Lightweight page count retrieval                         |
 | `get_metadata`   | Full metadata extraction (title, author, PDF version...) |
-| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). For **logical** order in tagged PDFs, prefer `extract_structured_text` |
+| `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). Reports **text extractability** per page (§9.10.1) so an empty result is never mistaken for an empty page. For **logical** order in tagged PDFs, prefer `extract_structured_text` |
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Image extraction as base64 with metadata                 |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
-| `summarize`      | Quick overview report (metadata + text + image count)    |
+| `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
 ### Tier 2: Structure Inspection
 
@@ -56,6 +56,27 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
 | `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+### Text extractability — three states, not two (#21)
+
+`read_text` used to answer with text or with nothing, and nothing meant three different things.
+ISO 32000-2 §9.10.1 separates them, so this server does too. Every text-returning tool —
+`read_text`, `read_url`, `search_text`, `extract_structured_text`, `summarize` — reports, per
+page:
+
+| State | Condition | What to do next |
+| --- | --- | --- |
+| `extracted` | Every font used has a route to Unicode under §9.10.2 | Use the text |
+| `no_text_layer` | No text-showing operator (`Tj` `TJ` `'` `"`), image content present | The page is pixels. OCR or a rendered image is needed; this server does neither |
+| `not_extractable` | A font used has no `/ToUnicode`, no standard encoding and no known CID collection | Text is missing or wrong. The report names the fonts and the clause |
+| `not_observed` | Encrypted, or the content stream could not be read | Nothing was measured. Not the same as "nothing is there" |
+
+`not_extractable` is reported **per font**, so a page that mixes a readable font with an
+unreadable one is a partial loss and says so, rather than passing as complete.
+
+The observation is made from the file, not from pdf.js's output: pdf.js synthesises a
+`toUnicode` map for every font it loads, so asking it whether a font has a `/ToUnicode` CMap
+answers yes for fonts whose dictionary has none.
 
 ## Installation
 

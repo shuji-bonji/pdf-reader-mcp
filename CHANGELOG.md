@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Text extractability is reported per page, in three states rather than two (#21).**
+  `read_text` answered with text or with nothing, and nothing meant three different things:
+  the page is blank, the page is an image with no text layer, or the page shows glyphs whose
+  character codes cannot be converted to Unicode. ISO 32000-2 §9.10.1 separates those
+  conditions; the return value did not, so a scanned page and an empty page produced the same
+  output, and a font without a `/ToUnicode` CMap dropped its text silently — which made a
+  partial extraction look like a complete one.
+
+  Every text-returning path now carries the state: `read_text`, `read_url`, `search_text`,
+  `extract_structured_text` and `summarize`. Leaving one path without it would have left the
+  hole open, because a caller reaches the same document through any of them.
+
+  | State | Condition |
+  | --- | --- |
+  | `extracted` | Every font used by a text-showing operator has a route to Unicode under §9.10.2 |
+  | `no_text_layer` | No `Tj` / `TJ` / `'` / `"` on the page, and image content is present |
+  | `not_extractable` | A font used has no `/ToUnicode`, no standard encoding and no known CID collection |
+  | `not_observed` | Encrypted, or the content stream could not be read — nothing was measured |
+
+  `not_observed` is the fourth state and is deliberately not folded into any of the other
+  three: an encrypted document is not a document without text, and counting it as `extracted`
+  would repeat the failure this change exists to fix.
+
+  `not_extractable` is decided per font, so a page mixing a readable font with an unreadable
+  one reports a partial loss and names the fonts responsible, instead of passing as complete.
+
+  The observation is read from the file with pdf-lib, not from pdfjs's output. pdfjs
+  synthesises a `toUnicode` map for every font it loads — a standard-encoding font gets one
+  built from its encoding — so asking pdfjs whether a font has a `/ToUnicode` CMap answers yes
+  for fonts whose dictionary has none.
+
+- **Three fixtures, added before the implementation, because none of the three states could be
+  measured without them.** A survey of the existing 17 found no PDF with a `/ToUnicode` CMap,
+  none with an image-only page, and no page drawn solely with an unmappable font — so
+  `extracted` for composite fonts, `no_text_layer`, and total loss each had zero specimens.
+
+  - `no-text-layer.pdf` — two image-only pages, no text-showing operator.
+  - `tounicode-cid.pdf` — Identity-H with a correct `/ToUnicode` CMap; the `extracted` control.
+  - `broken-cid-only.pdf` — a page whose only font is Identity-H without `/ToUnicode`.
+
+  `cid-font.pdf` is now the fourth: it gained a well-formed Identity-H font with no
+  `/ToUnicode` and a line drawn with it, which makes its page the mixed one. Its existing F3
+  (a Type0 with no `/DescendantFonts`) could not serve — pdfjs abandons the whole page over it,
+  so the Helvetica text disappears too and there is no "partial" left to observe.
+
+### Changed
+
+- `PageText` gained an optional `extractability` record, `PdfSummary` gained
+  `textExtractability` and `unreadablePages`, `SearchResult` gained `unsearchablePages`, and
+  `StructuredTextResult` gained `extractability`. All are additive.
+- `search_text` no longer reports zero hits over an unreadable page as a plain "no matches":
+  the note now says the query was not found *in what could be read*.
+- The server `instructions` say that OCR is not performed **and** that the need for it is
+  detected and reported. Detecting an unreadable page is inside an observing server's remit;
+  staying silent about it is not.
+- No new dependency. The operator walk reuses the existing content-stream scanner; the font
+  rules are read with pdf-lib. Tool count stays at 18.
+
 ## [0.11.2] - 2026-08-13
 
 ### Changed

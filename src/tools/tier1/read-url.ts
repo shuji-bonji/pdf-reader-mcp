@@ -6,6 +6,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadUrlInput, ReadUrlSchema } from '../../schemas/tier1.js';
 import { extractTextFromDoc, loadDocumentFromData } from '../../services/pdfjs-service.js';
+import {
+  byPage,
+  observeExtractabilityFromData,
+  summarizeExtractability,
+} from '../../services/text-extractability-service.js';
 import { fetchPdfFromUrl } from '../../services/url-fetcher.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
@@ -49,16 +54,32 @@ Examples:
         const doc = await loadDocumentFromData(data);
 
         try {
-          const results = await extractTextFromDoc(doc, params.pages, {
-            splitColumns: params.split_columns,
-            compactWhitespace: params.compact_whitespace,
-          });
+          const [extracted, observations] = await Promise.all([
+            extractTextFromDoc(doc, params.pages, {
+              splitColumns: params.split_columns,
+              compactWhitespace: params.compact_whitespace,
+            }),
+            // #21: the same three-state answer as read_text — the fetched bytes
+            // are already here, so there is no reason for this path to be the
+            // one that still returns a bare empty string.
+            observeExtractabilityFromData(data, params.pages),
+          ]);
+
+          const observed = byPage(observations);
+          const results = extracted.map((page) => ({
+            ...page,
+            ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
+          }));
 
           let text: string;
           if (params.response_format === ResponseFormat.JSON) {
             text = JSON.stringify(results, null, 2);
           } else {
-            text = formatPageTextsMarkdown(results);
+            text = [
+              ...summarizeExtractability(observations),
+              '',
+              formatPageTextsMarkdown(results),
+            ].join('\n');
           }
 
           const { text: finalText } = truncateIfNeeded(text);

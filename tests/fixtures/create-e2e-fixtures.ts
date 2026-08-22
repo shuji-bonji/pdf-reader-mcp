@@ -6,11 +6,15 @@
  *  - comprehensive_1.pdf : 4-page PDF with text and embedded images
  *  - tagged.pdf          : Tagged PDF with structure tree (Document/P/H1)
  *  - multi-font.pdf      : PDF using multiple font families
- *  - cid-font.pdf        : Type0 (composite/CID) fonts — embedded & not (High-1 regression)
+ *  - cid-font.pdf        : Type0 (composite/CID) fonts — embedded & not (High-1 regression),
+ *                          plus one drawn with an Identity-H font that has no /ToUnicode (#21)
  *  - image-kinds.pdf     : One image of each pdfjs ImageKind (High-2 / D-9 regression)
  *  - structured.pdf      : REAL tagged PDF with page-spanning elements (M-8)
  *  - actual-text-span.pdf: UNTAGGED PDF with Span-level /ActualText (#18, §14.9.4)
  *  - encrypted-actualtext.pdf: RC4-encrypted tagged PDF whose /ActualText is ciphertext (#18)
+ *  - no-text-layer.pdf   : image-only pages, no text-showing operator (#21)
+ *  - tounicode-cid.pdf   : Identity-H + a correct /ToUnicode CMap (#21)
+ *  - broken-cid-only.pdf : a page drawn ONLY with a CID font that has no /ToUnicode (#21)
  *  - no-metadata.pdf     : PDF with no metadata set
  *  - corrupted.pdf       : Invalid file (non-PDF bytes)
  */
@@ -512,9 +516,71 @@ async function createCidFontPdf(): Promise<void> {
     }),
   );
 
+  // ── F4: WELL-FORMED Type0, Identity-H, but no /ToUnicode ──
+  // #21's partial-loss specimen. It differs from F3 in being structurally
+  // valid: pdfjs parses the page and draws the glyphs, and only the conversion
+  // to Unicode has nothing to work from (ISO 32000-2 §9.10.1). F3 cannot serve
+  // here — with /DescendantFonts absent pdfjs abandons the whole page, so the
+  // Helvetica text would disappear too and there would be no "partial" left to
+  // observe.
+  const unmappableDescriptorRef = context.register(
+    context.obj({
+      Type: 'FontDescriptor',
+      FontName: 'CCCCCC+NoToUnicode',
+      Flags: 4,
+      FontBBox: [-500, -300, 1500, 1000],
+      ItalicAngle: 0,
+      Ascent: 880,
+      Descent: -120,
+      CapHeight: 700,
+      StemV: 80,
+    }),
+  );
+  const unmappableCidFontRef = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'CIDFontType2',
+      BaseFont: 'CCCCCC+NoToUnicode',
+      CIDSystemInfo: {
+        Registry: PDFString.of('Adobe'),
+        Ordering: PDFString.of('Identity'),
+        Supplement: 0,
+      },
+      FontDescriptor: unmappableDescriptorRef,
+      DW: 600,
+      CIDToGIDMap: 'Identity',
+    }),
+  );
+  const unmappableType0Ref = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'Type0',
+      BaseFont: 'CCCCCC+NoToUnicode-Identity-H',
+      Encoding: 'Identity-H',
+      DescendantFonts: [unmappableCidFontRef],
+      // No /ToUnicode — this is the whole point of the specimen.
+    }),
+  );
+
   page.node.setFontDictionary(PDFName.of('F1'), embeddedType0Ref);
   page.node.setFontDictionary(PDFName.of('F2'), nonEmbeddedType0Ref);
   page.node.setFontDictionary(PDFName.of('F3'), malformedType0Ref);
+  page.node.setFontDictionary(PDFName.of('F4'), unmappableType0Ref);
+
+  // Draw one line with F4, so this page MIXES a font whose characters convert
+  // to Unicode (Helvetica, standard encoding) with one whose characters do not.
+  // Before this the Type0 fonts only sat in /Resources and no text-showing
+  // operator referenced them, so partial loss had no specimen at all.
+  page.pushOperators(
+    PDFOperator.of(PDFOperatorNames.BeginText),
+    // pdf-lib sizes an operator from its args' string lengths, so a numeric arg
+    // makes sizeInBytes() NaN and the whole content stream serialises to zero
+    // bytes — silently. Numbers go in as strings.
+    PDFOperator.of(PDFOperatorNames.SetFontAndSize, ['/F4', '12']),
+    PDFOperator.of(PDFOperatorNames.MoveText, ['50', '720']),
+    PDFOperator.of(PDFOperatorNames.ShowText, ['<0001000200030004>']),
+    PDFOperator.of(PDFOperatorNames.EndText),
+  );
 
   doc.setTitle('CID Font Test PDF');
   doc.setAuthor('pdf-reader-mcp');
@@ -523,7 +589,7 @@ async function createCidFontPdf(): Promise<void> {
 
   const bytes = await doc.save();
   await writeFile(`${FIXTURES_DIR}/cid-font.pdf`, bytes);
-  console.log('Created: cid-font.pdf (1 page, 3 Type0 fonts + Helvetica)');
+  console.log('Created: cid-font.pdf (1 page, 4 Type0 fonts + Helvetica, F4 drawn)');
 }
 
 // ─── Minimal PNG encoder (for image-kinds.pdf) ──────────
@@ -1326,6 +1392,270 @@ async function createElementBboxPdf(): Promise<void> {
   );
 }
 
+// ─── Issue #21: text extractability fixtures ────────────
+//
+// ISO 32000-2 §9.10.1 separates three conditions that `read_text` used to
+// return as one empty (or silently shortened) string. The repository had no
+// specimen for two of them, so neither could ever be measured:
+//
+//  - `no_text_layer`   : no text-showing operator at all, image content present
+//  - `extracted`       : every font meets the §9.10.1 conditions
+//  - `not_extractable` : a font used by a text-showing operator has neither a
+//                        standard encoding, nor a known CID collection, nor a
+//                        `/ToUnicode` CMap, nor `/ActualText`
+//
+// `image-kinds.pdf` cannot stand in for the first: it draws body text as well.
+// `cid-font.pdf` cannot stand in for the third on its own: since this commit it
+// mixes F3 with Helvetica, which is exactly the partial-loss specimen and
+// therefore NOT the isolated one.
+
+/**
+ * Build the body of a `/ToUnicode` CMap (ISO 32000-2 §9.10.3).
+ *
+ * The CMap is a PostScript program; only the `beginbfchar` block carries the
+ * mapping this fixture is about. Codes are the two-byte CIDs an Identity-H
+ * encoding uses, values are UTF-16BE.
+ */
+function toUnicodeCMap(mappings: Array<[number, string]>): string {
+  const entries = mappings
+    .map(([code, char]) => {
+      const unicode = Array.from(char)
+        .flatMap((c) => {
+          const cp = c.codePointAt(0) ?? 0;
+          if (cp <= 0xffff) return [cp];
+          const v = cp - 0x10000;
+          return [0xd800 + (v >> 10), 0xdc00 + (v & 0x3ff)];
+        })
+        .map((u) => u.toString(16).padStart(4, '0').toUpperCase())
+        .join('');
+      return `<${code.toString(16).padStart(4, '0').toUpperCase()}> <${unicode}>`;
+    })
+    .join('\n');
+
+  return `/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo <</Registry (Adobe) /Ordering (UCS) /Supplement 0>> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+${mappings.length} beginbfchar
+${entries}
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end`;
+}
+
+/** A hex string operand (`<....>`) holding one two-byte CID per character. */
+function identityHexString(text: string): string {
+  const codes = Array.from(text, (_, i) => (i + 1).toString(16).padStart(4, '0').toUpperCase());
+  return `<${codes.join('')}>`;
+}
+
+/**
+ * Create a PDF whose pages carry no text-showing operator at all — the
+ * `no_text_layer` specimen (#21).
+ *
+ * Two pages, each drawing a single image and nothing else. A scanned document
+ * has exactly this shape, and it is the case that must NOT be reported the same
+ * way as `empty.pdf`: one has no text because there is none, the other has no
+ * text because the text is pixels.
+ */
+async function createNoTextLayerPdf(): Promise<void> {
+  const W = 16;
+  const H = 16;
+  const pixels = Buffer.alloc(W * H * 3);
+  for (let i = 0; i < W * H; i++) {
+    // A visible pattern, so the page is not blank when rendered.
+    const on = ((i >> 2) ^ i) & 1;
+    pixels[i * 3] = on ? 20 : 235;
+    pixels[i * 3 + 1] = on ? 20 : 235;
+    pixels[i * 3 + 2] = on ? 20 : 235;
+  }
+
+  const doc = await PDFDocument.create();
+  const image = await doc.embedPng(encodePng(W, H, 2, pixels));
+
+  for (let p = 0; p < 2; p++) {
+    const page = doc.addPage([595, 842]);
+    page.drawImage(image, { x: 40, y: 500, width: 515, height: 300 });
+  }
+
+  doc.setTitle('No Text Layer Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E fixture - image-only pages, no text-showing operator (#21)');
+  doc.setProducer('pdf-reader-mcp test suite');
+
+  await writeFile(`${FIXTURES_DIR}/no-text-layer.pdf`, await doc.save());
+  console.log('Created: no-text-layer.pdf (2 pages, image only, no Tj/TJ)');
+}
+
+/**
+ * Create a PDF drawn entirely with an Identity-H Type0 font that DOES carry a
+ * correct `/ToUnicode` CMap — the `extracted` control for #21.
+ *
+ * Without this specimen the `extracted` verdict would only ever be observed on
+ * simple fonts with a standard encoding, and a rule that answered
+ * `not_extractable` for every composite font would still pass every test.
+ *
+ * The font program is not embedded: `/ToUnicode` is what §9.10.1 requires for
+ * conversion to Unicode, and embedding is a separate question (`inspect_fonts`
+ * answers that one).
+ */
+async function createToUnicodeCidPdf(): Promise<void> {
+  const TEXT = 'ToUnicode CMap fixture';
+
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const page = doc.addPage([595, 842]);
+
+  const descriptorRef = context.register(
+    context.obj({
+      Type: 'FontDescriptor',
+      FontName: 'BBBBBB+ToUnicodeSans',
+      Flags: 4,
+      FontBBox: [-500, -300, 1500, 1000],
+      ItalicAngle: 0,
+      Ascent: 880,
+      Descent: -120,
+      CapHeight: 700,
+      StemV: 80,
+    }),
+  );
+  const cidFontRef = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'CIDFontType2',
+      BaseFont: 'BBBBBB+ToUnicodeSans',
+      CIDSystemInfo: {
+        Registry: PDFString.of('Adobe'),
+        Ordering: PDFString.of('Identity'),
+        Supplement: 0,
+      },
+      FontDescriptor: descriptorRef,
+      DW: 600,
+      CIDToGIDMap: 'Identity',
+    }),
+  );
+  const toUnicodeRef = context.register(
+    context.flateStream(
+      Buffer.from(
+        toUnicodeCMap(Array.from(TEXT, (char, i) => [i + 1, char] as [number, string])),
+        'latin1',
+      ),
+    ),
+  );
+  const type0Ref = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'Type0',
+      BaseFont: 'BBBBBB+ToUnicodeSans-Identity-H',
+      Encoding: 'Identity-H',
+      DescendantFonts: [cidFontRef],
+      ToUnicode: toUnicodeRef,
+    }),
+  );
+
+  page.node.setFontDictionary(PDFName.of('F1'), type0Ref);
+  page.pushOperators(
+    PDFOperator.of(PDFOperatorNames.BeginText),
+    PDFOperator.of(PDFOperatorNames.SetFontAndSize, ['/F1', '18']),
+    PDFOperator.of(PDFOperatorNames.MoveText, ['50', '760']),
+    PDFOperator.of(PDFOperatorNames.ShowText, [identityHexString(TEXT)]),
+    PDFOperator.of(PDFOperatorNames.EndText),
+  );
+
+  doc.setTitle('ToUnicode CID Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E fixture - Identity-H with a correct /ToUnicode CMap (#21)');
+  doc.setProducer('pdf-reader-mcp test suite');
+
+  await writeFile(`${FIXTURES_DIR}/tounicode-cid.pdf`, await doc.save());
+  console.log('Created: tounicode-cid.pdf (1 page, Identity-H + /ToUnicode)');
+}
+
+/**
+ * Create a PDF whose only text is drawn with a CID font that has no
+ * `/ToUnicode`, no known CID collection and no `/ActualText` — the isolated
+ * `not_extractable` specimen (#21).
+ *
+ * `cid-font.pdf` cannot serve here: its page also carries Helvetica, so the
+ * whole-page verdict there is the PARTIAL one. This fixture is the total-loss
+ * case, which is what a rule that only checks "is any font unmappable" would
+ * get right by accident — the pair separates them.
+ */
+async function createBrokenCidOnlyPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const page = doc.addPage([595, 842]);
+
+  // Identity-H and no /ToUnicode. The font is otherwise well formed on purpose:
+  // with /DescendantFonts missing pdfjs abandons the page and returns no
+  // operators at all, which would make this a specimen of "the page did not
+  // parse" rather than of "the glyphs show but do not convert to Unicode" —
+  // and §9.10.1 is about the second.
+  const brokenDescriptorRef = context.register(
+    context.obj({
+      Type: 'FontDescriptor',
+      FontName: 'BrokenCID',
+      Flags: 4,
+      FontBBox: [-500, -300, 1500, 1000],
+      ItalicAngle: 0,
+      Ascent: 880,
+      Descent: -120,
+      CapHeight: 700,
+      StemV: 80,
+    }),
+  );
+  const brokenCidFontRef = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'CIDFontType2',
+      BaseFont: 'BrokenCID',
+      CIDSystemInfo: {
+        Registry: PDFString.of('Adobe'),
+        Ordering: PDFString.of('Identity'),
+        Supplement: 0,
+      },
+      FontDescriptor: brokenDescriptorRef,
+      DW: 600,
+      CIDToGIDMap: 'Identity',
+    }),
+  );
+  const brokenType0Ref = context.register(
+    context.obj({
+      Type: 'Font',
+      Subtype: 'Type0',
+      BaseFont: 'BrokenCID-Identity-H',
+      Encoding: 'Identity-H',
+      DescendantFonts: [brokenCidFontRef],
+      // No /ToUnicode, and Adobe-Identity-0 is not a collection any CMap maps
+      // to Unicode — so nothing in the file says what these CIDs mean.
+    }),
+  );
+
+  page.node.setFontDictionary(PDFName.of('F1'), brokenType0Ref);
+  page.pushOperators(
+    PDFOperator.of(PDFOperatorNames.BeginText),
+    PDFOperator.of(PDFOperatorNames.SetFontAndSize, ['/F1', '14']),
+    PDFOperator.of(PDFOperatorNames.MoveText, ['50', '760']),
+    PDFOperator.of(PDFOperatorNames.ShowText, [identityHexString('unreadable')]),
+    PDFOperator.of(PDFOperatorNames.EndText),
+  );
+
+  doc.setTitle('Broken CID Only Test PDF');
+  doc.setAuthor('pdf-reader-mcp');
+  doc.setSubject('E2E fixture - Identity-H without /ToUnicode, sole font on the page (#21)');
+  doc.setProducer('pdf-reader-mcp test suite');
+
+  await writeFile(`${FIXTURES_DIR}/broken-cid-only.pdf`, await doc.save());
+  console.log('Created: broken-cid-only.pdf (1 page, Identity-H without /ToUnicode)');
+}
+
 async function main(): Promise<void> {
   // An optional argv narrows the run to one fixture, so adding a fixture does
   // not force regenerating (and re-committing) every existing one.
@@ -1336,6 +1666,9 @@ async function main(): Promise<void> {
     ['multi-font', createMultiFontPdf],
     ['cid-font', createCidFontPdf],
     ['image-kinds', createImageKindsPdf],
+    ['no-text-layer', createNoTextLayerPdf],
+    ['tounicode-cid', createToUnicodeCidPdf],
+    ['broken-cid-only', createBrokenCidOnlyPdf],
     ['structured', createStructuredPdf],
     ['spanning-table', createSpanningTablePdf],
     ['element-bbox', createElementBboxPdf],

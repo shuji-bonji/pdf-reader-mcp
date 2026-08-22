@@ -23,10 +23,59 @@ export interface PdfMetadata {
   fileSize: number;
 }
 
+/**
+ * How much of a page's text this server could have converted to Unicode (#21).
+ *
+ * ISO 32000-2 §9.10.1 distinguishes three conditions that an empty extraction
+ * result used to collapse into one. `not_observed` is a fourth, and is not a
+ * verdict about the file: it says this server did not get to look (an encrypted
+ * document, an undecodable content stream). Counting it as `extracted` would
+ * repeat the bug this type exists to fix.
+ */
+export type TextExtractabilityState =
+  | 'extracted'
+  | 'no_text_layer'
+  | 'not_extractable'
+  | 'not_observed';
+
+/** One font a text-showing operator used that offers no route to Unicode. */
+export interface UnmappableFont {
+  /** The `/Tf` resource name, e.g. `F4`. */
+  resourceName: string;
+  baseFont: string | null;
+  subtype: string | null;
+  encoding: string | null;
+  /** Which method of ISO 32000-2 §9.10.2 was missing, in words. */
+  reason: string;
+}
+
+/** Per-page text extractability observation (#21). */
+export interface PageExtractability {
+  page: number;
+  state: TextExtractabilityState;
+  /** Empty unless `state` is `not_extractable`. */
+  unmappableFonts: UnmappableFont[];
+  /** Fonts referenced by a text-showing operator on this page. */
+  fontsUsed: number;
+  /** `Tj` / `TJ` / `'` / `"` occurrences. */
+  textShowingOperators: number;
+  /** `Do` on an Image XObject, plus `BI` inline images. */
+  imageOperators: number;
+  /** `/ActualText` entries on marked-content sequences of this page (§14.9.4). */
+  actualTextEntries: number;
+  /** Set only for `not_observed`: what stopped the observation. */
+  reason?: string;
+}
+
 /** A single page's extracted text */
 export interface PageText {
   page: number;
   text: string;
+  /**
+   * Present when the caller asked for it (#21). Absent is not "extracted" —
+   * it means the state was not requested on this path.
+   */
+  extractability?: PageExtractability;
 }
 
 /** A search match within a PDF */
@@ -51,6 +100,12 @@ export interface SearchResult {
    * which only `extract_structured_text` resolves.
    */
   note?: string;
+  /**
+   * Pages searched whose text is not fully convertible to Unicode (#21).
+   * A zero-match search over these pages means "not found in what could be
+   * read", which is not the same claim as "not in the document".
+   */
+  unsearchablePages?: PageExtractability[];
 }
 
 /** An extracted image from a PDF page */
@@ -86,6 +141,13 @@ export interface PdfSummary {
   textPreview: string;
   imageCount: number;
   hasText: boolean;
+  /**
+   * Document-level fold of the per-page states (#21). `hasText` alone cannot
+   * say why text is absent; this can.
+   */
+  textExtractability: TextExtractabilityState;
+  /** The pages that are not `extracted`, so the caller can go straight to them. */
+  unreadablePages: PageExtractability[];
 }
 
 // ─── Tier 2: Structure Analysis ──────────────────────────
@@ -225,6 +287,11 @@ export interface StructuredTextResult {
   isTagged: boolean;
   lang: string | null;
   elements: StructuredElement[];
+  /**
+   * Per-page text extractability (#21). The structure tree says what the
+   * elements are; this says whether their characters could be read at all.
+   */
+  extractability?: PageExtractability[];
   /** Why extraction is not possible, when `isTagged` is false. */
   note?: string;
   /** What the rectangles do and do not mean. Present only when `include_bbox`. */
