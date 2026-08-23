@@ -33,7 +33,7 @@ For Japanese form-style PDFs (帳票・様式) where U+3000 fullwidth spaces are
 
 Args:
   - file_path (string): Absolute path to a local PDF file
-  - pages (string, optional): Page range to extract. Format: "1-5", "3", or "1,3,5-7". Omit for all pages.
+  - pages (string, optional): Page range to extract. Format: "1-5", "3", or "1,3,5-7". **Omitting it means ALL pages** — on a large document that consumes the whole response budget in one call. Past ~50 pages, search_text first and pass an explicit range here.
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
   - split_columns (1 | 2 | 3, optional): Column-aware reordering for untagged multi-column PDFs. Default 1 = existing Y-sort.
   - compact_whitespace (boolean, optional): Collapse whitespace runs (incl. U+3000) to one ASCII space and trim each line. Default false.

@@ -174,6 +174,15 @@ export function formatSummaryMarkdown(summary: PdfSummary): string {
     lines.push('', '## Text Preview (first page)', '', summary.textPreview);
   }
 
+  // #24: each suggestion names the observation it follows from, so the reader
+  // can check the premise rather than trust the advice.
+  if (summary.next.length > 0) {
+    lines.push('', '## Next', '');
+    for (const suggestion of summary.next) {
+      lines.push(`- ${suggestion}`);
+    }
+  }
+
   return lines.join('\n');
 }
 

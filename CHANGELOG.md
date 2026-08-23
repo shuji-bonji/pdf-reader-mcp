@@ -54,6 +54,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a Type0 with no `/DescendantFonts`) could not serve — pdfjs abandons the whole page over it,
   so the Helvetica text disappears too and there is no "partial" left to observe.
 
+- **`summarize` ends with a `next` list — tool suggestions derived from its own observations
+  (#24).** Tool descriptions say what each tool does; nothing said what to call *given what
+  was just observed*, so a caller seeing `hasText: false` had to already know that
+  `render_page` is the move. The rules: encrypted → decrypt first (and nothing else, because
+  every other suggestion would under-deliver on ciphertext); `no_text_layer` /
+  `not_extractable` → `render_page`, with the page numbers; tagged → `extract_structured_text`
+  and `extract_tables`; over 50 pages → `search_text` before an unbounded `read_text`. Each
+  line names the observation it follows from, so the premise can be checked rather than the
+  advice trusted. An ordinary small document gets an empty list — advice that always appears
+  is advice that stops being read. Deliberately NOT a workflow: nothing is enforced and no
+  ordering is implied; orchestration stays with the Skill layer.
+
+- **`read_text` and `read_images` say, in bold, that omitting `pages` means every page** —
+  and what to do instead on a large document. The default itself is unchanged; what changed
+  is that its cost is stated where the decision is made.
+
 - **`render_page` rasterises pages to PNG/JPEG through PDFium-WASM (#23).** `summarize`
   answering `hasText: false` used to be a dead end — nothing in this server could read the
   document any further. Now the page itself can be handed to a vision model: the whole page,

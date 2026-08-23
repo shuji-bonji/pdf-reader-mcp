@@ -174,6 +174,16 @@ export interface PdfSummary {
   textExtractability: TextExtractabilityState;
   /** The pages that are not `extracted`, so the caller can go straight to them. */
   unreadablePages: PageExtractability[];
+  /**
+   * What to call next, decided from the observations above (#24).
+   *
+   * Suggestions, not a workflow: each line names the observation it follows
+   * from, the caller remains free to ignore it, and no ordering between the
+   * lines is implied. Orchestration stays a Skill-level responsibility — this
+   * field only saves the caller from re-deriving the obvious move from the
+   * numbers.
+   */
+  next: string[];
 }
 
 // ─── Tier 2: Structure Analysis ──────────────────────────

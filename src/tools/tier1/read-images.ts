@@ -23,7 +23,7 @@ Response size is bounded: at most ${(MAX_IMAGE_RESPONSE_BYTES / (1024 * 1024)).t
 
 Args:
   - file_path (string): Absolute path to a local PDF file
-  - pages (string, optional): Page range. Format: "1-5", "3", or "1,3,5-7". Omit for all pages.
+  - pages (string, optional): Page range. Format: "1-5", "3", or "1,3,5-7". **Omitting it means ALL pages** — on an image-heavy document that exhausts the byte budget immediately. Name the pages you need.
   - format ('png' | 'jpeg', optional): Output encoding. Default 'png' (lossless). 'jpeg' is smaller and composites alpha over white.
   - quality (1-100, optional): JPEG quality. Ignored for PNG.
   - max_width (number, optional): Downscale images wider than this (area average). Never enlarges.
