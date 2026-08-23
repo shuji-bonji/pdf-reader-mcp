@@ -58,6 +58,11 @@ measurement and a rectangle the file merely declares are not the same claim.
 Where an observation here and a verdict from pdf-verify-mcp disagree, the verdict wins —
 this server reads the file, the validator applies the rules.
 
+This server never writes to the file system — every tool is read-only. That is also why
+read_url returns text and nothing more: it does not save the fetched bytes, so pointing the
+other tools at a URL's PDF means downloading the file first (the caller's job, not this
+server's) and passing its local path.
+
 For what the specification *requires*, ask pdf-spec-mcp. This server never quotes ISO clauses.`;
 
 const server = new McpServer(

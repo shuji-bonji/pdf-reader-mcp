@@ -33,7 +33,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。ページごとに**テキスト抽出可能性**（§9.10.1）を併記するので、空の結果が「空のページ」と取り違えられない。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
 | `read_images`    | 埋め込み画像 XObject を **PNG / JPEG ファイル**として抽出し、MCP の image コンテンツブロックで返す（視覚モデルがそのまま読める）。`max_width` / `max_height` で面積平均による縮小。応答にはバイト予算があり、返さなかった画像は理由付きで名指しする |
-| `read_url`       | URLからリモートPDFを取得して処理                      |
+| `read_url`       | リモート PDF を取得して**テキストだけ**を返す。取得したバイト列は保存しない。URL 上の PDF に他の 18 ツールを使うには、先にローカルへダウンロードしてそのパスを渡す（「read_url と read-only の境界」参照） |
 | `render_page`    | ページを **PNG/JPEG** にラスタライズ（PDFium の WASM 版・optionalDependencies の `@hyzyla/pdfium`）。テキスト抽出可能性が `no_text_layer` / `not_extractable` のときの次の一手。ベクタ図形・フォーム込みでページ全体を描く |
 | `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
@@ -57,6 +57,21 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `validate_tagged`   | **非推奨** — ISO 規格への合否判定は [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`（`flavour: "pdfua-1"`）へ移管。次のメジャーまで残置 |
 | `validate_metadata` | **非推奨** — 移管先は上と同じ。次のメジャーまで残置 |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+
+### read_url と read-only の境界（#25）
+
+`read_url` が返すのはテキストだけ。これは設計判断であり、今回それを暗黙から明文にした。
+取得したバイト列は抽出後に破棄する。保存すれば reader のツールがファイルシステムに
+書き込むことになり、本サーバの全 19 ツールが read-only（`readOnlyHint: true`）という
+不変条件が成り立たなくなるため。
+
+URL 上の PDF に `search_text` / `inspect_structure` / `extract_tables` / `render_page`
+などを使いたい場合は、呼び出し側の環境が持つ取得手段で**先にローカルへダウンロード**し、
+そのパスを渡す。取得を呼び出し側の責務とするのは意図的で、エージェント環境には必ず
+ファイルを取得する手段が別にあり、ファイルを書く reader は純粋な観測者ではなくなる。
+
+「この URL の文書には何が書いてあるか」という 1 回きりの問いには、引き続き `read_url`
+がそのまま使える。
 
 ### テキストが読めない文書はページを描画できる（#23）
 

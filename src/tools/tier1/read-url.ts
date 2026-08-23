@@ -20,9 +20,11 @@ export function registerReadUrl(server: McpServer): void {
     'read_url',
     {
       title: 'Read PDF from URL',
-      description: `Fetch a PDF from a URL and extract its text content.
+      description: `Fetch a PDF from a URL and extract its text content. Text is ALL this tool returns — see the scope note below.
 
 Downloads the PDF from the specified URL, then extracts text with Y-coordinate-based reading order. Supports HTTP and HTTPS. Maximum file size: 50MB. Timeout: 30 seconds.
+
+**Scope (#25):** the fetched bytes are discarded after extraction; this tool deliberately does not save them. Every other tool of this server takes a \`file_path\`, so to use search_text, inspect_structure, extract_tables, render_page or anything else on a URL's PDF, download the file to local disk FIRST (with whatever fetch capability the calling environment has) and pass its path. This keeps every tool of this server read-only with respect to the file system — writing files is not a reader's job. read_url exists for the one-shot case: "what does the document at this URL say?"
 
 Like \`read_text\`, accepts \`split_columns: 2 | 3\` for **untagged** multi-column PDFs and \`compact_whitespace: true\` to collapse U+3000 / ASCII whitespace runs. Tagged PDFs should use \`extract_tables\` instead.
 

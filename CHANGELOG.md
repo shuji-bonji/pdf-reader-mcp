@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a Type0 with no `/DescendantFonts`) could not serve — pdfjs abandons the whole page over it,
   so the Helvetica text disappears too and there is no "partial" left to observe.
 
+- **`read_url`'s scope is now stated where it is felt (#25).** The tool returns text and
+  discards the fetched bytes; the other 18 tools take a `file_path`; so a URL's PDF cannot
+  reach them through this server. That was always the behaviour — what was missing was the
+  sentence saying it is a *decision*: every tool here is read-only, a `save_path` (or a
+  separate fetch tool) would have the reader writing files, and fetching is the caller's job.
+  The tool description, the server `instructions` and both READMEs now say so, with the
+  workaround spelled out: download the file first, pass the local path. No code path changed.
+
 - **`summarize` ends with a `next` list — tool suggestions derived from its own observations
   (#24).** Tool descriptions say what each tool does; nothing said what to call *given what
   was just observed*, so a caller seeing `hasText: false` had to already know that

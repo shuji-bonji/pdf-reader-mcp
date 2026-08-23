@@ -33,7 +33,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). Reports **text extractability** per page (§9.10.1) so an empty result is never mistaken for an empty page. For **logical** order in tagged PDFs, prefer `extract_structured_text` |
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Embedded image XObjects as **PNG or JPEG files**, returned as MCP image content blocks so a vision model can read them. `max_width` / `max_height` downscale by area average; the response has a byte budget and names anything it leaves out |
-| `read_url`       | Fetch and process remote PDFs from URLs                  |
+| `read_url`       | Fetch a remote PDF and extract its **text** — nothing more. The bytes are not saved; to use the other 18 tools on a URL's PDF, download it first and pass the local path (see "read_url and the read-only boundary") |
 | `render_page`    | Rasterise pages to **PNG/JPEG** via PDFium-WASM (optional dependency `@hyzyla/pdfium`). The next step when text extractability says `no_text_layer` / `not_extractable` — draws the whole page, vector art and forms included |
 | `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
@@ -57,6 +57,22 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
 | `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+### read_url and the read-only boundary (#25)
+
+`read_url` returns text, and only text. This is a decision, now stated rather than implied:
+the fetched bytes are discarded after extraction, because saving them would make a reader
+tool write to the file system, and every tool of this server is read-only
+(`readOnlyHint: true` — all 19 of them).
+
+To run `search_text`, `inspect_structure`, `extract_tables`, `render_page` or anything else
+against a PDF that lives at a URL, download the file first — with whatever fetch capability
+the calling environment has — and pass the local path. Fetching is the caller's
+responsibility, deliberately: an agent environment always has a way to download a file, and a
+reader that also writes files has stopped being a pure observer.
+
+`read_url` remains the right tool for the one-shot question: *what does the document at this
+URL say?*
 
 ### Pages can be rendered when text cannot be read (#23)
 
