@@ -15,12 +15,12 @@ PDF の中身を**読み取り・報告**する MCP サーバ。PDF family に�
 - 責務分担の提案: `mcps/pdf-family-role-architecture.md`
 - 上位仕様: `Document-Note/mcps/PDFfamily/foundation/pdf-reader-mcp.md`
 
-## ツール一覧（16・3 tier）
+## ツール一覧（19・3 tier）
 
 | Tier | ツール |
 |------|--------|
-| 1 基本 | `read_text` / `read_url` / `read_images` / `search_text` / `get_metadata` / `get_page_count` / `summarize` |
-| 2 構造検査 | `inspect_structure` / `inspect_fonts` / `inspect_annotations` / `inspect_signatures` / `inspect_tags` / `extract_tables` |
+| 1 基本 | `read_text` / `read_url` / `read_images` / `render_page` / `search_text` / `get_metadata` / `get_page_count` / `summarize` |
+| 2 構造検査 | `inspect_structure` / `inspect_fonts` / `inspect_annotations` / `inspect_signatures` / `inspect_tags` / `extract_tables` / `extract_structured_text` / `locate_objects` |
 | 3 検証・分析 | `compare_structure` / `validate_metadata` / `validate_tagged` |
 
 ## 境界ルール（ツール追加時の判断基準）

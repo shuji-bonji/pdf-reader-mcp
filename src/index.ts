@@ -45,7 +45,9 @@ What it does NOT do:
     does DETECT that OCR is needed and say so: every text-returning tool reports, per page,
     whether the characters could be converted to Unicode at all (ISO 32000-2 §9.10.1) —
     extracted / no_text_layer / not_extractable / not_observed. An empty extraction result is
-    therefore never on its own evidence that a page has no text.
+    therefore never on its own evidence that a page has no text. When a page cannot be read as
+    text, render_page rasterises it (PDFium-WASM, optional dependency) so a vision model can
+    read the pixels instead.
 
 It DOES map content to coordinates: locate_objects turns an object number into a page and a
 rectangle, and extract_structured_text with include_bbox does the same for a structure element.

@@ -10,6 +10,7 @@ import { registerGetPageCount } from './tier1/get-page-count.js';
 import { registerReadImages } from './tier1/read-images.js';
 import { registerReadText } from './tier1/read-text.js';
 import { registerReadUrl } from './tier1/read-url.js';
+import { registerRenderPage } from './tier1/render-page.js';
 import { registerSearchText } from './tier1/search-text.js';
 import { registerSummarize } from './tier1/summarize.js';
 // Tier 2: Structure analysis
@@ -37,6 +38,7 @@ export function registerAllTools(server: McpServer): void {
   registerSearchText(server);
   registerReadImages(server);
   registerReadUrl(server);
+  registerRenderPage(server);
   registerSummarize(server);
 
   // Tier 2: Structure analysis

@@ -22,7 +22,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ## 機能
 
-**18 ツール** を 3 層構成で提供します。
+**19 ツール** を 3 層構成で提供します。
 
 ### Tier 1: 基本機能
 
@@ -34,6 +34,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
 | `read_images`    | 埋め込み画像 XObject を **PNG / JPEG ファイル**として抽出し、MCP の image コンテンツブロックで返す（視覚モデルがそのまま読める）。`max_width` / `max_height` で面積平均による縮小。応答にはバイト予算があり、返さなかった画像は理由付きで名指しする |
 | `read_url`       | URLからリモートPDFを取得して処理                      |
+| `render_page`    | ページを **PNG/JPEG** にラスタライズ（PDFium の WASM 版・optionalDependencies の `@hyzyla/pdfium`）。テキスト抽出可能性が `no_text_layer` / `not_extractable` のときの次の一手。ベクタ図形・フォーム込みでページ全体を描く |
 | `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
 ### Tier 2: 構造解析
@@ -56,6 +57,32 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `validate_tagged`   | **非推奨** — ISO 規格への合否判定は [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`（`flavour: "pdfua-1"`）へ移管。次のメジャーまで残置 |
 | `validate_metadata` | **非推奨** — 移管先は上と同じ。次のメジャーまで残置 |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+
+### テキストが読めない文書はページを描画できる（#23）
+
+これまで `summarize` が `hasText: false` を返すと、その先に打つ手が無かった。
+`render_page` はページを PNG / JPEG にラスタライズし、MCP の image コンテンツブロックで
+返す。スキャン・図面・記入済みフォーム・手書きを、視覚モデルがそのまま読める。
+
+```
+render_page({ file_path: "/path/to/scan.pdf", pages: "1-3", format: "jpeg" })
+```
+
+`pages` は**必須**。描画はこのサーバで最も高価な処理であり、500 ページのスキャンの
+「全ページ」は既定値ではなく判断であるべきだから。応答予算（4 MB）は `read_images` と
+同じで、超過分は理由付きで名指しする。
+
+描画エンジンは **PDFium の WebAssembly 版**（`@hyzyla/pdfium`・optionalDependencies）。
+WASM はどのプラットフォームでも同じバイト列なので、`npx` で入る公開版の挙動が環境に
+よらない — ネイティブアドオンを使わない理由がそのまま満たせる。未インストールなら
+`render_page` はインストール方法を返し、他の 18 ツールは通常どおり動く。
+PDFium（BSD-3-Clause）はテキスト読み取りに使っている pdf.js とは別エンジンであり、
+その旨は description に明記してある（エンジン間の描画差をファイルの性質と
+取り違えないため）。
+
+> 採用前の実測: pdf.js + `@napi-rs/canvas`（1.0.7 / 0.1.80）は画像を描くページで
+> プロセスごと Segmentation fault になり（このツールの対象そのもの）、
+> `standardFontDataUrl` 未設定では白紙を「成功」として返した。
 
 ### 画像は画像ファイルとして返る（#22）
 

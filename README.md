@@ -22,7 +22,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**18 tools** organized into three tiers:
+**19 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -34,6 +34,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Embedded image XObjects as **PNG or JPEG files**, returned as MCP image content blocks so a vision model can read them. `max_width` / `max_height` downscale by area average; the response has a byte budget and names anything it leaves out |
 | `read_url`       | Fetch and process remote PDFs from URLs                  |
+| `render_page`    | Rasterise pages to **PNG/JPEG** via PDFium-WASM (optional dependency `@hyzyla/pdfium`). The next step when text extractability says `no_text_layer` / `not_extractable` — draws the whole page, vector art and forms included |
 | `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
 ### Tier 2: Structure Inspection
@@ -56,6 +57,33 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
 | `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+### Pages can be rendered when text cannot be read (#23)
+
+`summarize` reporting `hasText: false` used to be a dead end: nothing in this server could
+read the document any further. `render_page` closes that — it rasterises pages to PNG or JPEG
+and returns them as MCP image content blocks, so a vision model can read a scan, a diagram, a
+filled form, or handwriting.
+
+```
+render_page({ file_path: "/path/to/scan.pdf", pages: "1-3", format: "jpeg" })
+```
+
+`pages` is required: rendering is the most expensive operation here, and "all pages" of a
+500-page scan should be a decision, not a default. The same 4 MB response budget as
+`read_images` applies, with omissions named.
+
+Rendering runs on **PDFium compiled to WebAssembly** (`@hyzyla/pdfium`, an optional
+dependency). A WASM binary is the same bytes on every platform, so the published package still
+behaves identically wherever `npx` runs it — the reason native addons are not used here.
+Without the dependency installed, `render_page` reports what to install and every other tool
+works normally. PDFium (BSD-3-Clause) is a different engine from the pdf.js this server reads
+text with; the tool description says so, because a rendering difference between engines must
+not be attributed to the file.
+
+> Measured before choosing this: pdf.js + `@napi-rs/canvas` (1.0.7 and 0.1.80) segfaults the
+> whole process on pages that draw images — exactly the pages this tool exists for — and
+> renders blank pages when `standardFontDataUrl` is not configured.
 
 ### Images come back as image files (#22)
 

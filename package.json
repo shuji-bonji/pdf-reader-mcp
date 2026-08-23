@@ -80,5 +80,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.0"
+  },
+  "optionalDependencies": {
+    "@hyzyla/pdfium": "^2.1.13"
   }
 }

@@ -171,6 +171,50 @@ export const SummarizeSchema = z
   })
   .strict();
 
+/**
+ * `render_page` — Issue #23: rasterise pages for documents whose text cannot
+ * be read as text.
+ *
+ * `pages` is REQUIRED, unlike every other tool here. Rendering is the most
+ * expensive thing this server does, and "all pages" of a 500-page scan is
+ * never what a caller means; making the range explicit keeps the cost a
+ * decision instead of a default.
+ */
+export const RenderPageSchema = z
+  .object({
+    file_path: FilePathSchema,
+    pages: z
+      .string()
+      .min(1, 'Page range is required — e.g. "1-3", "5", "1,3,5-7"')
+      .describe('Page range to render. Required: rendering all pages is never implicit.'),
+    dpi: z
+      .number()
+      .int()
+      .min(36)
+      .max(600)
+      .optional()
+      .describe('Rasterisation density (default 150). PDF points are 1/72 inch.'),
+    max_width: z
+      .number()
+      .int()
+      .min(1)
+      .max(10_000)
+      .optional()
+      .describe('Cap on the rendered width in pixels; wins over dpi when smaller.'),
+    format: z
+      .enum(['png', 'jpeg'])
+      .optional()
+      .describe('png (default, lossless) or jpeg (smaller — usually right for scans).'),
+    quality: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .describe(`JPEG quality 1-100 (default ${DEFAULT_IMAGE_QUALITY}). Ignored for png.`),
+  })
+  .strict();
+
 // Export inferred types
 export type GetPageCountInput = z.infer<typeof GetPageCountSchema>;
 export type GetMetadataInput = z.infer<typeof GetMetadataSchema>;
@@ -179,3 +223,4 @@ export type SearchTextInput = z.infer<typeof SearchTextSchema>;
 export type ReadImagesInput = z.infer<typeof ReadImagesSchema>;
 export type ReadUrlInput = z.infer<typeof ReadUrlSchema>;
 export type SummarizeInput = z.infer<typeof SummarizeSchema>;
+export type RenderPageInput = z.infer<typeof RenderPageSchema>;

@@ -54,6 +54,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (a Type0 with no `/DescendantFonts`) could not serve — pdfjs abandons the whole page over it,
   so the Helvetica text disappears too and there is no "partial" left to observe.
 
+- **`render_page` rasterises pages to PNG/JPEG through PDFium-WASM (#23).** `summarize`
+  answering `hasText: false` used to be a dead end — nothing in this server could read the
+  document any further. Now the page itself can be handed to a vision model: the whole page,
+  vector drawings, forms and handwriting included, where `read_images` only extracts embedded
+  image XObjects. `pages` is required (rendering all pages of a scan should be a decision, not
+  a default), and the #22 response budget applies, with omissions named.
+
+  The renderer is `@hyzyla/pdfium` in `optionalDependencies` — PDFium compiled to a single
+  WebAssembly binary, identical bytes on every platform, so the published package still
+  behaves the same everywhere `npx` runs it. When it is not installed, `render_page` reports
+  what to install; the other 18 tools are unaffected. Tool count: 18 → 19.
+
+  pdf.js + `@napi-rs/canvas` was measured first and rejected: versions 1.0.7 and 0.1.80 both
+  segfault the process — the whole MCP server — on any page that draws an image, which is
+  exactly the class of page this tool exists for; and with `standardFontDataUrl` unset, text
+  pages rendered as blank images that looked like success. The e2e suite therefore asserts on
+  decoded pixels ("ink"), not on file headers.
+
 - **`read_images` returns PNG or JPEG files, in MCP image content blocks (#22).** It used to
   base64 `imgData.data`, which is pdfjs's *decoded pixel array*: 192 bytes for an 8×8 RGB
   image, 256 for 8×8 RGBA, 8 for an 8×8 1 bpp greyscale — measured on `image-kinds.pdf`, with
