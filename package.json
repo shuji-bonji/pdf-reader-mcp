@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "check:engines": "node scripts/check-engines.mjs",
+    "check:public-types": "node scripts/check-public-types.mjs",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc && chmod +x dist/index.js",

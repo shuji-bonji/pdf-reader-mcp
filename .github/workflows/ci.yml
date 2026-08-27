@@ -50,6 +50,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check the published types carry no SDK / zod
+        run: npm run check:public-types
+
       - name: Generate test fixtures
         run: npm run test:fixtures
 
