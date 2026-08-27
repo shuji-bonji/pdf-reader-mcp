@@ -19,12 +19,11 @@ export const PagesSchema = z
 
 /** Response format parameter */
 export const ResponseFormatSchema = z
-  .nativeEnum(ResponseFormat)
+  .enum(ResponseFormat)
   .default(ResponseFormat.MARKDOWN)
   .describe('Output format: "markdown" for human-readable, "json" for structured data');
 
 /** URL parameter for remote PDFs */
 export const UrlSchema = z
-  .string()
   .url('Must be a valid URL')
   .describe('URL pointing to a PDF file (HTTP or HTTPS)');
