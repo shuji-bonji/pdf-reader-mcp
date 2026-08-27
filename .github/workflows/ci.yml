@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +27,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Check engines.node against the lockfile
+        run: npm run check:engines
 
       # qpdf is used by tests/fixtures/create-test-pdf.ts to generate
       # `linearized.pdf`, the regression fixture for Issue #1

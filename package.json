@@ -18,6 +18,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "check:engines": "node scripts/check-engines.mjs",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc && chmod +x dist/index.js",
@@ -42,7 +43,7 @@
     "provenance": true
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "keywords": [
     "mcp",
@@ -78,7 +79,7 @@
     "@biomejs/biome": "2.5.4",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
+    "typescript": "^7.0.2",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {
