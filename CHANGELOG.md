@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-27
+
+Infrastructure only: no tool gained or lost a capability, and no tool's output
+changed. Four things reach callers — read **Changed** before upgrading.
+
+### Changed
+
+- **Node 18 is no longer supported.** `engines.node` is `>=20` (was `>=18`).
+- **MCP SDK v1 → v2** (`@modelcontextprotocol/sdk@^1.6.1` →
+  `@modelcontextprotocol/server@^2.0.0`). One difference reaches callers: a
+  `tools/call` naming a tool this server does not have now comes back as a
+  **JSON-RPC error** (code `-32602`), where v1 returned a tool result with
+  `isError: true`. Client code that only reads `isError` will not see it, and
+  `await client.callTool(...)` throws instead of resolving. Failures of input
+  validation — a missing required argument, a key the schema does not declare —
+  still arrive as `isError: true`.
+- **Arguments the input schema does not declare are now rejected.** All 19
+  tools take a `.strict()` object, so an undeclared key fails the call with
+  `-32602 Unrecognized key`. Until now such a key was silently dropped and the
+  call ran: `tools/list` already stated `additionalProperties: false`, but that
+  statement was produced by zod 3's JSON Schema conversion and nothing enforced
+  it — zod 3's default for an object is *strip*, not *strict*. The statement and
+  the behaviour now agree.
+- **`inputSchema` in `tools/list`**: `$schema` is now
+  `https://json-schema.org/draft/2020-12/schema` (was draft-07) for all 19
+  tools. `additionalProperties: false` is unchanged in the response — what
+  changed is that it is now true of the running server. Tool names,
+  descriptions and `required` are unchanged — measured tool by tool against
+  0.12.0 with `scripts/tools-list-snapshot.mjs`, which speaks raw JSON-RPC over
+  stdio rather than using an SDK client.
+- `zod` moves from `^3.23.8` to `^4.2.0` — the version all four servers in the
+  family now share. `typescript` moves to `^7.0.2` (a devDependency).
+
+### Added
+
+- `npm run check:public-types` fails if a type from the MCP SDK or from zod
+  appears in the published `.d.ts`. The published surface must not force a
+  consumer onto our versions of those.
+- `npm run check:engines` compares `engines.node` against what the dependency
+  tree asks for, and runs in CI alongside a lockfile check.
+
 ## [0.12.0] - 2026-08-23
 
 ### Added
