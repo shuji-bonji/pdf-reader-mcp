@@ -1,8 +1,7 @@
 /**
  * inspect_tags - Tagged PDF structure tree analysis.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectTagsInput, InspectTagsSchema } from '../../schemas/tier2.js';
 import { analyzeTags } from '../../services/struct-tree-service.js';

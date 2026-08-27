@@ -1,8 +1,7 @@
 /**
  * get_page_count - Lightweight page count retrieval.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { type GetPageCountInput, GetPageCountSchema } from '../../schemas/tier1.js';
 import { loadDocument } from '../../services/pdfjs-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';

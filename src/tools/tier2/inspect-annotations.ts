@@ -1,8 +1,7 @@
 /**
  * inspect_annotations - PDF annotation analysis.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectAnnotationsInput, InspectAnnotationsSchema } from '../../schemas/tier2.js';
 import { analyzeAnnotations } from '../../services/pdfjs-service.js';

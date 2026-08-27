@@ -1,8 +1,7 @@
 /**
  * inspect_structure - PDF internal structure analysis.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectStructureInput, InspectStructureSchema } from '../../schemas/tier2.js';
 import { analyzeStructure } from '../../services/pdflib-service.js';

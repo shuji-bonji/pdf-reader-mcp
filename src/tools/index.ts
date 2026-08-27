@@ -2,8 +2,7 @@
  * Tool registration entry point.
  * Registers all available tools with the MCP server.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { registerGetMetadata } from './tier1/get-metadata.js';
 // Tier 1: Basic tools
 import { registerGetPageCount } from './tier1/get-page-count.js';

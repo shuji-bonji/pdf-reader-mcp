@@ -1,8 +1,7 @@
 /**
  * read_images - Extract images from PDF pages as PNG or JPEG (#22).
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { MAX_IMAGE_RESPONSE_BYTES } from '../../constants.js';
 import { type ReadImagesInput, ReadImagesSchema } from '../../schemas/tier1.js';
 import { extractImages } from '../../services/pdfjs-service.js';

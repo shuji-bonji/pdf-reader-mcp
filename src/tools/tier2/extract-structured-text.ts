@@ -1,8 +1,7 @@
 /**
  * extract_structured_text - structure-preserving text extraction (M-8).
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import {
   type ExtractStructuredTextInput,

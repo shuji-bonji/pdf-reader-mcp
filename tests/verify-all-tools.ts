@@ -8,8 +8,8 @@
  */
 
 import { resolve } from 'node:path';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
 const SIMPLE_PDF = resolve(import.meta.dirname, 'fixtures/simple.pdf');
 const EMPTY_PDF = resolve(import.meta.dirname, 'fixtures/empty.pdf');

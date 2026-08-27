@@ -1,8 +1,7 @@
 /**
  * locate_objects - object number → page and rectangle (Issue #20).
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type LocateObjectsInput, LocateObjectsSchema } from '../../schemas/tier2.js';
 import { locateObjects } from '../../services/object-locator.js';

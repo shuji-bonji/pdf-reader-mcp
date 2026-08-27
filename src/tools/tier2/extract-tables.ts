@@ -6,8 +6,7 @@
  * such as 国税庁 新旧対照表 / 帳票, where pure reading-order extraction
  * collapses two-column tables into ambiguous text.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ExtractTablesInput, ExtractTablesSchema } from '../../schemas/tier2.js';
 import { extractTables } from '../../services/struct-tree-service.js';

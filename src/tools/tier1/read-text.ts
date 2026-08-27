@@ -1,8 +1,7 @@
 /**
  * read_text - Text extraction with Y-coordinate-based reading order.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadTextInput, ReadTextSchema } from '../../schemas/tier1.js';
 import { extractText } from '../../services/pdfjs-service.js';

@@ -1,8 +1,7 @@
 /**
  * inspect_fonts - PDF font analysis.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectFontsInput, InspectFontsSchema } from '../../schemas/tier2.js';
 import { analyzeFontsWithPdfLib } from '../../services/pdflib-service.js';

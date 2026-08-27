@@ -1,8 +1,7 @@
 /**
  * validate_metadata - PDF metadata conformance validation.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ValidateMetadataInput, ValidateMetadataSchema } from '../../schemas/tier3.js';
 import { validateMetadata } from '../../services/validation-service.js';

@@ -1,8 +1,7 @@
 /**
  * compare_structure - Compare structures of two PDF documents.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type CompareStructureInput, CompareStructureSchema } from '../../schemas/tier3.js';
 import { compareStructure } from '../../services/validation-service.js';

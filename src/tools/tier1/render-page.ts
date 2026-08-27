@@ -1,8 +1,7 @@
 /**
  * render_page - Rasterise PDF pages to PNG or JPEG (#23).
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { MAX_IMAGE_RESPONSE_BYTES } from '../../constants.js';
 import { type RenderPageInput, RenderPageSchema } from '../../schemas/tier1.js';
 import {

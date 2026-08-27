@@ -1,8 +1,7 @@
 /**
  * validate_tagged - PDF/UA tagged structure validation.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ValidateTaggedInput, ValidateTaggedSchema } from '../../schemas/tier3.js';
 import { validateTagged } from '../../services/validation-service.js';

@@ -1,8 +1,7 @@
 /**
  * get_metadata - PDF metadata extraction.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type GetMetadataInput, GetMetadataSchema } from '../../schemas/tier1.js';
 import { getMetadata } from '../../services/pdfjs-service.js';

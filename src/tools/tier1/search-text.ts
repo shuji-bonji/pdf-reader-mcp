@@ -1,8 +1,7 @@
 /**
  * search_text - Full-text search within a PDF.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type SearchTextInput, SearchTextSchema } from '../../schemas/tier1.js';
 import { searchText } from '../../services/pdfjs-service.js';

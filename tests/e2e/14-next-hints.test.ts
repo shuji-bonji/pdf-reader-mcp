@@ -14,7 +14,7 @@ async function summarize(filePath: string): Promise<{
   next: string[];
   textExtractability: string;
 }> {
-  const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+  const { McpServer } = await import('@modelcontextprotocol/server');
   const { registerSummarize } = await import('../../src/tools/tier1/summarize.js');
 
   let handler: ((params: unknown) => Promise<{ content: Array<{ text?: string }> }>) | null = null;

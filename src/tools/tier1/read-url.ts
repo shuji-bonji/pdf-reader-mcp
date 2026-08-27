@@ -1,8 +1,7 @@
 /**
  * read_url - Fetch and extract text from a remote PDF.
  */
-
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadUrlInput, ReadUrlSchema } from '../../schemas/tier1.js';
 import { extractTextFromDoc, loadDocumentFromData } from '../../services/pdfjs-service.js';
