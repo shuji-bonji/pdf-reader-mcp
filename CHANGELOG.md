@@ -31,10 +31,14 @@ changed. Four things reach callers — read **Changed** before upgrading.
 - **`inputSchema` in `tools/list`**: `$schema` is now
   `https://json-schema.org/draft/2020-12/schema` (was draft-07) for all 19
   tools. `additionalProperties: false` is unchanged in the response — what
-  changed is that it is now true of the running server. Tool names,
-  descriptions and `required` are unchanged — measured tool by tool against
-  0.12.0 with `scripts/tools-list-snapshot.mjs`, which speaks raw JSON-RPC over
-  stdio rather than using an SDK client.
+  changed is that it is now true of the running server. One bound moved:
+  `locate_objects`' `object_numbers` items now carry
+  `maximum: 9007199254740991` alongside `minimum: 1` — zod 4 writes the safe
+  integer bound that zod 3 left out. It is the only property in the 19 tools
+  whose schema body changed. Tool names, descriptions and `required` are
+  unchanged — measured tool by tool against 0.12.0 with
+  `scripts/tools-list-snapshot.mjs`, which speaks raw JSON-RPC over stdio
+  rather than using an SDK client.
 - `zod` moves from `^3.23.8` to `^4.2.0` — the version all four servers in the
   family now share. `typescript` moves to `^7.0.2` (a devDependency).
 
