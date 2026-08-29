@@ -83,10 +83,15 @@ verify の t3 は 14 通りで、そのうち 4 つ（増えただけ / 並び�
 | `document.ts` | `openDocument` と `DocumentScope`（どこまで読んだか） |
 | `cos.ts` | COS の読み口。判定は書かない |
 
-**そのままコピーするか、共有ライブラリに上げるかを先に決める。**
-2 リポジトリで同じものを持つと、片方だけ直る形になる。
-（normativepdf の高レベル層 `@normativepdf/document` = ADR-0009 が
-この受け皿になりうる。着手前に読むこと。）
+✅ **決まった（2026-08-29・[ADR-0010](../../../../lib/normativepdf/docs/adr/0010-recover-package.md)）:
+共有パッケージ `@normativepdf/recover` として切り出す。**
+コアには入れない（回復方針は推測で、条文どおりに読むコアの立場と両立しない）。
+`@normativepdf/document`（ADR-0009）はオーサリング層なので、そこでもない。
+
+🔴 **切り出しは reader の撤去より先に行う。** reader は最初からこのパッケージの
+`openDocument` / `cos` の上で書く —— コピーしてから共有に直すと、A/B の差が
+「置き場所の移動」と「pdf-lib の撤去」で混ざる。
+切り出しの 1 枚 = [`mcp/pdf-verify-mcp/docs/handoff/recover-extraction.md`](../../../pdf-verify-mcp/docs/handoff/recover-extraction.md)
 
 計器 3 本も型になる: `golden.mjs` / `probe-scope.mjs` / `verapdf-oracle.mjs`。
 
@@ -132,7 +137,8 @@ flowchart TD
 
 ## 8. 先に決めること 3 つ
 
-1. **B2 の 3 ファイルをコピーするか、共有に上げるか**（§4）
+1. ~~B2 の 3 ファイルをコピーするか、共有に上げるか~~ → **決まった**（§4・ADR-0010）。
+   `@normativepdf/recover` の切り出しが**この作業の前**に入る
 2. **面 3 の独立オラクルを何にするか**、19 ツールのどれに立つか（§6）
 3. **pdfjs と pdf-lib の切り分け**をどこで測るか（§2）
 
