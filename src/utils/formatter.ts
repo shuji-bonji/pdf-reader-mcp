@@ -90,7 +90,14 @@ export function formatPageTextsMarkdown(pages: PageText[]): string {
     if (state && state !== 'extracted') {
       lines.push(`> ${describeExtractability(page.extractability as PageExtractability)}`, '');
     }
-    lines.push(page.text, '');
+    // 🔴 text が null のときに空行を出すと「文字の無いページ」に見える。
+    // 取り出せなかったことは、取り出せて 0 字だったことと別なので、そう書く。
+    lines.push(
+      page.text === null
+        ? '> The text of this page was not extracted — see "Scope of this reading" above.'
+        : page.text,
+      '',
+    );
   }
 
   return lines.join('\n');
@@ -103,11 +110,14 @@ export function formatSearchResultMarkdown(result: SearchResult): string {
   const lines: string[] = [
     `# Search Results: "${result.query}"`,
     '',
-    `Found **${result.totalMatches}** match${result.totalMatches !== 1 ? 'es' : ''}`,
+    // 🔴 探せなかったことを「0 件」と書かない。0 件は「探して無かった」である。
+    result.totalMatches === null
+      ? 'The document could not be searched — see "Scope of this reading" below.'
+      : `Found **${result.totalMatches}** match${result.totalMatches !== 1 ? 'es' : ''}`,
     '',
   ];
 
-  for (const match of result.matches) {
+  for (const match of result.matches ?? []) {
     lines.push(
       `### Page ${match.page}`,
       '',
@@ -141,29 +151,32 @@ export function formatSearchResultMarkdown(result: SearchResult): string {
  */
 export function formatSummaryMarkdown(summary: PdfSummary): string {
   const meta = summary.metadata;
+  // 🔴 読まなかった項目に "No" や 0 を書かない。観測した答えと区別が付かなくなる。
+  const NOT_READ = 'not read — see scope';
+  const yesNo = (v: boolean | null | undefined) => (v == null ? NOT_READ : v ? 'Yes' : 'No');
   const lines: string[] = [
     `# PDF Summary`,
     '',
     `| Property | Value |`,
     `|---|---|`,
-    `| Pages | ${meta.pageCount} |`,
-    `| PDF Version | ${meta.pdfVersion ?? 'Unknown'} |`,
-    `| File Size | ${formatFileSize(meta.fileSize)} |`,
-    `| Tagged | ${meta.isTagged ? 'Yes' : 'No'} |`,
-    `| Encrypted | ${meta.isEncrypted ? 'Yes' : 'No'} |`,
-    `| Signatures | ${meta.hasSignatures ? 'Yes' : 'No'} |`,
-    `| Has Text | ${summary.hasText ? 'Yes' : 'No'} |`,
-    `| Text extractability | ${summary.textExtractability} |`,
-    `| Images | ${summary.imageCount} |`,
+    `| Pages | ${meta ? meta.pageCount : NOT_READ} |`,
+    `| PDF Version | ${meta ? (meta.pdfVersion ?? 'Unknown') : NOT_READ} |`,
+    `| File Size | ${meta ? formatFileSize(meta.fileSize) : NOT_READ} |`,
+    `| Tagged | ${yesNo(meta?.isTagged)} |`,
+    `| Encrypted | ${yesNo(meta?.isEncrypted)} |`,
+    `| Signatures | ${yesNo(meta?.hasSignatures)} |`,
+    `| Has Text | ${yesNo(summary.hasText)} |`,
+    `| Text extractability | ${summary.textExtractability ?? NOT_READ} |`,
+    `| Images | ${summary.imageCount ?? NOT_READ} |`,
   ];
 
-  if (meta.title) lines.push(`| Title | ${meta.title} |`);
-  if (meta.author) lines.push(`| Author | ${meta.author} |`);
+  if (meta?.title) lines.push(`| Title | ${meta.title} |`);
+  if (meta?.author) lines.push(`| Author | ${meta.author} |`);
 
   // #21: `Has Text` alone cannot say why text is absent. Name the pages that
   // are not `extracted` so the caller can go straight to them instead of
   // inferring from an empty preview.
-  if (summary.unreadablePages.length > 0) {
+  if (summary.unreadablePages && summary.unreadablePages.length > 0) {
     lines.push('', '## Pages that are not fully extractable', '');
     for (const page of summary.unreadablePages) {
       lines.push(`- Page ${page.page}: ${describeExtractability(page)}`);
@@ -317,6 +330,13 @@ export function formatPageList(pages: number[]): string {
 export function formatStructuredTextMarkdown(result: StructuredTextResult): string {
   const lines: string[] = ['# Structured Text', ''];
 
+  // 🔴 読めなかったことを「タグが無い」と書かない。No は観測した答えである。
+  if (result.isTagged === null) {
+    lines.push('- **Tagged**: not observed — the structure tree could not be read');
+    lines.push('', 'See "Scope of this reading" above for why.');
+    return lines.join('\n');
+  }
+
   lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
   if (result.lang) lines.push(`- **Language**: ${result.lang}`);
 
@@ -325,10 +345,10 @@ export function formatStructuredTextMarkdown(result: StructuredTextResult): stri
     return lines.join('\n');
   }
 
-  lines.push(`- **Elements**: ${result.elements.length}`);
+  lines.push(`- **Elements**: ${(result.elements ?? []).length}`);
   lines.push('', '## Logical Content Order', '');
 
-  for (const element of result.elements) {
+  for (const element of result.elements ?? []) {
     const indent = '  '.repeat(element.depth);
     const parts: string[] = [`${indent}- **${element.role}**`];
 
@@ -534,6 +554,14 @@ export function formatTaggedValidationMarkdown(result: TaggedValidation): string
   lines.push(`- **Passed**: ${result.passed}`);
   lines.push(`- **Failed**: ${result.failed}`);
   lines.push(`- **Warnings**: ${result.warnings}`);
+  // 🔴 回らなかった検査を数字の外に置かない。合格の数だけを見せると、
+  // 「検査していない」が「問題なし」に見える。
+  if (result.notChecked && result.notChecked.length > 0) {
+    lines.push(`- **Not checked**: ${result.notChecked.length}`);
+    for (const n of result.notChecked) {
+      lines.push(`  - [${n.code}] ${n.reason}`);
+    }
+  }
 
   lines.push('', '## Results', '');
 

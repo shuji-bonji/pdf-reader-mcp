@@ -13,6 +13,7 @@ import type {
   TaggedValidation,
   ValidationIssue,
 } from '../types.js';
+import { PdfReaderError } from '../utils/error-handler.js';
 import { formatFileSize } from '../utils/formatter.js';
 import {
   analyzeTagsFromDoc,
@@ -21,6 +22,7 @@ import {
   loadDocument,
 } from './pdfjs-service.js';
 import { analyzeFontsWithPdfLib, analyzeStructure } from './pdflib-service.js';
+import { half } from './reading-scope.js';
 
 // ─── validate_tagged ─────────────────────────────────────
 
@@ -46,14 +48,28 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
   // ドキュメントを1回だけロードし、タグ解析と画像カウントで共有
   const doc = await loadDocument(filePath);
   let tagsAnalysis: Awaited<ReturnType<typeof analyzeTagsFromDoc>>;
-  let imageCount: number;
+  // 🔴 画像の数は観測できないことがある。0 と null は違う ——
+  // 0 は「画像は無いと観測した」、null は「数えられなかった」で、
+  // null を 0 として扱うと TAG-005 が「画像が無いので Figure も要らない」と
+  // 判定して合格を出す。観測していないことが合格の顔をする。
+  let imageCount: number | null = null;
+  const notChecked: { code: string; reason: string }[] = [];
 
   try {
-    // タグ解析と画像カウントを並列実行
-    [tagsAnalysis, imageCount] = await Promise.all([
+    // タグ解析と画像カウントは別々に失敗しうる。Promise.all に入れると、
+    // 画像を数えられなかっただけでタグの検査が 1 つも行われなくなる。
+    const [tags, images] = await Promise.all([
       analyzeTagsFromDoc(doc),
-      countImagesFromDoc(doc),
+      half(() => countImagesFromDoc(doc)),
     ]);
+    tagsAnalysis = tags;
+    imageCount = images.ok ? images.value : null;
+    if (!images.ok) {
+      notChecked.push({
+        code: 'TAG-005',
+        reason: `the image count could not be observed: ${images.outcome.reason}`,
+      });
+    }
   } finally {
     await doc.destroy();
   }
@@ -186,10 +202,23 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
   }
 
   // Check 5: Figure tags for images
-  totalChecks++;
   const figureCount = tagsAnalysis.roleCounts.Figure ?? 0;
 
-  if (imageCount > 0 && figureCount === 0) {
+  // 🔴 回らなかった検査は totalChecks に数えない。数えたうえで passed にも
+  // failed にも入れないと、合計が合わなくなる。
+  if (imageCount !== null) totalChecks++;
+
+  if (imageCount === null) {
+    issues.push({
+      severity: 'info',
+      code: 'TAG-005',
+      message: 'Not checked — the image count could not be observed.',
+      details:
+        'Figure tags are judged against the number of images the page draws. ' +
+        'Without that number this check would have to assume zero images, which ' +
+        'would report a pass for a document nobody looked at.',
+    });
+  } else if (imageCount > 0 && figureCount === 0) {
     failed++;
     issues.push({
       severity: 'error',
@@ -306,9 +335,13 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
   const errorCount = issues.filter((i) => i.severity === 'error').length;
   const warnCount = issues.filter((i) => i.severity === 'warning').length;
 
+  const notCheckedNote =
+    notChecked.length > 0
+      ? ` ${notChecked.length} check(s) were not made: ${notChecked.map((n) => n.code).join(', ')}.`
+      : '';
   let summary: string;
   if (errorCount === 0 && warnCount === 0) {
-    summary = `All ${totalChecks} checks passed. Document appears well-structured for PDF/UA compliance.`;
+    summary = `All ${totalChecks} checks passed. Document appears well-structured for PDF/UA compliance.${notCheckedNote}`;
   } else if (errorCount === 0) {
     summary = `${passed}/${totalChecks} checks passed with ${warnCount} warning(s). Review warnings for full PDF/UA compliance.`;
   } else {
@@ -322,6 +355,7 @@ export async function validateTagged(filePath: string): Promise<TaggedValidation
     failed,
     warnings,
     issues,
+    ...(notChecked.length > 0 ? { notChecked } : {}),
     summary,
   };
 }
@@ -616,15 +650,50 @@ export async function compareStructure(
   filePath1: string,
   filePath2: string,
 ): Promise<StructureComparison> {
-  // Analyze both files in parallel
-  const [struct1, struct2, fonts1, fonts2, meta1, meta2] = await Promise.all([
-    analyzeStructure(filePath1),
-    analyzeStructure(filePath2),
-    analyzeFontsWithPdfLib(filePath1),
-    analyzeFontsWithPdfLib(filePath2),
-    getMetadata(filePath1),
-    getMetadata(filePath2),
+  // 2 つのファイルを並行に読む。
+  // 🔴 6 本を 1 つの Promise.all に入れると、どちらのファイルが読めなかったのかが
+  // 出力に残らない。ファイル単位でまとめ、失敗したときに名指しできるようにする。
+  const [a, b] = await Promise.all([
+    half(async () => {
+      const [structure, fonts, metadata] = await Promise.all([
+        analyzeStructure(filePath1),
+        analyzeFontsWithPdfLib(filePath1),
+        getMetadata(filePath1),
+      ]);
+      return { structure, fonts, metadata };
+    }),
+    half(async () => {
+      const [structure, fonts, metadata] = await Promise.all([
+        analyzeStructure(filePath2),
+        analyzeFontsWithPdfLib(filePath2),
+        getMetadata(filePath2),
+      ]);
+      return { structure, fonts, metadata };
+    }),
   ]);
+
+  // 比べるには 2 つとも要る。片方でも読めなければ答えは出せないが、
+  // **どちらが読めなかったか**は言える。0.13.0 まではそれが出力に残らなかった。
+  if (!a.ok || !b.ok) {
+    const parts: string[] = [];
+    if (!a.ok) parts.push(`file_path_1 (${filePath1}): ${a.outcome.code}: ${a.outcome.reason}`);
+    if (!b.ok) parts.push(`file_path_2 (${filePath2}): ${b.outcome.code}: ${b.outcome.reason}`);
+    throw new PdfReaderError(
+      `The comparison needs both files. ${parts.join(' / ')}`,
+      'INVALID_PDF',
+      !a.ok && !b.ok
+        ? 'どちらのファイルも読めませんでした。'
+        : `読めなかったのは ${!a.ok ? 'file_path_1' : 'file_path_2'} のほうです。もう一方は読めています。`,
+      !a.ok ? a.outcome.code : !b.ok ? b.outcome.code : 'INVALID_PDF',
+    );
+  }
+
+  const struct1 = a.value.structure;
+  const struct2 = b.value.structure;
+  const fonts1 = a.value.fonts;
+  const fonts2 = b.value.fonts;
+  const meta1 = a.value.metadata;
+  const meta2 = b.value.metadata;
 
   const diffs: StructureDiffEntry[] = [];
 

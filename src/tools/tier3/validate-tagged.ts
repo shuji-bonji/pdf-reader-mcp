@@ -37,6 +37,8 @@ Args:
 Returns:
   Validation results including: whether the PDF is tagged, total checks performed, pass/fail counts, detailed issues with severity levels (error/warning/info), and a summary.
 
+  \`totalChecks\` counts the checks that were actually decided. A check whose premise could not be observed is not counted there and appears in \`notChecked\` with the reason — TAG-005 judges Figure tags against the number of images the page draws, so without that number it would have to assume zero images and would report a pass for something nobody looked at.
+
 Checks performed:
   - Document marked as tagged
   - Structure tree root existence

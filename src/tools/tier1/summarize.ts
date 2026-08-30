@@ -11,6 +11,13 @@ import {
   loadDocument,
 } from '../../services/pdfjs-service.js';
 import {
+  bothFailedError,
+  formatSummaryScope,
+  half,
+  type PartOutcome,
+  type SummaryScope,
+} from '../../services/reading-scope.js';
+import {
   foldExtractability,
   observeExtractability,
 } from '../../services/text-extractability-service.js';
@@ -20,7 +27,6 @@ import type {
   PdfSummary,
   TextExtractabilityState,
 } from '../../types.js';
-import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSummaryMarkdown } from '../../utils/formatter.js';
 
 /**
@@ -32,11 +38,15 @@ import { formatSummaryMarkdown } from '../../utils/formatter.js';
  * layer observes; orchestration belongs to the Skill above it.
  */
 function suggestNext(
-  metadata: PdfMetadata,
-  textExtractability: TextExtractabilityState,
-  unreadablePages: PageExtractability[],
+  metadata: PdfMetadata | null,
+  textExtractability: TextExtractabilityState | null,
+  unreadablePages: PageExtractability[] | null,
 ): string[] {
   const next: string[] = [];
+
+  // 🔴 観測できなかった前提からは何も勧めない。読まなかったことを
+  // 「そうではなかった」として扱うと、助言が観測の顔をする。
+  if (!metadata) return next;
 
   if (metadata.isEncrypted) {
     next.push(
@@ -47,7 +57,7 @@ function suggestNext(
     return next;
   }
 
-  const unreadable = unreadablePages.filter(
+  const unreadable = (unreadablePages ?? []).filter(
     (page) => page.state === 'no_text_layer' || page.state === 'not_extractable',
   );
   if (textExtractability === 'no_text_layer' || textExtractability === 'not_extractable') {
@@ -119,6 +129,8 @@ The summary ends with a \`next\` list: tool suggestions derived from the observa
 Returns:
   Summary including: page count, PDF version, file size, tagged/encrypted/signature flags, text presence, per-document text extractability, the pages that are not fully extractable, image count, a text preview from page 1, and the \`next\` suggestions.
 
+  Four separate readings produce that summary — the document information, the text of page 1, the image count, and the extractability observation — and any of them can fail on its own. \`scope\` says which were done. A field whose reading did not happen is \`null\`, never \`0\`, \`false\` or \`""\`: "not read" and "read and found nothing" are different answers, and \`next\` stays silent about any premise that was not observed.
+
 Examples:
   - Quick overview: { file_path: "/path/to/doc.pdf" }
   - Machine-readable: { file_path: "/path/to/doc.pdf", response_format: "json" }`,
@@ -131,57 +143,88 @@ Examples:
       },
     },
     async (params: SummarizeInput) => {
-      try {
-        // Load the PDF document once and reuse for all operations
-        const doc = await loadDocument(params.file_path);
+      // 🔴 4 つの読みは別々に失敗しうる。Promise.all に入れると、先に失敗した
+      // ものの理由だけが残り、ほかの 3 つの答えが捨てられる。
+      // 3 つは同じ pdfjs の文書から取るので、文書が開けなければ 3 つとも同じ理由になる。
+      const docHalf = await half(() => loadDocument(params.file_path));
+      let metadataOutcome: PartOutcome = docHalf.outcome;
+      let previewOutcome: PartOutcome = docHalf.outcome;
+      let imagesOutcome: PartOutcome = docHalf.outcome;
+      let metadata: PdfMetadata | null = null;
+      let textPreview: string | null = null;
+      let imageCount: number | null = null;
 
+      if (docHalf.ok) {
+        const doc = docHalf.value;
         try {
-          const [metadata, firstPageTexts, imageCount, observations] = await Promise.all([
-            getMetadataFromDoc(doc, params.file_path),
-            extractTextFromDoc(doc, '1'),
-            countImagesFromDoc(doc),
-            // #21: over ALL pages, not just page 1. `hasText` is decided from
-            // the first page's preview, so a document whose page 1 happens to
-            // carry a title would otherwise report "has text" for 400 scanned
-            // pages behind it.
-            observeExtractability(params.file_path),
+          const [m, t, i] = await Promise.all([
+            half(() => getMetadataFromDoc(doc, params.file_path)),
+            half(() => extractTextFromDoc(doc, '1')),
+            half(() => countImagesFromDoc(doc)),
           ]);
-
-          const textPreview = firstPageTexts[0]?.text?.slice(0, 500) ?? '';
-          const hasText = textPreview.trim().length > 0;
-
-          const textExtractability = foldExtractability(observations);
-          const unreadablePages = observations.filter((page) => page.state !== 'extracted');
-
-          const summary: PdfSummary = {
-            filePath: params.file_path,
-            metadata,
-            textPreview,
-            imageCount,
-            hasText,
-            textExtractability,
-            unreadablePages,
-            next: suggestNext(metadata, textExtractability, unreadablePages),
-          };
-
-          const text =
-            params.response_format === ResponseFormat.JSON
-              ? JSON.stringify(summary, null, 2)
-              : formatSummaryMarkdown(summary);
-
-          return {
-            content: [{ type: 'text' as const, text }],
-          };
+          metadataOutcome = m.outcome;
+          previewOutcome = t.outcome;
+          imagesOutcome = i.outcome;
+          metadata = m.ok ? m.value : null;
+          textPreview = t.ok ? (t.value[0]?.text?.slice(0, 500) ?? '') : null;
+          imageCount = i.ok ? i.value : null;
         } finally {
           await doc.destroy();
         }
-      } catch (error) {
-        const err = handleStructuredError(error);
+      }
+
+      // #21: over ALL pages, not just page 1. `hasText` is decided from the
+      // first page's preview, so a document whose page 1 happens to carry a
+      // title would otherwise report "has text" for 400 scanned pages behind it.
+      const obs = await half(() => observeExtractability(params.file_path));
+
+      const scope: SummaryScope = {
+        metadata: metadataOutcome,
+        textPreview: previewOutcome,
+        imageCount: imagesOutcome,
+        extractabilityObservation: obs.outcome,
+      };
+
+      // どれ 1 つ読めなかったときだけ、エラーにする。
+      if (!docHalf.ok && !obs.ok) {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(bothFailedError(docHalf.error, obs.error), null, 2),
+            },
+          ],
           isError: true,
         };
       }
+
+      const observations = obs.ok ? obs.value : null;
+      const textExtractability = observations ? foldExtractability(observations) : null;
+      const unreadablePages = observations
+        ? observations.filter((page) => page.state !== 'extracted')
+        : null;
+
+      const summary: PdfSummary = {
+        filePath: params.file_path,
+        scope,
+        metadata,
+        textPreview,
+        imageCount,
+        // 🔴 1 ページ目の文字を読めていないなら、文字があるともないとも言えない。
+        hasText: textPreview === null ? null : textPreview.trim().length > 0,
+        textExtractability,
+        unreadablePages,
+        next: suggestNext(metadata, textExtractability, unreadablePages),
+      };
+
+      const text =
+        params.response_format === ResponseFormat.JSON
+          ? JSON.stringify(summary, null, 2)
+          : [...formatSummaryScope(scope), '', formatSummaryMarkdown(summary)].join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text }],
+      };
     },
   );
 }

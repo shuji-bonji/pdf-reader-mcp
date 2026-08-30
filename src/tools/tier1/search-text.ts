@@ -5,9 +5,9 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type SearchTextInput, SearchTextSchema } from '../../schemas/tier1.js';
 import { searchText } from '../../services/pdfjs-service.js';
+import { bothFailedError, bothHalves, formatReadingScope } from '../../services/reading-scope.js';
 import { observeExtractability } from '../../services/text-extractability-service.js';
 import type { SearchResult } from '../../types.js';
-import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSearchResultMarkdown } from '../../utils/formatter.js';
 
 export function registerSearchText(server: McpServer): void {
@@ -30,7 +30,7 @@ Args:
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
 
 Returns:
-  Search matches with page number, matched text, and surrounding context.
+  Search matches with page number, matched text, and surrounding context, plus \`scope\` — which of the two readings behind the answer were done: searching the characters on the page, and observing whether those characters have a route to Unicode (ISO 32000-2 §9.10.1). When the search itself could not run, \`totalMatches\` and \`matches\` are \`null\` rather than \`0\` and \`[]\`: "could not search" and "searched and found nothing" are different answers.
 
 Examples:
   - Search entire PDF: { file_path: "/path/to/doc.pdf", query: "digital signature" }
@@ -44,68 +44,90 @@ Examples:
       },
     },
     async (params: SearchTextInput) => {
-      try {
-        const [{ matches: allMatches, unresolvedPages, unresolvedReason }, observations] =
-          await Promise.all([
-            searchText(params.file_path, params.query, params.context_chars, params.pages),
-            // #21: zero hits on a page whose characters do not convert to Unicode
-            // is "not found in what could be read", not "not in the document".
-            observeExtractability(params.file_path, params.pages),
-          ]);
-        const unsearchable = observations.filter((page) => page.state !== 'extracted');
+      // 🔴 検索と観測は別々に失敗しうる。Promise.all に入れると、先に失敗した
+      // ほうの理由だけが残り、もう片方の答えが捨てられる。
+      const {
+        text: search,
+        observation,
+        scope,
+      } = await bothHalves(
+        () => searchText(params.file_path, params.query, params.context_chars, params.pages),
+        // #21: zero hits on a page whose characters do not convert to Unicode
+        // is "not found in what could be read", not "not in the document".
+        () => observeExtractability(params.file_path, params.pages),
+      );
 
-        const truncated = allMatches.length > params.max_results;
-        const matches = allMatches.slice(0, params.max_results);
-
-        const result: SearchResult = {
-          query: params.query,
-          totalMatches: allMatches.length,
-          matches,
-          truncated,
-          ...(unsearchable.length > 0 ? { unsearchablePages: unsearchable } : {}),
-        };
-
-        // #18 resolves /ActualText, so the blanket #15 warning no longer
-        // applies — but the resolution can still be skipped. Keep saying so,
-        // now only where it is actually true, and say which of the two reasons
-        // it is: they call for different next steps, and pointing an encrypted
-        // document at extract_structured_text would waste the caller's time
-        // (that tool reads its replacement text through pdf-lib as well).
-        if (allMatches.length === 0 && unresolvedPages.length === 0 && unsearchable.length > 0) {
-          result.note =
-            `No matches. ${unsearchable.length} of the ${observations.length} page(s) searched ` +
-            'do not yield text that can be converted to Unicode (ISO 32000-2 §9.10.1), so this ' +
-            'result says the query was not found in what could be read — not that it is absent ' +
-            'from the document. See the per-page states above.';
-        } else if (allMatches.length === 0 && unresolvedPages.length > 0) {
-          result.note =
-            unresolvedReason === 'encrypted'
-              ? 'No matches. This document is encrypted, so replacement text (/ActualText, ' +
-                'ISO 32000-2 §14.9.4) could not be read: §7.6.2 encrypts strings and streams, ' +
-                'and this server does not decrypt them. What was searched is the glyphs as ' +
-                'drawn. No other tool here will do better — decrypt the file first if you ' +
-                'need the replacement text.'
-              : 'No matches. Replacement text (/ActualText, ISO 32000-2 §14.9.4) was resolved, ' +
-                `except on page(s) ${unresolvedPages.join(', ')}, whose content stream could not ` +
-                'be aligned with the extracted text. A Span-level replacement there would be ' +
-                'invisible to this search — try extract_structured_text if the document is tagged.';
-        }
-
-        const text =
-          params.response_format === ResponseFormat.JSON
-            ? JSON.stringify(result, null, 2)
-            : formatSearchResultMarkdown(result);
-
+      if (!search.ok && !observation.ok) {
         return {
-          content: [{ type: 'text' as const, text }],
-        };
-      } catch (error) {
-        const err = handleStructuredError(error);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(bothFailedError(search.error, observation.error), null, 2),
+            },
+          ],
           isError: true,
         };
       }
+
+      const observations = observation.ok ? observation.value : [];
+      const unsearchable = observations.filter((page) => page.state !== 'extracted');
+
+      const allMatches = search.ok ? search.value.matches : null;
+      const unresolvedPages = search.ok ? search.value.unresolvedPages : [];
+      const unresolvedReason = search.ok ? search.value.unresolvedReason : undefined;
+
+      const truncated = allMatches === null ? null : allMatches.length > params.max_results;
+      const matches = allMatches === null ? null : allMatches.slice(0, params.max_results);
+
+      const result: SearchResult = {
+        scope,
+        query: params.query,
+        // 🔴 探せなかったときは null。0 と書くと「探して見つからなかった」になる。
+        totalMatches: allMatches === null ? null : allMatches.length,
+        matches,
+        truncated,
+        ...(unsearchable.length > 0 ? { unsearchablePages: unsearchable } : {}),
+      };
+
+      // #18 resolves /ActualText, so the blanket #15 warning no longer
+      // applies — but the resolution can still be skipped. Keep saying so,
+      // now only where it is actually true, and say which of the two reasons
+      // it is: they call for different next steps, and pointing an encrypted
+      // document at extract_structured_text would waste the caller's time
+      // (that tool reads its replacement text through pdf-lib as well).
+      if (
+        allMatches !== null &&
+        allMatches.length === 0 &&
+        unresolvedPages.length === 0 &&
+        unsearchable.length > 0
+      ) {
+        result.note =
+          `No matches. ${unsearchable.length} of the ${observations.length} page(s) searched ` +
+          'do not yield text that can be converted to Unicode (ISO 32000-2 §9.10.1), so this ' +
+          'result says the query was not found in what could be read — not that it is absent ' +
+          'from the document. See the per-page states above.';
+      } else if (allMatches !== null && allMatches.length === 0 && unresolvedPages.length > 0) {
+        result.note =
+          unresolvedReason === 'encrypted'
+            ? 'No matches. This document is encrypted, so replacement text (/ActualText, ' +
+              'ISO 32000-2 §14.9.4) could not be read: §7.6.2 encrypts strings and streams, ' +
+              'and this server does not decrypt them. What was searched is the glyphs as ' +
+              'drawn. No other tool here will do better — decrypt the file first if you ' +
+              'need the replacement text.'
+            : 'No matches. Replacement text (/ActualText, ISO 32000-2 §14.9.4) was resolved, ' +
+              `except on page(s) ${unresolvedPages.join(', ')}, whose content stream could not ` +
+              'be aligned with the extracted text. A Span-level replacement there would be ' +
+              'invisible to this search — try extract_structured_text if the document is tagged.';
+      }
+
+      const text =
+        params.response_format === ResponseFormat.JSON
+          ? JSON.stringify(result, null, 2)
+          : [...formatReadingScope(scope), '', formatSearchResultMarkdown(result)].join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text }],
+      };
     },
   );
 }

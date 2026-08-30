@@ -5,12 +5,13 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadTextInput, ReadTextSchema } from '../../schemas/tier1.js';
 import { extractText } from '../../services/pdfjs-service.js';
+import { bothFailedError, bothHalves, formatReadingScope } from '../../services/reading-scope.js';
 import {
   byPage,
   observeExtractability,
   summarizeExtractability,
 } from '../../services/text-extractability-service.js';
-import { handleStructuredError } from '../../utils/error-handler.js';
+import type { PageText } from '../../types.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerReadText(server: McpServer): void {
@@ -39,8 +40,10 @@ Args:
 
 Every page also reports how much of its text could be converted to Unicode (ISO 32000-2 §9.10.1): \`extracted\`, \`no_text_layer\` (no text-showing operator, image content present — reading it needs OCR or a rendered page), \`not_extractable\` (a font used here offers no route to Unicode, so text is missing or wrong), or \`not_observed\` (encrypted or unreadable content stream). An empty result is therefore never by itself evidence that a page has no text.
 
+Two separate readings produce that answer: taking the characters off the page, and observing whether those characters have a route to Unicode. Either can fail on its own, so the response says which of the two was done, under \`scope\`. When the characters were taken but the observation could not run, the text is still returned and \`extractability\` is left off the pages — absent is not \`extracted\`. When the characters could not be taken but the observation ran, \`text\` is \`null\` (not \`""\`, which would say the page has no text) and the per-page observation still tells you whether the page has any text-showing operator at all. Only when neither reading could be done is this an error, and it then names both reasons.
+
 Returns:
-  Extracted text organized by page number, preceded by the extractability tally. With \`split_columns >= 2\`, columns are separated by a blank line so a downstream LLM can tell them apart.
+  \`{ scope, pages }\`. \`pages\` is the extracted text organized by page number, preceded by the extractability tally. With \`split_columns >= 2\`, columns are separated by a blank line so a downstream LLM can tell them apart.
 
 Examples:
   - Extract all text: { file_path: "/path/to/doc.pdf" }
@@ -55,44 +58,66 @@ Examples:
       },
     },
     async (params: ReadTextInput) => {
-      try {
-        const [extracted, observations] = await Promise.all([
+      // 🔴 2 本を Promise.all に入れない。先に失敗したほうの理由だけが残り、
+      // もう片方の答えが捨てられる（0.13.0 まではそうなっていた）。
+      const {
+        text: extraction,
+        observation,
+        scope,
+      } = await bothHalves(
+        () =>
           extractText(params.file_path, params.pages, {
             splitColumns: params.split_columns,
             compactWhitespace: params.compact_whitespace,
           }),
-          // #21: an empty (or shortened) result is not evidence that the page
-          // has no text. The state says which of the three §9.10.1 conditions
-          // produced what is above it.
-          observeExtractability(params.file_path, params.pages),
-        ]);
+        // #21: an empty (or shortened) result is not evidence that the page
+        // has no text. The state says which of the three §9.10.1 conditions
+        // produced what is above it.
+        () => observeExtractability(params.file_path, params.pages),
+      );
 
-        const observed = byPage(observations);
-        const pages = extracted.map((page) => ({
-          ...page,
-          ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
-        }));
-
-        let text: string;
-        if (params.response_format === ResponseFormat.JSON) {
-          text = JSON.stringify(pages, null, 2);
-        } else {
-          const banner = summarizeExtractability(observations);
-          text = [...banner, '', formatPageTextsMarkdown(pages)].join('\n');
-        }
-
-        const { text: finalText } = truncateIfNeeded(text);
-
+      if (!extraction.ok && !observation.ok) {
         return {
-          content: [{ type: 'text' as const, text: finalText }],
-        };
-      } catch (error) {
-        const err = handleStructuredError(error);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(bothFailedError(extraction.error, observation.error), null, 2),
+            },
+          ],
           isError: true,
         };
       }
+
+      const observations = observation.ok ? observation.value : [];
+      const observed = byPage(observations);
+      const pages: PageText[] = extraction.ok
+        ? extraction.value.map((page) => ({
+            ...page,
+            ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
+          }))
+        : // 文字は取り出せなかった。ページの一覧は観測側から取る。
+          // text は null —— '' と書くと「このページに文字は無い」と言ったことになる。
+          observations.map((o) => ({ page: o.page, text: null, extractability: o }));
+
+      let text: string;
+      if (params.response_format === ResponseFormat.JSON) {
+        text = JSON.stringify({ scope, pages }, null, 2);
+      } else {
+        const banner = observation.ok ? summarizeExtractability(observations) : [];
+        text = [
+          ...formatReadingScope(scope),
+          '',
+          ...banner,
+          '',
+          formatPageTextsMarkdown(pages),
+        ].join('\n');
+      }
+
+      const { text: finalText } = truncateIfNeeded(text);
+
+      return {
+        content: [{ type: 'text' as const, text: finalText }],
+      };
     },
   );
 }

@@ -23,6 +23,8 @@ Args:
 Returns:
   Structural comparison including: property-by-property diff (page count, PDF version, encryption, tagged status, object counts, page dimensions, file size, catalog entries, signatures), font comparison (fonts unique to each file and shared fonts), and a summary.
 
+  The comparison needs both files, so an unreadable file is an error — but the error names which of the two could not be read, and says that the other one was fine.
+
 Examples:
   - Compare two versions of the same document
   - Verify structural consistency across PDF exports

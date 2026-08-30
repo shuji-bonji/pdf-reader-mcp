@@ -7,12 +7,13 @@ import {
   type ExtractStructuredTextInput,
   ExtractStructuredTextSchema,
 } from '../../schemas/tier2.js';
+import { bothFailedError, bothHalves, formatReadingScope } from '../../services/reading-scope.js';
 import { extractStructuredText } from '../../services/struct-tree-service.js';
 import {
   observeExtractability,
   summarizeExtractability,
 } from '../../services/text-extractability-service.js';
-import { handleStructuredError } from '../../utils/error-handler.js';
+import type { StructuredTextResult } from '../../types.js';
 import { formatStructuredTextMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
 export function registerExtractStructuredText(server: McpServer): void {
@@ -37,6 +38,8 @@ Returns:
   isTagged, the document language, and a flat list of elements in logical content order.
   Each element has: role, depth (nesting; top level is 0), text, pages, and optionally
   alt / label / rows / boxes / boxNote.
+
+  \`scope\` says which of the two readings behind that answer were done — reading the structure tree, and observing whether the characters under it have a route to Unicode (ISO 32000-2 §9.10.1). When the structure tree could not be read, \`isTagged\` and \`elements\` are \`null\` rather than \`false\` and \`[]\`: "not read" and "read and found no tags" are different answers.
 
   The list is flat with a depth field rather than nested — a depth-first pre-order plus
   depth encodes the tree exactly, so nothing is lost. Table is the exception and carries
@@ -98,39 +101,57 @@ Examples:
       },
     },
     async (params: ExtractStructuredTextInput) => {
-      try {
-        const [result, observations] = await Promise.all([
+      // 🔴 構造木の読み取りと §9.10.1 の観測は別々に失敗しうる。
+      const {
+        text: structured,
+        observation,
+        scope,
+      } = await bothHalves(
+        () =>
           extractStructuredText(params.file_path, {
             pages: params.pages,
             roles: params.roles,
             includeBbox: params.include_bbox,
           }),
-          // #21: logical order does not make characters convertible. A tagged
-          // page drawn with an Identity-H font that has no /ToUnicode returns a
-          // correct tree over unreadable text, and that has to be visible here
-          // too — otherwise this is the one path that still hides it.
-          observeExtractability(params.file_path, params.pages),
-        ]);
-        result.extractability = observations;
+        // #21: logical order does not make characters convertible. A tagged
+        // page drawn with an Identity-H font that has no /ToUnicode returns a
+        // correct tree over unreadable text, and that has to be visible here
+        // too — otherwise this is the one path that still hides it.
+        () => observeExtractability(params.file_path, params.pages),
+      );
 
-        const raw =
-          params.response_format === ResponseFormat.JSON
-            ? JSON.stringify(result, null, 2)
-            : [
-                ...summarizeExtractability(observations),
-                '',
-                formatStructuredTextMarkdown(result),
-              ].join('\n');
-
-        const { text } = truncateIfNeeded(raw);
-        return { content: [{ type: 'text' as const, text }] };
-      } catch (error) {
-        const err = handleStructuredError(error);
+      if (!structured.ok && !observation.ok) {
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(bothFailedError(structured.error, observation.error), null, 2),
+            },
+          ],
           isError: true,
         };
       }
+
+      const observations = observation.ok ? observation.value : [];
+      // 構造木が読めなかったときは null を置く。false は「タグが無いと観測した」であり、
+      // 読めなかったこととは違う。
+      const result: StructuredTextResult = structured.ok
+        ? { scope, ...structured.value, extractability: observations }
+        : { scope, isTagged: null, lang: null, elements: null, extractability: observations };
+
+      const raw =
+        params.response_format === ResponseFormat.JSON
+          ? JSON.stringify(result, null, 2)
+          : [
+              ...formatReadingScope(scope),
+              '',
+              ...(observation.ok ? summarizeExtractability(observations) : []),
+              '',
+              formatStructuredTextMarkdown(result),
+            ].join('\n');
+
+      const { text } = truncateIfNeeded(raw);
+      return { content: [{ type: 'text' as const, text }] };
     },
   );
 }

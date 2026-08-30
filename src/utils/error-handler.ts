@@ -77,6 +77,16 @@ function inferFamilyCodeFromMessage(message: string): LawErrorCode | undefined {
   if (message.includes('Invalid PDF') || message.includes('PDF header not found')) {
     return 'INVALID_PDF';
   }
+  // pdf-lib の構文解析が投げるメッセージ。ここを拾わないと、ファイルが壊れている
+  // ことが INTERNAL_ERROR（= この server の落ち度）として報告される。
+  // 実測: ヘッダが "%PDF-" だけの文書で "Failed to parse number (line:0 col:5 offset=5)"
+  if (
+    message.includes('Failed to parse') ||
+    message.includes('No PDF header found') ||
+    message.startsWith('Expected instance of PDF')
+  ) {
+    return 'INVALID_PDF';
+  }
   if (message.includes('password') || message.includes('encrypted')) {
     return 'ENCRYPTED_PDF';
   }
@@ -196,10 +206,20 @@ function buildInferredError(
         detail: { cause: original.message },
       });
     case 'ENCRYPTED_PDF':
-      return makeError(code, 'This PDF is password-protected.', {
-        hint: '現在 pdf-reader-mcp は暗号化 PDF をサポートしていません。',
-        detail: { cause: original.message },
-      });
+      // 🔴 「暗号化 PDF をサポートしていません」とは書かない。文字が取り出せない
+      // だけで、構造の観測は暗号化されていない範囲について続いている。
+      // 何ができなかったのかを、できたことと分けて書く。
+      return makeError(
+        code,
+        'This PDF is password-protected, so its text could not be extracted.',
+        {
+          hint:
+            '利用者パスワードが必要です。ISO 32000-2 §7.6.4.3.2 のとおり、' +
+            'ファイル暗号鍵は利用者パスワードから導くため、パスワードが無いと文字は取り出せません。' +
+            '構造の観測は、暗号化されていない範囲について続けています。',
+          detail: { cause: original.message },
+        },
+      );
     case 'FILE_TOO_LARGE':
       return makeError(code, 'File exceeds the 50MB size limit.', {
         hint: 'PDF を分割してから再試行してください。',

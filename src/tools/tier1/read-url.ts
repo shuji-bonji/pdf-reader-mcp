@@ -5,12 +5,14 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type ReadUrlInput, ReadUrlSchema } from '../../schemas/tier1.js';
 import { extractTextFromDoc, loadDocumentFromData } from '../../services/pdfjs-service.js';
+import { bothFailedError, bothHalves, formatReadingScope } from '../../services/reading-scope.js';
 import {
   byPage,
   observeExtractabilityFromData,
   summarizeExtractability,
 } from '../../services/text-extractability-service.js';
 import { fetchPdfFromUrl } from '../../services/url-fetcher.js';
+import type { PageText } from '../../types.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatPageTextsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 
@@ -35,7 +37,7 @@ Args:
   - compact_whitespace (boolean, optional): Collapse whitespace runs (incl. U+3000) to one ASCII space. Default false.
 
 Returns:
-  Extracted text organized by page number, same format as read_text.
+  \`{ scope, pages }\`, the same shape as read_text: \`pages\` is the extracted text by page number, and \`scope\` says which of the two readings behind it were done — taking the characters off the page, and observing whether those characters have a route to Unicode (ISO 32000-2 §9.10.1). Either can fail on its own; only when neither could be done is this an error, and it then names both reasons.
 
 Examples:
   - Read remote PDF: { url: "https://example.com/document.pdf" }
@@ -50,53 +52,84 @@ Examples:
       },
     },
     async (params: ReadUrlInput) => {
+      let data: Uint8Array;
       try {
-        const data = await fetchPdfFromUrl(params.url);
-        const doc = await loadDocumentFromData(data);
-
-        try {
-          const [extracted, observations] = await Promise.all([
-            extractTextFromDoc(doc, params.pages, {
-              splitColumns: params.split_columns,
-              compactWhitespace: params.compact_whitespace,
-            }),
-            // #21: the same three-state answer as read_text — the fetched bytes
-            // are already here, so there is no reason for this path to be the
-            // one that still returns a bare empty string.
-            observeExtractabilityFromData(data, params.pages),
-          ]);
-
-          const observed = byPage(observations);
-          const results = extracted.map((page) => ({
-            ...page,
-            ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
-          }));
-
-          let text: string;
-          if (params.response_format === ResponseFormat.JSON) {
-            text = JSON.stringify(results, null, 2);
-          } else {
-            text = [
-              ...summarizeExtractability(observations),
-              '',
-              formatPageTextsMarkdown(results),
-            ].join('\n');
-          }
-
-          const { text: finalText } = truncateIfNeeded(text);
-          return {
-            content: [{ type: 'text' as const, text: finalText }],
-          };
-        } finally {
-          await doc.destroy();
-        }
+        data = await fetchPdfFromUrl(params.url);
       } catch (error) {
+        // 取ってこられなければ、どちらの読み方も始まらない。ここだけは 1 つの理由。
         const err = handleStructuredError(error);
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
           isError: true,
         };
       }
+
+      // 🔴 pdfjs は渡された配列の中身を worker へ移す。移したあと元の配列は空になり、
+      // 同じ配列を読む 2 人目には 0 バイトに見える（実測: loadDocumentFromData の
+      // あと data.buffer.byteLength === 0、data.slice が detached ArrayBuffer で落ちる）。
+      // 0.13.0 ではそれが原因で read_url が全検体で「No PDF header found」を返していた。
+      // 読み手が 2 人いるので、それぞれに自分の分を渡す。
+      const forObservation = new Uint8Array(data);
+
+      let doc: Awaited<ReturnType<typeof loadDocumentFromData>> | undefined;
+      const {
+        text: extraction,
+        observation,
+        scope,
+      } = await bothHalves(
+        async () => {
+          doc = await loadDocumentFromData(data);
+          return extractTextFromDoc(doc, params.pages, {
+            splitColumns: params.split_columns,
+            compactWhitespace: params.compact_whitespace,
+          });
+        },
+        // #21: the same four-state answer as read_text — the fetched bytes are
+        // already here, so there is no reason for this path to be the one that
+        // still returns a bare empty string.
+        () => observeExtractabilityFromData(forObservation, params.pages),
+      );
+      if (doc) await doc.destroy();
+
+      if (!extraction.ok && !observation.ok) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(bothFailedError(extraction.error, observation.error), null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const observations = observation.ok ? observation.value : [];
+      const observed = byPage(observations);
+      const results: PageText[] = extraction.ok
+        ? extraction.value.map((page) => ({
+            ...page,
+            ...(observed.has(page.page) ? { extractability: observed.get(page.page) } : {}),
+          }))
+        : observations.map((o) => ({ page: o.page, text: null, extractability: o }));
+
+      let text: string;
+      if (params.response_format === ResponseFormat.JSON) {
+        text = JSON.stringify({ scope, pages: results }, null, 2);
+      } else {
+        const banner = observation.ok ? summarizeExtractability(observations) : [];
+        text = [
+          ...formatReadingScope(scope),
+          '',
+          ...banner,
+          '',
+          formatPageTextsMarkdown(results),
+        ].join('\n');
+      }
+
+      const { text: finalText } = truncateIfNeeded(text);
+      return {
+        content: [{ type: 'text' as const, text: finalText }],
+      };
     },
   );
 }

@@ -48,6 +48,12 @@ What it does NOT do:
     therefore never on its own evidence that a page has no text. When a page cannot be read as
     text, render_page rasterises it (PDFium-WASM, optional dependency) so a vision model can
     read the pixels instead.
+  - No collapsing of two readings into one verdict. Taking the characters off a page and
+    observing whether those characters have a route to Unicode are separate readings that
+    can fail separately, so every text-returning tool reports which of them were done under
+    \`scope\`, and a field whose reading did not happen is \`null\` — never zero, false or an
+    empty string. "Not read" and "read and found nothing" are different answers, and this
+    server keeps them apart.
 
 It DOES map content to coordinates: locate_objects turns an object number into a page and a
 rectangle, and extract_structured_text with include_bbox does the same for a structure element.

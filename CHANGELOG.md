@@ -5,6 +5,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-08-30
+
+Text-returning tools now say which of the readings behind their answer were
+actually done. Output shapes change — read **Changed** before upgrading.
+
+### Fixed
+
+- **`read_url` returned an error for every input.** The bytes fetched from the
+  URL were handed to pdfjs and then, concurrently, to the extractability
+  observation. pdfjs takes ownership of the `Uint8Array` it is given and moves
+  its buffer to a worker, so the second reader saw zero bytes and reported
+  `Failed to parse PDF document (line:0 col:0 offset=0): No PDF header found`.
+  Measured over the 40-specimen smoke set: 40 of 40 calls were `isError`. Each
+  reader now gets its own copy of the bytes.
+
+- **The error a caller received for an unreadable file was decided by a race.**
+  `read_text`, `read_url`, `search_text`, `summarize` and
+  `extract_structured_text` each ran two readings inside `Promise.all`, which
+  rejects with whichever rejected first. Twelve calls with the same file
+  returned `INVALID_PDF` ten times and `INTERNAL_ERROR` twice, with different
+  `hint` and `next_actions` each way. Taking the same golden twice, with
+  nothing changed, produced three differences.
+
+- **A damaged file was reported as this server's fault.** pdf-lib's parse
+  failures (`Failed to parse ...`, `No PDF header found`,
+  `Expected instance of PDF...`) fell through to `INTERNAL_ERROR`; they are
+  `INVALID_PDF`.
+
+### Changed
+
+- **Two readings, reported separately (#26).** Taking the characters off a page
+  (pdfjs) and observing whether those characters have a route to Unicode
+  (ISO 32000-2 §9.10.1, pdf-lib) are separate questions that fail separately.
+  Over 2,931 corpus files: 2,927 both succeeded, 3 had the text but not the
+  observation, and 1 had neither. In those 3 the tool returned an error and
+  **threw away text it had already extracted** — 13, 0 and 86 characters.
+
+  Every text-returning tool now carries `scope`:
+
+  ```jsonc
+  { "scope": { "textExtraction": { "status": "read" },
+               "extractabilityObservation": {
+                 "status": "failed", "code": "INVALID_PDF", "reason": "..." } },
+    "pages": [ … ] }
+  ```
+
+  Only when *neither* reading could be done is the call an error, and it then
+  names both reasons in `detail.cause`.
+
+- **Output shapes.** `read_text` and `read_url` return `{ scope, pages }` where
+  they returned a bare array of pages. `search_text`,
+  `extract_structured_text` and `summarize` gain `scope`.
+
+- **`null` where a reading did not happen — never `0`, `false` or `""`.**
+  "Not read" and "read and found nothing" are different answers.
+
+  | Field | `null` means | The observed answer |
+  | --- | --- | --- |
+  | `PageText.text` | the extraction did not run | `""` — it ran and produced no characters |
+  | `SearchResult.totalMatches` / `matches` | the search did not run | `0` / `[]` — searched, nothing found |
+  | `StructuredTextResult.isTagged` / `elements` | the structure tree was not read | `false` / `[]` — read, no tags |
+  | `PdfSummary.metadata` / `textPreview` / `imageCount` / `hasText` / `textExtractability` / `unreadablePages` | that reading did not run | the value it measured |
+
+  When the observation could not run, pages carry no `extractability` field at
+  all rather than one filled with zeros: `0` fonts observed and "not observed"
+  are different answers.
+
+- **`summarize.next` stays silent about a premise it did not observe.** It used
+  to derive its suggestions from metadata; with metadata unread it now suggests
+  nothing rather than reasoning from absence.
+
+- **`validate_tagged` no longer passes a check it could not make.** TAG-005
+  judges Figure tags against the number of images the page draws. When that
+  count could not be observed, the check previously fell into the branch for
+  "no images", which counted as a pass. It is now excluded from `totalChecks`
+  and listed in the new `notChecked` field with the reason.
+
+- **`compare_structure` names which file it could not read.** The comparison
+  still needs both files, but the error says which of the two failed, and that
+  the other one was fine.
+
+- **The message for a password-protected file describes what happened.** It
+  said "pdf-reader-mcp does not support encrypted PDFs"; the text cannot be
+  extracted because the file encryption key is derived from the user password
+  (ISO 32000-2 §7.6.4.3.2), while the structure observation continues over what
+  is not encrypted.
+
+### Added
+
+- `src/services/reading-scope.ts` — the shared shape for the above.
+- `tests/e2e/15-reading-scope.test.ts` — 15 tests pinning all four combinations
+  of the two readings, including that twelve identical calls return one code.
+- `scripts/probe-read-halves.mjs` — runs the two readings separately and counts
+  the four combinations over a corpus.
+- `scripts/golden-specimens-halves.mjs` — one specimen per combination. The
+  `fail/ok` case did not exist anywhere in the 2,931-file corpus; it needs a
+  document with a non-empty user password, so it is built with qpdf under
+  `--static-id` to keep the bytes identical run to run.
+- `scripts/golden.mjs` — freezes the output of all 19 tools across 23 calls, so
+  the pdf-lib removal that follows can be attributed difference by difference.
+
 ## [0.13.0] - 2026-08-27
 
 Infrastructure only: no tool gained or lost a capability, and no tool's output

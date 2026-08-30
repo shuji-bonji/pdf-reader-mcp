@@ -2,6 +2,8 @@
  * pdf-reader-mcp shared type definitions
  */
 
+import type { ReadingScope, SummaryScope } from './services/reading-scope.js';
+
 // ─── Tier 1 ──────────────────────────────────────────────
 
 /** Metadata extracted from a PDF document */
@@ -70,10 +72,22 @@ export interface PageExtractability {
 /** A single page's extracted text */
 export interface PageText {
   page: number;
-  text: string;
+  /**
+   * The text this server could take from the page.
+   *
+   * 🔴 `null` and `''` are different answers. `''` means the extraction ran and
+   * produced no characters; `null` means the extraction did not run on this
+   * document at all, and `ReadingScope.textExtraction` says why. Writing `''`
+   * for the second case would say "this page has no text", which is a claim
+   * this server did not measure.
+   */
+  text: string | null;
   /**
    * Present when the caller asked for it (#21). Absent is not "extracted" —
-   * it means the state was not requested on this path.
+   * it means the state was not observed on this path. When the observation
+   * could not run at all, `ReadingScope.extractabilityObservation` says why;
+   * this field is left off rather than filled with zeros, because `0` fonts
+   * observed and "not observed" are different answers.
    */
   extractability?: PageExtractability;
 }
@@ -89,10 +103,18 @@ export interface SearchMatch {
 
 /** Search results response */
 export interface SearchResult {
+  /** どこまで読んだか。検索と観測は別々に失敗しうる。 */
+  scope?: ReadingScope;
   query: string;
-  totalMatches: number;
-  matches: SearchMatch[];
-  truncated: boolean;
+  /**
+   * 見つかった件数。
+   *
+   * 🔴 `null` は 0 ではない。0 は「探して見つからなかった」、`null` は
+   * 「探せなかった」で、理由は `scope.textExtraction` にある。
+   */
+  totalMatches: number | null;
+  matches: SearchMatch[] | null;
+  truncated: boolean | null;
   /**
    * Set when the search found nothing but the document is tagged (#15).
    * search_text sees raw glyphs only — a tagged document may carry the
@@ -163,17 +185,23 @@ export interface ImageExtractionResult {
 /** Summary report of a PDF document */
 export interface PdfSummary {
   filePath: string;
-  metadata: PdfMetadata;
-  textPreview: string;
-  imageCount: number;
-  hasText: boolean;
+  /**
+   * どこまで読んだか。この 4 つは別々に失敗しうる（#26）。
+   * 🔴 下の項目が `null` のときは、その読みが行われなかったということで、
+   * 「0 だった」「無かった」ではない。理由はここにある。
+   */
+  scope?: SummaryScope;
+  metadata: PdfMetadata | null;
+  textPreview: string | null;
+  imageCount: number | null;
+  hasText: boolean | null;
   /**
    * Document-level fold of the per-page states (#21). `hasText` alone cannot
    * say why text is absent; this can.
    */
-  textExtractability: TextExtractabilityState;
+  textExtractability: TextExtractabilityState | null;
   /** The pages that are not `extracted`, so the caller can go straight to them. */
-  unreadablePages: PageExtractability[];
+  unreadablePages: PageExtractability[] | null;
   /**
    * What to call next, decided from the observations above (#24).
    *
@@ -320,9 +348,15 @@ export interface ElementBox {
 
 /** extract_structured_text output */
 export interface StructuredTextResult {
-  isTagged: boolean;
+  /** どこまで読んだか。構造木の読み取りと §9.10.1 の観測は別々に失敗しうる。 */
+  scope?: ReadingScope;
+  /**
+   * 🔴 `null` は false ではない。false は「タグが無いと観測した」、`null` は
+   * 「構造木を読めなかった」で、理由は `scope.textExtraction` にある。
+   */
+  isTagged: boolean | null;
   lang: string | null;
-  elements: StructuredElement[];
+  elements: StructuredElement[] | null;
   /**
    * Per-page text extractability (#21). The structure tree says what the
    * elements are; this says whether their characters could be read at all.
@@ -480,11 +514,18 @@ export interface ValidationIssue {
 /** validate_tagged output */
 export interface TaggedValidation {
   isTagged: boolean;
+  /**
+   * 実際に判定できた検査の数。
+   * 🔴 前提を観測できずに回らなかった検査はここに入らない。`notChecked` にある。
+   * 回らなかった検査を「通った」に数えると、観測していないことが合格の顔をする。
+   */
   totalChecks: number;
   passed: number;
   failed: number;
   warnings: number;
   issues: ValidationIssue[];
+  /** 前提を観測できなかったので回らなかった検査。コードと、なぜ回らなかったか。 */
+  notChecked?: { code: string; reason: string }[];
   summary: string;
 }
 
