@@ -9,3 +9,6 @@ tests/fixtures/*.pdf
 
 # Claude Code のローカル設定（環境固有・共有しない）
 .claude/settings.local.json
+
+# 撤去前のゴールデン（pdf-lib が在るうちにしか採れない）。消さない
+.golden/
