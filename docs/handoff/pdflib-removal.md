@@ -5,11 +5,42 @@
 > verify = `mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`（+ `scope-in-output.md`）。
 >
 > 実測日 2026-08-29。reader **0.13.0** / normativepdf **0.9.0**。
-> **2026-08-31 追記: L0 は閉じた。§0 を先に読むこと。**
+> **2026-08-31 追記: L0 と L1 の 1 本目が閉じた。§0 を先に読むこと。**
 
 ## 0. いまここ（2026-08-31）
 
-**L0（撤去前の出力を凍結する）は終わった。次は L1。**
+**L0 は終わった。L1 は `detectEncryption` 1 本を移し終えた。次は L1 の続き。**
+
+### L1 の進み
+
+| 入口 | 移した先 | A/B |
+|---|---|---|
+| `detectEncryption` | `services/recover-service.ts`（`openDocument` → `scope.encrypted`） | **差 0 件**（2,942 検体 × 23 呼び出し × json/markdown 両方） |
+| `loadWithPdfLib` / `loadWithPdfLibFromData` | まだ pdf-lib | — |
+
+`detectEncryption` を選んだのは、呼び出し元が `pdfjs-service.ts:125` の
+`metadata.isEncrypted` **1 箇所だけ**で、そこから `summarize` を経て
+pdf-read Phase 1 の停止条件になるためである。壊れても何も落ちない経路なので、
+差が出れば必ず A/B に出る。**振る舞いは変えていない** ——
+読めなかったときに `false` を返す握り潰しも、pdf-lib 版のまま残してある。
+これを `PartOutcome` に直すのは次の段で、そのとき
+`tests/tier1/recover-service.test.ts` の L1-4 が落ちる。それが合図になる。
+
+🔴 **「差 0 件」が計器の見落としでないことを確かめた。**
+`return !scope.encrypted` に変えて 35 検体を採り直すと、
+`get_metadata` / `summarize` / `validate_metadata` で 96 件の差が出た。
+`isEncrypted` は kept に入っており、diff はそれを見ている。
+
+### 🔴 その確認で計器の欠陥が 1 つ出た（直した）
+
+96 件が全部 `P 返した画像が変わった（枚数・バイト列）` に入っていた。
+**画像は 1 枚も動いていない。** `blocks` を丸ごと比べており、`blocks` は本文
+ブロックのバイト数も持つので、`true` と `false` の 1 バイト差が P に当たっていた。
+帰属は分類の名前を読んで行うので、名前が別のものを指していたら帰属できない。
+`imageBlocks()` で本文ブロックを外し、いまは D 32 / C 31 / G 64 に落ちる
+（G = 「その他（帰属が要る）」。`get_metadata` と `summarize` では
+`isEncrypted` は検査ではなく素の項目なので、これが正しい）。
+分類は diff の時に走るので、**採り直しは要らない**。
 
 ```
 ✅ 計器            scripts/golden.mjs（take / merge / diff / report / t3）
@@ -19,7 +50,14 @@
                    .golden/md-0.14.0.json    同上（markdown）
                    🔴 **消さない。** pdf-lib が在るうちにしか採れない
 ✅ 決定性          同じ集合を 2 回採って差 0 件（400 検体 9,200 呼び出し）
+✅ L1 の A/B       .golden/json-L1.json / .golden/md-L1.json（差 0 件）
 ```
+
+🔴 **バックグラウンドで採るのは効かない。** `device_bash` は呼び出しが終わると
+`--die-with-parent` で子ごと落ちる（`setsid nohup` でも同じ）。しかも各呼び出しは
+別の PID 名前空間なので、`pgrep` は前の呼び出しのプロセスを**見つけられない** ——
+落ちているのに「動いている」と読めてしまう。`--budget-ms 140000` と `--resume` で
+1 回の呼び出しに収まる分ずつ進めること。
 
 ### 🔴 撤去の前に 3 つ直した（0.14.0 と #27）
 

@@ -1027,6 +1027,17 @@ const B_F = 'F 観測できた対象が増えた';
 const B_N2 = 'N 🔴 取り出せた文字が減った';
 const B_O = 'O 取り出せた文字が増えた';
 const B_P = 'P 返した画像が変わった（枚数・バイト列）';
+
+/**
+ * B_P に当てるのは**画像などのブロックだけ**である。
+ *
+ * 🔴 2026-08-31: ここは `blocks` を丸ごと比べていた。`blocks` は本文ブロックの
+ * バイト数も持っているので、`isEncrypted` が true/false で 1 バイト動いただけの差が
+ * 96 件すべて「返した画像が変わった」と名乗った。**画像は 1 枚も動いていない。**
+ * 帰属は分類の名前を読んで行うので、名前が別のものを指していたら帰属できない。
+ * 本文の差は N/O（文字数）・K/L（行）・G（その他）が持っているので、ここでは見ない。
+ */
+const imageBlocks = (blocks) => (blocks ?? []).filter((b) => b.type !== 'text');
 const B_H = 'H 🔴 出力が切り詰められて JSON にならない（項目を 1 つも取れていない）';
 const B_M = 'M 🔴 本文が空（項目を 1 つも取れていない）';
 const B_I = 'I 並びだけが違う（行の集合と中身は同じ）';
@@ -1048,7 +1059,7 @@ function classifyText(before, after) {
   if (!before.isError && after.isError) return [B_A];
   if (before.isError && !after.isError) return [B_B];
   const s = new Set();
-  if (stable(before.blocks) !== stable(after.blocks)) s.add(B_P);
+  if (stable(imageBlocks(before.blocks)) !== stable(imageBlocks(after.blocks))) s.add(B_P);
   const la = String(before.text ?? '').split('\n');
   const lb = String(after.text ?? '').split('\n');
   if (la.join('\n') !== lb.join('\n')) {
@@ -1083,7 +1094,7 @@ function classify(key, before, after) {
   const b = after.kept ?? {};
   const s = new Set();
 
-  if (stable(before.blocks) !== stable(after.blocks)) s.add(B_P);
+  if (stable(imageBlocks(before.blocks)) !== stable(imageBlocks(after.blocks))) s.add(B_P);
 
   const sa = subjectsOf(key, a);
   const sb = subjectsOf(key, b);

@@ -89,24 +89,6 @@ function trySilently<T>(fn: () => T): T | undefined {
 }
 
 /**
- * Check if a PDF is encrypted.
- */
-export async function detectEncryption(filePath: string): Promise<boolean> {
-  try {
-    const data = await readPdfFile(filePath);
-    const doc = await withSuppressedPdfLibLogs(() =>
-      PDFDocument.load(data, {
-        ignoreEncryption: true,
-        updateMetadata: false,
-      }),
-    );
-    return doc.isEncrypted;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Analyze PDF internal structure (catalog, page tree, objects).
  *
  * Linearized PDFs (typical of public-sector publishers) confuse pdf-lib's

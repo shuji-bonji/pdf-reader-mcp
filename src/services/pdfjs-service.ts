@@ -44,7 +44,8 @@ import {
   flattenAlphaOverWhite,
   type Samples,
 } from './image-resampler.js';
-import { detectEncryption, loadWithPdfLib } from './pdflib-service.js';
+import { loadWithPdfLib } from './pdflib-service.js';
+import { detectEncryption } from './recover-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
