@@ -17,7 +17,7 @@
 |---|---|---|
 | L1 | `detectEncryption` → `recover-service.ts` | **差 0 件**（json / markdown 両方） |
 | S1 | `object-locator.ts`（`locate_objects`） | 差 91 件・全件帰属（json / markdown で同じ 91 件） |
-| S2 | `struct-tree-walker` / `struct-tree-service` / `actual-text-service` | まだ |
+| S2 | `struct-tree-walker` / `struct-tree-service` / `actual-text-service` | 差 23 件・全件帰属（json / markdown で同じ 23 件） |
 | S3 | `content-stream-service` / `text-extractability-service` | まだ |
 | S4 | `pdflib-service`（`loadWithPdfLib` を消す） | まだ |
 
@@ -58,6 +58,45 @@ recover は鍵が無いとオブジェクトを渡さないので、いまは
 「鍵が導けなかった。パスワードを渡せ」と言って型を返さない。
 利用者パスワードが空の文書（`encrypted-actualtext.pdf` など）は影響を受けない
 —— recover が復号するので、むしろ文字列まで正しく読める。
+
+### S2 の帰属（23 件）
+
+`inspect_tags` 6 / `extract_tables` 5 / `extract_structured_text` 5 / 同 `#bbox` 5 /
+`read_text` 1 / 同 `#cols2-compact` 1。**誤った pass は 0 件。**
+
+| 分類 | 件数 | 何が起きたか |
+|---|---:|---|
+| B 読めない→読めた | 8 | `%PDF-`（版の無いヘッダ）2 ファイル × 4 呼び出し。S1 と同じ原因 |
+| N 取り出せた文字が減った | 4 | UTF-8 のバイト順マーク（§7.9.2.2.1・PDF 2.0）。pdf-lib 1.x は PDFDocEncoding として読み、本文の頭に `ï»¿` を付けていた。検体名がそのまま `pdf20-utf8-test.pdf` |
+| O / F 増えた | 5 | 暗号化された PDF/UA 検体の構造木が読めるようになった |
+| G その他 | 8 | ① エラー文面が条文つきに（4）② `/Rectangle#c2` の `#c2` を §7.3.5 どおり復号（3）③ 上と同じ検体の `isTagged` が false→true（1） |
+
+#### 暗号化検体の構造木（`PDF_UA-1/7.16 Security/7.16-t01-fail-a.pdf`）
+
+`inspect_tags` が **0 要素 → 3 要素**（Document / H1 / P）になった。
+pdf-lib は `ignoreEncryption` でオブジェクトストリームを開けず、
+**タグ付き文書を「タグ無し」と誤報していた**。
+
+🔴 面 3: `qpdf --show-encryption` が「利用者パスワードは空」と言い、
+`--decrypt` して数えると `/S /Document` `/S /H1` `/S /P` の 3 件。reader の新しい答えと一致する。
+
+#### 構造木の巡回を止める見張りが 2 枚要る
+
+pdf-lib 版には**見張りが 1 枚も無かった**。`/K` が循環している文書では再帰が
+止まらず、サーバは以後どの呼び出しにも答えない（0.14.0 の `render_page` と同じ形）。
+
+| 見張り | 何を止めるか |
+|---|---|
+| 参照番号（`ancestors`・**枝ごと**） | 番号を持つ枝の循環。木全体ではなく枝で見張るので、非循環の文書では出力が 1 バイトも変わらない |
+| 深さの上限（`MAX_STRUCT_DEPTH = 200`） | **番号を持たない直接オブジェクト**の循環。前者は素通りする |
+
+🔴 止まらないのは例外ではない。try/catch にも試験の timeout にも掛からない ——
+無限の await はマイクロタスクを詰めるので、マクロタスクである `setTimeout` に
+順番が回らない。**試験は落ちずにハングする。** 実際、2 枚とも外すと
+`vitest` が何も出さずに終わった（1 枚だけ外すと ST-1 が落ちる）。
+
+上限 200 が実文書を切っていないことは測ってある: コーパス 2,939 検体の
+`inspect_tags.maxDepth` の最大は **9**。
 
 #### 「見つからない」を 3 つに分けた
 

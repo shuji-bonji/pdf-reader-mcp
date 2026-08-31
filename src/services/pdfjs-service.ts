@@ -45,7 +45,7 @@ import {
   type Samples,
 } from './image-resampler.js';
 import { loadWithPdfLib } from './pdflib-service.js';
-import { detectEncryption } from './recover-service.js';
+import { detectEncryption, openPdf } from './recover-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
@@ -192,11 +192,14 @@ async function loadActualTextResolution(
   filePath: string,
 ): Promise<ActualTextResolution | undefined> {
   try {
-    const libDoc = await loadWithPdfLib(filePath);
+    // 🔴 いまは 2 つの読み手が要る。構造木は recover へ移したが、
+    // Span 側（`buildSpanActualTextMap` → `content-stream-service`）はまだ pdf-lib で、
+    // S3 でそちらを移すとこの pdf-lib の口は消える。
+    const [libDoc, opened] = await Promise.all([loadWithPdfLib(filePath), openPdf(filePath)]);
     return {
       libDoc,
-      structActualText: buildStructActualTextMap(libDoc),
-      encrypted: libDoc.isEncrypted,
+      structActualText: await buildStructActualTextMap(opened.doc, opened.scope.encrypted),
+      encrypted: opened.scope.encrypted,
     };
   } catch {
     return undefined;

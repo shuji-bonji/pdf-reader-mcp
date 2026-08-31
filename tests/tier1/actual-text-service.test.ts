@@ -14,6 +14,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { openDocument } from '@normativepdf/recover';
 import { PDFDocument } from 'pdf-lib';
 import { describe, expect, it } from 'vitest';
 import {
@@ -175,13 +176,11 @@ describe('buildSpanActualTextMap', () => {
 
 describe('buildStructActualTextMap', () => {
   it('maps every MCID an ActualText element owns', async () => {
-    const data = await readFile(resolve(FIXTURES, 'structured.pdf'));
-    const doc = await PDFDocument.load(data, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-      throwOnInvalidObject: false,
-    });
-    const map = buildStructActualTextMap(doc);
+    // S2 以降、構造木は @normativepdf/recover が読む（Span 側はまだ pdf-lib）。
+    const { doc, scope } = await openDocument(
+      new Uint8Array(await readFile(resolve(FIXTURES, 'structured.pdf'))),
+    );
+    const map = await buildStructActualTextMap(doc, scope.encrypted);
     expect([...map.values()]).toEqual(['Difficult']);
   });
 });

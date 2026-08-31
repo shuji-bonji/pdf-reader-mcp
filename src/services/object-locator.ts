@@ -30,7 +30,6 @@ import {
   asRef,
   nameOf as cosNameOf,
   get,
-  numberOf,
   refKey,
   resolved,
   textOf,
@@ -39,13 +38,11 @@ import {
   type CosDict,
   type CosObject,
   type CosRef,
-  inheritedAttribute,
-  type PageEntry,
   type PdfDocument,
   readPageTree,
 } from 'normativepdf';
 import type { LocatedObject, ObjectLocation, ObjectLocationResult, ObjectRect } from '../types.js';
-import { lockedOut, openPdf } from './recover-service.js';
+import { lockedOut, numberArray, openPdf, pageBox } from './recover-service.js';
 
 /** Resource categories whose entries are reachable from a page. */
 const RESOURCE_CATEGORIES = [
@@ -75,49 +72,9 @@ function normaliseRect(values: number[]): ObjectRect | null {
   };
 }
 
-async function numberArray(
-  doc: PdfDocument,
-  value: CosObject | undefined,
-): Promise<number[] | null> {
-  const array = asArray(await resolved(doc, value));
-  if (!array) return null;
-  const numbers: number[] = [];
-  for (const item of array.items) {
-    const n = numberOf(await resolved(doc, item));
-    if (n === null) return null;
-    numbers.push(n);
-  }
-  return numbers;
-}
-
 /** 名前を引く。**参照は解決しない** —— pdf-lib 版の `dict.get()` と同じ範囲である。 */
 function nameOf(dict: CosDict | null, key: string): string | null {
   return cosNameOf(get(dict, key));
-}
-
-/**
- * ページの矩形。**pdf-lib の `getCropBox()` と同じ順で決める**（A/B のため）:
- *
- *   1. 継承込みの `/CropBox` が 4 要素の数の配列なら、それ
- *   2. 配列でない・無いなら `/MediaBox` へ落ちる
- *   3. `/CropBox` が配列だが 4 要素でない、または数でない要素を含むなら、
- *      pdf-lib は `asRectangle()` が投げて **`/MediaBox` へは落ちない**。矩形は付かない
- *
- * 🔴 正規化しない。pdf-lib の `asRectangle` は `{x: llx, width: urx - llx}` を返し、
- * 呼び出し側が `x2 = x + width` に戻すので、逆順の矩形は逆順のまま出ていた。
- */
-async function pageBox(doc: PdfDocument, page: PageEntry): Promise<ObjectRect | null> {
-  const crop = await resolved(doc, inheritedAttribute(page, 'CropBox'));
-  const cropArray = asArray(crop);
-  if (cropArray) {
-    const values = await numberArray(doc, crop ?? undefined);
-    // 4 要素の数でなければ pdf-lib は投げる —— MediaBox へは落ちない
-    if (values === null || values.length !== 4) return null;
-    return { x1: values[0], y1: values[1], x2: values[2], y2: values[3] };
-  }
-  const media = await numberArray(doc, inheritedAttribute(page, 'MediaBox'));
-  if (media === null || media.length !== 4) return null;
-  return { x1: media[0], y1: media[1], x2: media[2], y2: media[3] };
 }
 
 /** Refs reachable from a page, with how they are reachable. */

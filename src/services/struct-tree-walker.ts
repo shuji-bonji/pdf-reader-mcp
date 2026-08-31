@@ -29,15 +29,16 @@
  */
 
 import {
-  PDFArray,
-  PDFDict,
-  type PDFDocument,
-  PDFHexString,
-  PDFName,
-  PDFNumber,
-  PDFRef,
-  PDFString,
-} from 'pdf-lib';
+  asArray,
+  asDict,
+  asRef,
+  get,
+  nameOf,
+  numberOf,
+  resolved,
+  textOf,
+} from '@normativepdf/recover';
+import type { CosDict, CosObject, CosRef, PdfDocument } from 'normativepdf';
 
 /**
  * A marked-content reference: the text this structure element owns on one page.
@@ -104,9 +105,18 @@ export function pdfjsMarkedContentId(ref: ContentRef): string {
   return `p${ref.pageObjNum}R_mc${ref.mcid}`;
 }
 
-/** Resolve a value that may be an indirect reference. */
-export function deref(doc: PDFDocument, obj: unknown): unknown {
-  return obj instanceof PDFRef ? doc.context.lookup(obj) : obj;
+/**
+ * Resolve a value that may be an indirect reference.
+ *
+ * 読めなかったときは `null` に畳む。pdf-lib 版の `context.lookup` は投げるか
+ * `undefined` を返していたので、ここは同じ範囲である —— **読めなかったことを
+ * 申告したい場所ではこれを使わない**（`tryResolve` が `unreadable` を返す）。
+ */
+export async function deref(
+  doc: PdfDocument,
+  obj: CosObject | undefined,
+): Promise<CosObject | null> {
+  return resolved(doc, obj);
 }
 
 /**
@@ -124,11 +134,14 @@ export function deref(doc: PDFDocument, obj: unknown): unknown {
  * bytes like `&)ð`. Since #18 those entries *replace* page text, so this
  * would have substituted garbage for the body of every such document.
  */
-function textEntry(doc: PDFDocument, dict: PDFDict, key: string): string | null {
-  if (doc.isEncrypted) return null;
-  const value = deref(doc, dict.get(PDFName.of(key)));
-  if (value instanceof PDFString || value instanceof PDFHexString) return value.decodeText();
-  return null;
+async function textEntry(
+  doc: PdfDocument,
+  encrypted: boolean,
+  dict: CosDict,
+  key: string,
+): Promise<string | null> {
+  if (encrypted) return null;
+  return textOf(await resolved(doc, get(dict, key)));
 }
 
 // ─── Layout attributes (Issue #20, stage 2) ─────────────────────────────────
@@ -141,21 +154,34 @@ function textEntry(doc: PDFDocument, dict: PDFDict, key: string): string | null 
  */
 const LAYOUT_OWNER = 'Layout';
 
-function bboxOfAttributeObject(doc: PDFDocument, value: unknown): number[] | null {
-  const dict = deref(doc, value);
-  if (!(dict instanceof PDFDict)) return null;
-  const owner = deref(doc, dict.get(PDFName.of('O')));
-  if (!(owner instanceof PDFName) || owner.decodeText() !== LAYOUT_OWNER) return null;
+/**
+ * 構造木を降りる深さの上限。
+ *
+ * 🔴 参照番号の見張り（下の `ancestors`）だけでは足りない。**直接オブジェクトで
+ * 書かれた枝は番号を持たない**ので見張りに載らず、そこに循環があると止まらない。
+ * 止まらないのは例外ではないので、try/catch にも試験の timeout にも掛からない ——
+ * マイクロタスクが詰まってタイマーすら動かず、サーバごと応答しなくなる
+ * （0.14.0 の `render_page` と同じ形）。
+ *
+ * 200 は §14.7 の木としては十分深い。PDF/UA の実文書はふつう 20 を超えない。
+ */
+const MAX_STRUCT_DEPTH = 200;
 
-  const bbox = deref(doc, dict.get(PDFName.of('BBox')));
-  if (!(bbox instanceof PDFArray) || bbox.size() !== 4) return null;
+async function bboxOfAttributeObject(
+  doc: PdfDocument,
+  value: CosObject | null | undefined,
+): Promise<number[] | null> {
+  const dict = asDict(await resolved(doc, value ?? undefined));
+  if (!dict) return null;
+  if (nameOf(await resolved(doc, get(dict, 'O'))) !== LAYOUT_OWNER) return null;
+
+  const bbox = asArray(await resolved(doc, get(dict, 'BBox')));
+  if (bbox?.items.length !== 4) return null;
 
   const numbers: number[] = [];
-  for (let i = 0; i < 4; i += 1) {
-    const entry = deref(doc, bbox.get(i));
-    if (!(entry instanceof PDFNumber)) return null;
-    const n = entry.asNumber();
-    if (!Number.isFinite(n)) return null;
+  for (const item of bbox.items) {
+    const n = numberOf(await resolved(doc, item));
+    if (n === null || !Number.isFinite(n)) return null;
     numbers.push(n);
   }
   return numbers;
@@ -175,36 +201,52 @@ function bboxOfAttributeObject(doc: PDFDocument, value: unknown): number[] | nul
  * present and a given attribute is specified by both, the one specified by the A
  * entry shall take precedence."
  */
-function layoutBBoxOf(doc: PDFDocument, dict: PDFDict, classMap: PDFDict | null): number[] | null {
-  const fromEntry = (value: unknown, resolve: (v: unknown) => unknown): number[] | null => {
-    const entry = deref(doc, value);
-    const candidates = entry instanceof PDFArray ? entry.asArray() : [entry];
+async function layoutBBoxOf(
+  doc: PdfDocument,
+  dict: CosDict,
+  classMap: CosDict | null,
+): Promise<number[] | null> {
+  const fromEntry = async (
+    value: CosObject | undefined,
+    resolve: (v: CosObject) => Promise<CosObject | null>,
+  ): Promise<number[] | null> => {
+    const entry = await resolved(doc, value);
+    const array = asArray(entry);
+    const candidates: (CosObject | null)[] = array ? [...array.items] : [entry];
     let found: number[] | null = null;
     for (const candidate of candidates) {
+      if (candidate === null) continue;
       // Revision numbers sit between the objects; they are not attribute objects.
-      if (deref(doc, candidate) instanceof PDFNumber) continue;
-      const bbox = bboxOfAttributeObject(doc, resolve(candidate));
+      if (numberOf(await resolved(doc, candidate)) !== null) continue;
+      const bbox = await bboxOfAttributeObject(doc, await resolve(candidate));
       if (bbox) found = bbox;
     }
     return found;
   };
 
-  const fromA = fromEntry(dict.get(PDFName.of('A')), (v) => v);
+  const fromA = await fromEntry(get(dict, 'A'), async (v) => v);
   if (fromA) return fromA;
 
   if (!classMap) return null;
-  return fromEntry(dict.get(PDFName.of('C')), (name) => {
-    const resolved = deref(doc, name);
-    return resolved instanceof PDFName ? classMap.get(PDFName.of(resolved.decodeText())) : null;
+  return fromEntry(get(dict, 'C'), async (name) => {
+    const named = nameOf(await resolved(doc, name));
+    return named === null ? null : (get(classMap, named) ?? null);
   });
 }
 
 /** Normalise `/K` — it may be absent, a single object, or an array. */
-function kidsOf(doc: PDFDocument, dict: PDFDict): unknown[] {
-  const k = deref(doc, dict.get(PDFName.of('K')));
-  if (k === undefined || k === null) return [];
-  if (k instanceof PDFArray) return k.asArray();
-  return [k];
+async function kidsOf(doc: PdfDocument, dict: CosDict): Promise<CosObject[]> {
+  // 🔴 `/K` の**生の値**も要る。要素が参照なら、その参照番号が巡回の見張りになる
+  // （recover の resolve は呼ぶたびに値を作るので、オブジェクト同一性では止まらない）。
+  const raw = get(dict, 'K');
+  const array = asArray(raw);
+  if (array) return [...array.items];
+  const k = await resolved(doc, raw);
+  if (k === null) return [];
+  const resolvedArray = asArray(k);
+  if (resolvedArray) return [...resolvedArray.items];
+  // 参照 1 個のときは、番号を残すために生の値を返す
+  return [raw ?? k];
 }
 
 /**
@@ -221,47 +263,58 @@ function kidsOf(doc: PDFDocument, dict: PDFDict): unknown[] {
  *
  * `/Pg` is inherited: an element without one uses its nearest ancestor's.
  */
-function walkElement(
-  doc: PDFDocument,
-  dict: PDFDict,
-  inheritedPg: PDFRef | undefined,
-  classMap: PDFDict | null,
-): StructElement | null {
-  const s = deref(doc, dict.get(PDFName.of('S')));
-  if (!(s instanceof PDFName)) return null;
+async function walkElement(
+  doc: PdfDocument,
+  encrypted: boolean,
+  dict: CosDict,
+  inheritedPg: CosRef | undefined,
+  classMap: CosDict | null,
+  /**
+   * この要素までに通った参照番号（**この枝の祖先だけ**）。
+   *
+   * 🔴 pdf-lib 版には巡回の見張りが無く、`/K` が循環している文書では
+   * 再帰が止まらなかった。番号で見張るのは、recover の `resolve` が呼ぶたびに
+   * 値を作るのでオブジェクト同一性では止まらないためである（verify で同じ轍）。
+   * 木全体ではなく**枝**で見張るので、非循環の文書では出力が 1 バイトも変わらない。
+   */
+  ancestors: ReadonlySet<number>,
+  depth: number,
+): Promise<StructElement | null> {
+  if (depth > MAX_STRUCT_DEPTH) return null;
+  const role = nameOf(await resolved(doc, get(dict, 'S')));
+  if (role === null) return null;
 
-  const pgValue = dict.get(PDFName.of('Pg'));
-  const pg = pgValue instanceof PDFRef ? pgValue : inheritedPg;
+  const pg = asRef(get(dict, 'Pg')) ?? inheritedPg;
 
   const element: StructElement = {
-    role: s.decodeText(),
-    actualText: textEntry(doc, dict, 'ActualText'),
-    alt: textEntry(doc, dict, 'Alt'),
-    lang: textEntry(doc, dict, 'Lang'),
+    role,
+    actualText: await textEntry(doc, encrypted, dict, 'ActualText'),
+    alt: await textEntry(doc, encrypted, dict, 'Alt'),
+    lang: await textEntry(doc, encrypted, dict, 'Lang'),
     contentRefs: [],
     children: [],
-    layoutBBox: layoutBBoxOf(doc, dict, classMap),
+    layoutBBox: await layoutBBoxOf(doc, dict, classMap),
   };
 
-  for (const kid of kidsOf(doc, dict)) {
+  for (const kid of await kidsOf(doc, dict)) {
     // An MCID written directly, on this element's page.
-    if (kid instanceof PDFNumber) {
-      if (pg) element.contentRefs.push({ pageObjNum: pg.objectNumber, mcid: kid.asNumber() });
+    const direct = numberOf(kid);
+    if (direct !== null) {
+      if (pg) element.contentRefs.push({ pageObjNum: pg.objectNumber, mcid: direct });
       continue;
     }
 
-    const resolved = deref(doc, kid);
-    if (!(resolved instanceof PDFDict)) continue;
+    const kidRef = asRef(kid);
+    const child = asDict(await resolved(doc, kid));
+    if (!child) continue;
 
-    const type = resolved.get(PDFName.of('Type'));
-    const typeName = type instanceof PDFName ? type.decodeText() : null;
+    const typeName = nameOf(get(child, 'Type'));
 
     if (typeName === 'MCR') {
-      const mcid = deref(doc, resolved.get(PDFName.of('MCID')));
-      const mcrPgValue = resolved.get(PDFName.of('Pg'));
-      const mcrPg = mcrPgValue instanceof PDFRef ? mcrPgValue : pg;
-      if (mcid instanceof PDFNumber && mcrPg) {
-        element.contentRefs.push({ pageObjNum: mcrPg.objectNumber, mcid: mcid.asNumber() });
+      const mcid = numberOf(await resolved(doc, get(child, 'MCID')));
+      const mcrPg = asRef(get(child, 'Pg')) ?? pg;
+      if (mcid !== null && mcrPg) {
+        element.contentRefs.push({ pageObjNum: mcrPg.objectNumber, mcid });
       }
       continue;
     }
@@ -272,9 +325,11 @@ function walkElement(
     // Anything with an /S is a child structure element. Checking /S rather than
     // Type == StructElem on purpose: Type is optional in practice and plenty of
     // producers omit it.
-    if (resolved.get(PDFName.of('S'))) {
-      const child = walkElement(doc, resolved, pg, classMap);
-      if (child) element.children.push(child);
+    if (get(child, 'S') !== undefined) {
+      if (kidRef && ancestors.has(kidRef.objectNumber)) continue; // 循環（§14.7.2 は木を求める）
+      const next = kidRef ? new Set(ancestors).add(kidRef.objectNumber) : ancestors;
+      const walked = await walkElement(doc, encrypted, child, pg, classMap, next, depth + 1);
+      if (walked) element.children.push(walked);
     }
   }
 
@@ -291,20 +346,25 @@ function walkElement(
  * Note this reads only `StructTreeRoot`; it needs neither `/ParentTree` nor
  * `/StructParents`, which pdfjs's per-page `getStructTree()` does require.
  */
-export function walkStructTree(doc: PDFDocument): StructElement[] | null {
-  const root = deref(doc, doc.catalog.get(PDFName.of('StructTreeRoot')));
-  if (!(root instanceof PDFDict)) return null;
+export async function walkStructTree(
+  doc: PdfDocument,
+  encrypted: boolean,
+): Promise<StructElement[] | null> {
+  const catalog = asDict(await doc.getCatalog().catch(() => null));
+  const root = asDict(await resolved(doc, get(catalog, 'StructTreeRoot')));
+  if (!root) return null;
 
   // §14.7.6.2: attribute classes named by an element's /C are resolved through
   // the structure tree root's /ClassMap, so it has to be read before the walk.
-  const classMapValue = deref(doc, root.get(PDFName.of('ClassMap')));
-  const classMap = classMapValue instanceof PDFDict ? classMapValue : null;
+  const classMap = asDict(await resolved(doc, get(root, 'ClassMap')));
 
   const elements: StructElement[] = [];
-  for (const kid of kidsOf(doc, root)) {
-    const resolved = deref(doc, kid);
-    if (resolved instanceof PDFDict && resolved.get(PDFName.of('S'))) {
-      const element = walkElement(doc, resolved, undefined, classMap);
+  for (const kid of await kidsOf(doc, root)) {
+    const kidRef = asRef(kid);
+    const child = asDict(await resolved(doc, kid));
+    if (child && get(child, 'S') !== undefined) {
+      const seed = new Set<number>(kidRef ? [kidRef.objectNumber] : []);
+      const element = await walkElement(doc, encrypted, child, undefined, classMap, seed, 0);
       if (element) elements.push(element);
     }
   }

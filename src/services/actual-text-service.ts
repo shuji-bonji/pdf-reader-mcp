@@ -33,6 +33,7 @@
  * behaviour; attaching replacement text to the wrong glyphs would be new damage.
  */
 
+import type { PdfDocument } from 'normativepdf';
 import type { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { scanPageMarkedContent } from './content-stream-service.js';
 import type { StructElement } from './struct-tree-walker.js';
@@ -76,9 +77,12 @@ interface RawItem {
  * replaced. Keyed by pdfjs's marked-content id (`p7R_mc3`) so no page bookkeeping
  * is needed at lookup time.
  */
-export function buildStructActualTextMap(doc: PdfLibDocument): Map<string, string> {
+export async function buildStructActualTextMap(
+  doc: PdfDocument,
+  encrypted: boolean,
+): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  const roots = walkStructTree(doc);
+  const roots = await walkStructTree(doc, encrypted);
   if (!roots) return map;
 
   const visit = (element: StructElement): void => {

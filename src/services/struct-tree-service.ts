@@ -37,7 +37,8 @@
  * text from pdfjs.
  */
 
-import { PDFDict, PDFHexString, PDFName, PDFString } from 'pdf-lib';
+import { asDict, boolOf, textOf as cosTextOf, get, resolved } from '@normativepdf/recover';
+import { type CosDict, type PdfDocument, readPageTree } from 'normativepdf';
 import type {
   ElementBox,
   ExtractedTable,
@@ -61,11 +62,10 @@ import {
   type RunBox,
   resolveLineBreaks,
 } from './pdfjs-service.js';
-import { loadWithPdfLib } from './pdflib-service.js';
+import { openPdf, pageBox } from './recover-service.js';
 import {
   type ContentRef,
   collectContentRefs,
-  deref,
   pdfjsMarkedContentId,
   type StructElement,
   walkStructTree,
@@ -545,13 +545,40 @@ export function analyzeTagsFromStructTree(
  * Uses the document's `StructTreeRoot` (pdf-lib), not per-page trees — see
  * `analyzeTagsFromStructTree`.
  */
+/**
+ * `/MarkInfo` `/Marked`（§14.7.1）。**true と書かれているかだけ**を見る。
+ *
+ * pdf-lib 版は `String(deref(...)) === 'true'` だった。`PDFBool` の文字列表現に
+ * 頼っていたので、`/Marked` が数や名前でも `"true"` と綴られていれば通っていた。
+ * ここは真理値として読む —— 条文が求めているのは boolean である。
+ */
+/**
+ * `/Pg` が持つページのオブジェクト番号 → 1 始まりのページ番号。
+ *
+ * 頁ツリーが歩けない文書では**空の対応表**を返す。pdf-lib 版の `getPages()` は
+ * そこで投げていたので、呼び出し側は例外で気づいていた。ここは空で返るので、
+ * `/Pg` はどのページにも当たらない —— 間違ったページに当てるよりよい。
+ */
+async function pageNumberByObjectNumber(doc: PdfDocument): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  const tree = await readPageTree(doc).catch(() => null);
+  if (!tree) return map;
+  for (const page of tree.pages) {
+    if (page.ref) map.set(page.ref.objectNumber, page.index + 1);
+  }
+  return map;
+}
+
+async function isMarked(doc: PdfDocument, catalog: CosDict | null): Promise<boolean> {
+  const markInfo = asDict(await resolved(doc, get(catalog, 'MarkInfo')));
+  return boolOf(await resolved(doc, get(markInfo, 'Marked'))) === true;
+}
+
 export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
-  const doc = await loadWithPdfLib(filePath);
-  const markInfo = deref(doc, doc.catalog.get(PDFName.of('MarkInfo')));
-  const marked =
-    markInfo instanceof PDFDict ? deref(doc, markInfo.get(PDFName.of('Marked'))) : undefined;
-  const isTagged = String(marked) === 'true';
-  return analyzeTagsFromStructTree(walkStructTree(doc), isTagged);
+  const { doc, scope } = await openPdf(filePath);
+  const catalog = asDict(await doc.getCatalog().catch(() => null));
+  const isTagged = await isMarked(doc, catalog);
+  return analyzeTagsFromStructTree(await walkStructTree(doc, scope.encrypted), isTagged);
 }
 
 /**
@@ -573,14 +600,12 @@ export async function extractStructuredText(
   filePath: string,
   options: { pages?: string; roles?: string[]; includeBbox?: boolean } = {},
 ): Promise<StructuredTextResult> {
-  const libDoc = await loadWithPdfLib(filePath);
+  const { doc: libDoc, scope } = await openPdf(filePath);
 
-  const markInfo = deref(libDoc, libDoc.catalog.get(PDFName.of('MarkInfo')));
-  const marked =
-    markInfo instanceof PDFDict ? deref(libDoc, markInfo.get(PDFName.of('Marked'))) : undefined;
-  const isTagged = String(marked) === 'true';
+  const catalog = asDict(await libDoc.getCatalog().catch(() => null));
+  const isTagged = await isMarked(libDoc, catalog);
 
-  const roots = walkStructTree(libDoc);
+  const roots = await walkStructTree(libDoc, scope.encrypted);
 
   if (!isTagged || !roots || roots.length === 0) {
     return {
@@ -596,22 +621,14 @@ export async function extractStructuredText(
     };
   }
 
-  const langEntry = deref(libDoc, libDoc.catalog.get(PDFName.of('Lang')));
-  const lang =
-    langEntry instanceof PDFString || langEntry instanceof PDFHexString
-      ? langEntry.decodeText()
-      : null;
+  const lang = cosTextOf(await resolved(libDoc, get(catalog, 'Lang')));
 
   const jsDoc = await loadDocument(filePath);
   try {
     const idToText = await buildDocumentIdToTextMap(jsDoc);
 
     // Map page object numbers (what /Pg holds) to 1-based page numbers.
-    const pageNumByObjNum = new Map<number, number>();
-    const pages = libDoc.getPages();
-    for (let i = 0; i < pages.length; i++) {
-      pageNumByObjNum.set(pages[i].ref.objectNumber, i + 1);
-    }
+    const pageNumByObjNum = await pageNumberByObjectNumber(libDoc);
 
     const pageFilter = options.pages
       ? resolvePageNumbers(options.pages, jsDoc.numPages)
@@ -620,24 +637,15 @@ export async function extractStructuredText(
     const idToBox = options.includeBbox ? await buildDocumentIdToBoxMap(jsDoc) : null;
 
     // Page boxes, so a declared /BBox can be checked against the page it claims
-    // to be on. pdf-lib's getCropBox already falls back to the media box when
-    // there is no crop box, which is the inheritance rule of §7.7.3.3 — same
-    // treatment as locate_objects gives, so the two stages agree on "the page".
+    // to be on. `pageBox` は locate_objects と**同じ 1 本**で、CropBox → MediaBox の
+    // 落ち方（§7.7.3.4）まで揃えてある。2 つの段が「そのページ」で食い違わないため。
     const pageBoxByNumber = new Map<number, ObjectRect>();
     if (options.includeBbox) {
-      for (let i = 0; i < pages.length; i++) {
-        try {
-          const box = pages[i].getCropBox();
-          pageBoxByNumber.set(i + 1, {
-            x1: box.x,
-            y1: box.y,
-            x2: box.x + box.width,
-            y2: box.y + box.height,
-          });
-        } catch {
-          // A page whose box cannot be read simply goes unchecked; the
-          // declaration is still reported, just without that cross-check.
-        }
+      const tree = await readPageTree(libDoc).catch(() => null);
+      for (const page of tree?.pages ?? []) {
+        // 箱の読めないページは照合しないだけ。宣言そのものは報告する。
+        const box = await pageBox(libDoc, page);
+        if (box) pageBoxByNumber.set(page.index + 1, box);
       }
     }
 
@@ -746,14 +754,12 @@ export async function extractTables(
   filePath: string,
   pages?: string,
 ): Promise<TablesExtractionResult> {
-  const libDoc = await loadWithPdfLib(filePath);
+  const { doc: libDoc, scope } = await openPdf(filePath);
 
-  const markInfo = deref(libDoc, libDoc.catalog.get(PDFName.of('MarkInfo')));
-  const marked =
-    markInfo instanceof PDFDict ? deref(libDoc, markInfo.get(PDFName.of('Marked'))) : undefined;
-  const isTagged = String(marked) === 'true';
+  const catalog = asDict(await libDoc.getCatalog().catch(() => null));
+  const isTagged = await isMarked(libDoc, catalog);
 
-  const roots = walkStructTree(libDoc);
+  const roots = await walkStructTree(libDoc, scope.encrypted);
 
   if (!isTagged || !roots || roots.length === 0) {
     return {
@@ -773,11 +779,7 @@ export async function extractTables(
     const idToText = await buildDocumentIdToTextMap(jsDoc);
 
     // Map page object numbers (what /Pg holds) to 1-based page numbers.
-    const pageNumByObjNum = new Map<number, number>();
-    const libPages = libDoc.getPages();
-    for (let i = 0; i < libPages.length; i++) {
-      pageNumByObjNum.set(libPages[i].ref.objectNumber, i + 1);
-    }
+    const pageNumByObjNum = await pageNumberByObjectNumber(libDoc);
 
     const pageNumbers = resolvePageNumbers(pages, jsDoc.numPages);
     const wanted = pages ? new Set(pageNumbers) : undefined;

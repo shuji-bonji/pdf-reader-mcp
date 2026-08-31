@@ -15,7 +15,16 @@
  * 握り潰しを直すのは A/B を採ったあとの別の段に置く（§L1 の後）。
  */
 
-import { type DocumentScope, type OpenedDocument, openDocument } from '@normativepdf/recover';
+import {
+  asArray,
+  type DocumentScope,
+  numberOf,
+  type OpenedDocument,
+  openDocument,
+  resolved,
+} from '@normativepdf/recover';
+import { type CosObject, inheritedAttribute, type PageEntry, type PdfDocument } from 'normativepdf';
+import type { ObjectRect } from '../types.js';
 import { readPdfFile } from '../utils/pdf-helpers.js';
 
 export type { DocumentScope, OpenedDocument };
@@ -65,4 +74,46 @@ export async function detectEncryption(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/* ---------------- ページの箱（locate_objects と extract_structured_text が共有する） ---------------- */
+
+export async function numberArray(
+  doc: PdfDocument,
+  value: CosObject | undefined,
+): Promise<number[] | null> {
+  const array = asArray(await resolved(doc, value));
+  if (!array) return null;
+  const numbers: number[] = [];
+  for (const item of array.items) {
+    const n = numberOf(await resolved(doc, item));
+    if (n === null) return null;
+    numbers.push(n);
+  }
+  return numbers;
+}
+
+/**
+ * ページの矩形。**pdf-lib の `getCropBox()` と同じ順で決める**（A/B のため）:
+ *
+ *   1. 継承込みの `/CropBox` が 4 要素の数の配列なら、それ
+ *   2. 配列でない・無いなら `/MediaBox` へ落ちる
+ *   3. `/CropBox` が配列だが 4 要素でない、または数でない要素を含むなら、
+ *      pdf-lib は `asRectangle()` が投げて **`/MediaBox` へは落ちない**。矩形は付かない
+ *
+ * 🔴 正規化しない。pdf-lib の `asRectangle` は `{x: llx, width: urx - llx}` を返し、
+ * 呼び出し側が `x2 = x + width` に戻すので、逆順の矩形は逆順のまま出ていた。
+ */
+export async function pageBox(doc: PdfDocument, page: PageEntry): Promise<ObjectRect | null> {
+  const crop = await resolved(doc, inheritedAttribute(page, 'CropBox'));
+  const cropArray = asArray(crop);
+  if (cropArray) {
+    const values = await numberArray(doc, crop ?? undefined);
+    // 4 要素の数でなければ pdf-lib は投げる —— MediaBox へは落ちない
+    if (values === null || values.length !== 4) return null;
+    return { x1: values[0], y1: values[1], x2: values[2], y2: values[3] };
+  }
+  const media = await numberArray(doc, inheritedAttribute(page, 'MediaBox'));
+  if (media === null || media.length !== 4) return null;
+  return { x1: media[0], y1: media[1], x2: media[2], y2: media[3] };
 }
