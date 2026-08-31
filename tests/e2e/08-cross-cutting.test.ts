@@ -4,13 +4,14 @@
  * EH-1〜EH-6: エラーハンドリング & セキュリティ
  */
 import { describe, expect, it } from 'vitest';
+import { analyzeFonts } from '../../src/services/font-service.js';
 import {
   extractText,
   getMetadata,
   loadDocument,
   searchText,
 } from '../../src/services/pdfjs-service.js';
-import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
+import { analyzeStructure } from '../../src/services/structure-service.js';
 import { validateMetadata } from '../../src/services/validation-service.js';
 import { validatePdfPath } from '../../src/utils/error-handler.js';
 import { parsePageRange } from '../../src/utils/pdf-helpers.js';
@@ -144,7 +145,7 @@ describe('08 - cross-service integration', () => {
 
     // Tier 2
     await analyzeStructure(FIXTURES.simple);
-    await analyzeFontsWithPdfLib(FIXTURES.simple);
+    await analyzeFonts(FIXTURES.simple);
 
     // Tier 3
     await validateMetadata(FIXTURES.simple);

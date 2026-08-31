@@ -219,6 +219,11 @@ export interface PdfSummary {
 /** Catalog entry info */
 export interface CatalogEntry {
   key: string;
+  /**
+   * COS の型（ISO 32000-2 §7.3）: `dict` / `stream` / `array` / `name` /
+   * `string` / `integer` / `real` / `boolean` / `null` / `ref`。
+   * 参照は解決しないので、`ref` は「この鍵には参照が書いてある」を意味する。
+   */
   type: string;
   value: string;
 }
@@ -231,9 +236,29 @@ export interface PageTreeInfo {
 
 /** Object statistics */
 export interface ObjectStats {
+  /** 読めた間接オブジェクトの数。読めなかった分は `unreadable` が持つ。 */
   totalObjects: number;
   streamCount: number;
+  /**
+   * COS の型（§7.3）ごとの数。10 種の `kind` で数える。
+   *
+   * 🔴 §7.3 の型と辞書の `/Type` は別の問いなので、`/Type` は `byDocType` に
+   * 分けてある。1 つの数に畳むと「dict が 51,237 個」と「Page が 13,001 個」が
+   * 同じ欄を取り合う。
+   */
   byType: Record<string, number>;
+  /**
+   * 辞書の `/Type` ごとの数（`Catalog` / `Pages` / `Page` / `Font` …）。
+   * ストリームの辞書も含める（`ObjStm` / `XRef` / `Metadata` がここに出る）。
+   */
+  byDocType: Record<string, number>;
+  /**
+   * 相互参照表に載っているが**読めなかった**オブジェクトの数。
+   *
+   * 🔴 `totalObjects` に足さない。足すと「読めた数」でも「表に載っている数」でも
+   * ない 3 つ目の数になる。0 は「全部読めた」という観測結果である。
+   */
+  unreadable: number;
 }
 
 /** inspect_structure output */

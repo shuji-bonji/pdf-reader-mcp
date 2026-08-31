@@ -74,7 +74,6 @@
     "@modelcontextprotocol/server": "^2.0.0",
     "@normativepdf/recover": "^0.1.2",
     "normativepdf": "0.9.0",
-    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.9.155",
     "zod": "^4.2.0"
   },
@@ -82,6 +81,7 @@
     "@biomejs/biome": "2.5.4",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/node": "^22.10.0",
+    "pdf-lib": "^1.17.1",
     "tsx": "^4.19.2",
     "typescript": "^7.0.2",
     "vitest": "^3.0.0"

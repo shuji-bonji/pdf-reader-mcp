@@ -7,8 +7,9 @@
  */
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { analyzeFontsWithPdfLib, analyzeStructure } from '../../src/services/pdflib-service.js';
+import { analyzeFonts } from '../../src/services/font-service.js';
 import { extractTables } from '../../src/services/struct-tree-service.js';
+import { analyzeStructure } from '../../src/services/structure-service.js';
 import type { TablesExtractionResult } from '../../src/types.js';
 import { formatTablesMarkdown } from '../../src/utils/formatter.js';
 import { A4_SIZE, EXPECTED_METADATA, FONT_FAMILIES } from './constants.js';
@@ -32,6 +33,63 @@ describe('04 - inspect_structure', () => {
     expect(result.objectStats.totalObjects).toBeGreaterThan(0);
     expect(result.objectStats.streamCount).toBeGreaterThanOrEqual(0);
     expect(typeof result.objectStats.byType).toBe('object');
+  });
+
+  // IS-2b: byType の語彙は ISO 32000-2 §7.3 の型である
+  //
+  // 🔴 0.14.0 まではここに pdf-lib の内部クラス名（PDFCatalog / PDFPageLeaf /
+  // PDFRawStream / PDFNumber …）が出ていた。S4 で pdf-lib を撤去したときに
+  // 語彙が変わったのに、この試験は `typeof … === 'object'` しか見ておらず
+  // 1 つも落ちなかった。何を出しても通る検査は何も固定していない。
+  const COS_KINDS = new Set([
+    'boolean',
+    'integer',
+    'real',
+    'string',
+    'name',
+    'array',
+    'dict',
+    'stream',
+    'ref',
+    'null',
+  ]);
+
+  it('IS-2b: byType keys are the COS types of §7.3, not library class names', async () => {
+    const result = await analyzeStructure(FIXTURES.simple);
+    const kinds = Object.keys(result.objectStats.byType);
+    expect(kinds.length).toBeGreaterThan(0);
+    for (const kind of kinds) expect(COS_KINDS.has(kind)).toBe(true);
+    // 撤去したライブラリの名前が戻ってこないことを名指しで止める。
+    expect(kinds.some((k) => k.startsWith('PDF'))).toBe(false);
+  });
+
+  // IS-2c: /Type は別の欄に出る（pdf-lib の PDFCatalog などが運んでいた情報）
+  it('IS-2c: byDocType counts the /Type of dictionaries', async () => {
+    const result = await analyzeStructure(FIXTURES.simple);
+    // 目録は必ずある。§7.7.2 Table 29: /Type は Catalog。
+    expect(result.objectStats.byDocType.Catalog).toBe(1);
+    expect(result.objectStats.byDocType.Pages).toBeGreaterThanOrEqual(1);
+    expect(result.objectStats.byDocType.Page).toBeGreaterThanOrEqual(1);
+  });
+
+  // IS-2d: 読めなかったオブジェクトは総数に混ぜない
+  it('IS-2d: unreadable is counted separately from totalObjects', async () => {
+    const result = await analyzeStructure(FIXTURES.simple);
+    // 健全な検体なので 0。🔴 これは「観測して 0 だった」であって
+    // 「観測していない」ではない —— 欄そのものが在ることを固定する。
+    expect(result.objectStats.unreadable).toBe(0);
+    expect(typeof result.objectStats.unreadable).toBe('number');
+  });
+
+  // IS-2e: catalog[].type も §7.3 の型である
+  it('IS-2e: catalog entry types are COS types', async () => {
+    const result = await analyzeStructure(FIXTURES.simple);
+    expect(result.catalog.length).toBeGreaterThan(0);
+    for (const entry of result.catalog) expect(COS_KINDS.has(entry.type)).toBe(true);
+    // /Pages は間接参照で書く（§7.7.2）。参照は解決せずに ref と言う。
+    const pages = result.catalog.find((e) => e.key === 'Pages');
+    expect(pages?.type).toBe('ref');
+    expect(pages?.value).toMatch(/^ref\(\d+\)$/);
   });
 
   // IS-3: pdfVersion 検出
@@ -104,14 +162,14 @@ describe('04 - inspect_structure', () => {
 describe('04 - inspect_fonts', () => {
   // IF-1: simple.pdf
   it('IF-1: simple.pdf has Helvetica font', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.simple);
+    const result = await analyzeFonts(FIXTURES.simple);
     const fontNames = [...result.fontMap.keys()];
     expect(fontNames.some((n) => n.includes(FONT_FAMILIES.helvetica))).toBe(true);
   });
 
   // IF-2: multi-font.pdf (3種以上)
   it('IF-2: multi-font.pdf has 3+ font families', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.multiFont);
+    const result = await analyzeFonts(FIXTURES.multiFont);
     expect(result.fontMap.size).toBeGreaterThanOrEqual(3);
 
     const fontNames = [...result.fontMap.keys()];
@@ -123,7 +181,7 @@ describe('04 - inspect_fonts', () => {
 
   // IF-3: フォントプロパティの正確性
   it('IF-3: font properties are valid', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.simple);
+    const result = await analyzeFonts(FIXTURES.simple);
     for (const [_name, font] of result.fontMap) {
       expect(typeof font.name).toBe('string');
       expect(typeof font.type).toBe('string');
@@ -136,16 +194,16 @@ describe('04 - inspect_fonts', () => {
 
   // IF-4: 全ページスキャン
   it('IF-4: pagesScanned equals total page count', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.simple);
+    const result = await analyzeFonts(FIXTURES.simple);
     expect(result.pagesScanned).toBe(EXPECTED_METADATA.simple.pageCount);
 
-    const result2 = await analyzeFontsWithPdfLib(FIXTURES.multiFont);
+    const result2 = await analyzeFonts(FIXTURES.multiFont);
     expect(result2.pagesScanned).toBe(EXPECTED_METADATA.multiFont.pageCount);
   });
 
   // IF-extra: multi-font の pagesUsed が正確
   it('IF-extra: multi-font.pdf font pagesUsed within range', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.multiFont);
+    const result = await analyzeFonts(FIXTURES.multiFont);
     const maxPage = EXPECTED_METADATA.multiFont.pageCount;
     for (const [_name, font] of result.fontMap) {
       for (const pageNum of font.pagesUsed) {
@@ -157,7 +215,7 @@ describe('04 - inspect_fonts', () => {
 
   // IF-extra: empty.pdf のフォント (フォントなしの可能性)
   it('IF-extra: empty.pdf has no fonts', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.empty);
+    const result = await analyzeFonts(FIXTURES.empty);
     expect(result.fontMap.size).toBe(0);
     expect(result.pagesScanned).toBe(EXPECTED_METADATA.empty.pageCount);
   });
@@ -178,7 +236,7 @@ describe('04 - inspect_fonts', () => {
 
   // IF-5: 埋め込み済み Type0 を embedded と判定する (High-1 の回帰)
   it('IF-5: embedded Type0 font is reported as embedded', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const result = await analyzeFonts(FIXTURES.cidFont);
     const font = [...result.fontMap.values()].find((f) => f.name.includes('NotoSansJP'));
 
     expect(font).toBeDefined();
@@ -190,7 +248,7 @@ describe('04 - inspect_fonts', () => {
   // IF-6: 非埋め込み Type0 は embedded と判定しない
   //       （「Type0 なら常に true」という過剰修正を防ぐ）
   it('IF-6: non-embedded Type0 font is not reported as embedded', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const result = await analyzeFonts(FIXTURES.cidFont);
     const font = [...result.fontMap.values()].find((f) => f.name.includes('KozMinPr6N'));
 
     expect(font).toBeDefined();
@@ -201,7 +259,7 @@ describe('04 - inspect_fonts', () => {
 
   // IF-7: DescendantFonts を欠く不正な Type0 は埋め込みを主張しない
   it('IF-7: malformed Type0 without DescendantFonts is not embedded', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const result = await analyzeFonts(FIXTURES.cidFont);
     const font = [...result.fontMap.values()].find((f) => f.name.includes('BrokenCID'));
 
     expect(font).toBeDefined();
@@ -210,7 +268,7 @@ describe('04 - inspect_fonts', () => {
 
   // IF-8: 単純フォントの経路は Type0 対応で壊れていない
   it('IF-8: simple (non-Type0) fonts still resolve their own FontDescriptor', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.cidFont);
+    const result = await analyzeFonts(FIXTURES.cidFont);
     const helv = [...result.fontMap.values()].find((f) => f.name.includes('Helvetica'));
 
     expect(helv).toBeDefined();
@@ -364,7 +422,7 @@ describeIfLinearized('04 - Linearized PDF (Issue #1 regression)', () => {
   });
 
   it('analyzeFontsWithPdfLib does not throw on a linearized PDF', async () => {
-    const result = await analyzeFontsWithPdfLib(FIXTURES.linearized);
+    const result = await analyzeFonts(FIXTURES.linearized);
     // We only require that the call resolves — fontMap may be empty or
     // populated depending on whether pdf-lib could traverse the page tree.
     expect(result.fontMap).toBeInstanceOf(Map);

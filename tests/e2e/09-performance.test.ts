@@ -4,17 +4,15 @@
  * PF-1〜PF-9: 各サービスのパフォーマンス計測 & 回帰チェック
  */
 import { afterAll, describe, it } from 'vitest';
+import { analyzeFonts } from '../../src/services/font-service.js';
 import {
   countImages,
   extractText,
   getMetadata,
   searchText,
 } from '../../src/services/pdfjs-service.js';
-import {
-  analyzeFontsWithPdfLib,
-  analyzeSignatures,
-  analyzeStructure,
-} from '../../src/services/pdflib-service.js';
+import { analyzeSignatures } from '../../src/services/signature-service.js';
+import { analyzeStructure } from '../../src/services/structure-service.js';
 import {
   compareStructure,
   validateMetadata,
@@ -69,7 +67,7 @@ describe('09 - Performance Baseline', () => {
   it('PF-5: analyzeFonts completes within threshold', async () => {
     await measureAndCheck(
       'analyzeFonts',
-      () => analyzeFontsWithPdfLib(FIXTURES.multiFont),
+      () => analyzeFonts(FIXTURES.multiFont),
       PERF_THRESHOLDS.analyzeFonts,
     );
   });

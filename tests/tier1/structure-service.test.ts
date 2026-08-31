@@ -1,9 +1,9 @@
 /**
- * Tests for pdflib-service.ts
+ * Tests for structure-service.ts
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolvePdfVersion } from '../../src/services/pdflib-service.js';
+import { resolvePdfVersion } from '../../src/services/structure-service.js';
 
 // D-8 regression: analyzeStructure returned the catalog's /Version whenever it
 // existed, ignoring the file header.

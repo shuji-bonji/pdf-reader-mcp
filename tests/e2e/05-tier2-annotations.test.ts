@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { analyzeAnnotations } from '../../src/services/pdfjs-service.js';
-import { analyzeSignatures } from '../../src/services/pdflib-service.js';
+import { analyzeSignatures } from '../../src/services/signature-service.js';
 import { analyzeTags } from '../../src/services/struct-tree-service.js';
 import { ANNOTATION_EXPECTATIONS } from './constants.js';
 import { FIXTURES } from './setup.js';

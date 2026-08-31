@@ -15,14 +15,15 @@ import type {
 } from '../types.js';
 import { PdfReaderError } from '../utils/error-handler.js';
 import { formatFileSize } from '../utils/formatter.js';
+import { analyzeFonts } from './font-service.js';
 import {
   analyzeTagsFromDoc,
   countImagesFromDoc,
   getMetadata,
   loadDocument,
 } from './pdfjs-service.js';
-import { analyzeFontsWithPdfLib, analyzeStructure } from './pdflib-service.js';
 import { half } from './reading-scope.js';
+import { analyzeStructure } from './structure-service.js';
 
 // ─── validate_tagged ─────────────────────────────────────
 
@@ -657,7 +658,7 @@ export async function compareStructure(
     half(async () => {
       const [structure, fonts, metadata] = await Promise.all([
         analyzeStructure(filePath1),
-        analyzeFontsWithPdfLib(filePath1),
+        analyzeFonts(filePath1),
         getMetadata(filePath1),
       ]);
       return { structure, fonts, metadata };
@@ -665,7 +666,7 @@ export async function compareStructure(
     half(async () => {
       const [structure, fonts, metadata] = await Promise.all([
         analyzeStructure(filePath2),
-        analyzeFontsWithPdfLib(filePath2),
+        analyzeFonts(filePath2),
         getMetadata(filePath2),
       ]);
       return { structure, fonts, metadata };

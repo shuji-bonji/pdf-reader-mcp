@@ -4,7 +4,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectFontsInput, InspectFontsSchema } from '../../schemas/tier2.js';
-import { analyzeFontsWithPdfLib } from '../../services/pdflib-service.js';
+import { analyzeFonts } from '../../services/font-service.js';
 import type { FontsAnalysis } from '../../types.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatFontsMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
@@ -37,7 +37,7 @@ Examples:
     },
     async (params: InspectFontsInput) => {
       try {
-        const result = await analyzeFontsWithPdfLib(params.file_path);
+        const result = await analyzeFonts(params.file_path);
         const fonts = Array.from(result.fontMap.values());
 
         const analysis: FontsAnalysis = {

@@ -4,7 +4,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectStructureInput, InspectStructureSchema } from '../../schemas/tier2.js';
-import { analyzeStructure } from '../../services/pdflib-service.js';
+import { analyzeStructure } from '../../services/structure-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatStructureMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 

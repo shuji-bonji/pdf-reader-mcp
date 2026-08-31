@@ -4,7 +4,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { ResponseFormat } from '../../constants.js';
 import { type InspectSignaturesInput, InspectSignaturesSchema } from '../../schemas/tier2.js';
-import { analyzeSignatures } from '../../services/pdflib-service.js';
+import { analyzeSignatures } from '../../services/signature-service.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
 import { formatSignaturesMarkdown, truncateIfNeeded } from '../../utils/formatter.js';
 

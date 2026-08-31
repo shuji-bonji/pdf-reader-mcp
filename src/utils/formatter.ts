@@ -228,9 +228,21 @@ export function formatStructureMarkdown(analysis: StructureAnalysis): string {
   lines.push('', '## Object Statistics', '');
   lines.push(`- **Total Objects**: ${analysis.objectStats.totalObjects}`);
   lines.push(`- **Streams**: ${analysis.objectStats.streamCount}`);
-  lines.push('- **By Type**:');
+  if (analysis.objectStats.unreadable > 0) {
+    // 読めなかった分は総数に混ぜない。混ぜると「何個あるか」の答えが
+    // 「何個読めたか」と区別できなくなる。
+    lines.push(`- **Unreadable**: ${analysis.objectStats.unreadable}`);
+  }
+  lines.push('- **By COS type** (ISO 32000-2 §7.3):');
   for (const [type, count] of Object.entries(analysis.objectStats.byType)) {
     lines.push(`  - ${type}: ${count}`);
+  }
+  const byDocType = Object.entries(analysis.objectStats.byDocType);
+  if (byDocType.length > 0) {
+    lines.push('- **By /Type**:');
+    for (const [type, count] of byDocType) {
+      lines.push(`  - /${type}: ${count}`);
+    }
   }
 
   // Flags

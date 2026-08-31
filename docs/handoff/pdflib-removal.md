@@ -5,12 +5,21 @@
 > verify = `mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`（+ `scope-in-output.md`）。
 >
 > 実測日 2026-08-29。reader **0.13.0** / normativepdf **0.9.0**。
-> **2026-08-31 追記: L0 / L1 / S1 / S2 / S3 が閉じた。§0 と §0.15 を先に読むこと。**
+> **2026-08-31 追記: pdf-lib の撤去は終わった（L0 / L1 / S1〜S4 / L3）。
+> §0 と §0.15 を先に読むこと。**
 
 ## 0. いまここ（2026-08-31）
 
-**L0 / L1 / S1 / S2 / S3 は終わった。次は S4。**
-`src` で pdf-lib を import しているのは **`services/pdflib-service.ts` 1 本だけ**になった。
+**L0 / L1 / S1 / S2 / S3 / S4 / L3 は終わった。残るは L4 の外側だけ。**
+
+```
+面 1 撤去      src の pdf-lib import 0 件 ✅
+               npm ls --omit=dev pdf-lib -> (empty) ✅
+面 2 A/B       6,090 件を全件帰属・未帰属 0・誤った pass 0 件 ✅
+面 3 独立オラクル  qpdf / pdftotext で 4 群を裏取り ✅
+残り           版を 0.15.0 として出す（破壊的変更あり）・site の再生成・
+               tier2 のツールに射程の申告が無いこと（§0.15 の借り）
+```
 
 > 別セッションで続けるなら、**§0.15「次のセッションが最初に読む所」から読む**。
 > 基準ファイル・残りの段・環境の落とし穴・面 3 の叩き方がそこに揃えてある。
@@ -24,7 +33,8 @@
 | S1 | `object-locator.ts`（`locate_objects`） | 差 91 件・全件帰属（json / markdown で同じ 91 件） |
 | S2 | `struct-tree-walker` / `struct-tree-service` / `actual-text-service` | 差 23 件・全件帰属（json / markdown で同じ 23 件） |
 | S3 | `content-stream-service` / `text-extractability-service`（+ `struct-tree-walker` の暗号の見方） | 差 95 件・全件帰属（json / markdown で同じ 95 件） |
-| S4 | `pdflib-service`（`loadWithPdfLib` を消す） | まだ |
+| S4 | `pdflib-service` を 3 つに割って recover へ（`structure` / `font` / `signature`） | 差 6,090 件・全件帰属（json / markdown で同じ 6,090 件） |
+| L3 | `pdf-lib` を devDependencies へ | `npm ls --omit=dev pdf-lib` が `(empty)` |
 
 各段で `openPdf`（recover）と `loadWithPdfLib`（pdf-lib）が**併存する**。
 移した段だけが recover で開き、残りは pdf-lib で開く。同じファイルを 2 回読むので
@@ -216,6 +226,124 @@ recover は回復方針で組み立てて読むので、観測が付くように
 `Promise.all` に戻した瞬間に壊れる経路なので、`tests/tier1/reading-scope.test.ts`
 を新しく置いて stub で 4 通りとも固定した。実ファイルの検体は **S4 以降の借り**である。
 
+### S4 の帰属（6,090 件・json / markdown で同じ 6,090 件）
+
+**pdf-lib は `src` から消えた。** `npm ls --omit=dev pdf-lib` は `(empty)` を返す。
+
+差が出た呼び出しは 5 種類で、`inspect_structure` 2,942（= 全検体）/
+`compare_structure#ref` 2,939 / 同 `#self` 194 / `inspect_fonts` 9 /
+`inspect_signatures` 6。**未帰属 0 件・誤った pass 0 件**（数え方は下の 5 節）。
+
+| 何が変わったか | 件数 |
+|---|---:|
+| 相互参照表に載っていないオブジェクトを数えなくなった | 3,308 |
+| `byType` の語彙が pdf-lib のクラス名から §7.3 の型になった | 2,936 |
+| `byDocType`（辞書の `/Type`）を新しく出した | 2,936 |
+| `unreadable`（読めなかった数）を新しく出した | 2,936 |
+| `catalog[].type` の語彙が §7.3 の型になった | 2,936 |
+| `compare_structure` の summary が上の変化に連動した | 792 |
+| `note` の文面が変わった | 10 |
+| pdf-lib が開けなかった文書を recover が読んだ | 10 |
+| `totalObjects` の一部が `unreadable` へ移った（合計は保存） | 8 |
+| 埋め込みの判定が変わった（pdf-lib の `has` の欠陥） | 7 |
+| エラーの `cause` が条文を名指しする文面になった | 6 |
+| 名前オブジェクトの `#xx` を §7.3.5 どおり復号した | 5 |
+| その他（`Page 1 Dimensions` 4 / ページ数 1 / 目録のエントリ数 2 / フォント数 2 / 切り詰め済み 2 / `Catalog Entries` 2 / `Total Fonts` 2） | 15 |
+
+> 1 件が複数の原因に当たるので、縦は 6,090 にならない。帰属は
+> `.golden/_scratch/attribute-s4.mjs` が 1 件ずつ判定して数えた ——
+> **要約を目で作らない**（作ると計器が出していた差を落とす）。
+> 未帰属を名指しで出すようにしてあり、最初は 3,145 件が未帰属だった
+> （`compare_structure` の raw の形を分類器が見ていなかった）。
+
+#### 1. 型名の語彙を pdf-lib のクラス名から §7.3 の型に替えた（2,936 件 ×2）
+
+`inspect_structure` は `obj.constructor.name` をそのまま出していたので、出力の
+語彙が `PDFCatalog` / `PDFPageTree` / `PDFPageLeaf` / `PDFRawStream` /
+`PDFInvalidObject` という **pdf-lib の内部クラス名**だった。撤去すると作れない。
+
+```
+byType     dict / stream / array / name / string / integer / real /
+           boolean / null / ref        ← §7.3 の 10 種（recover の kind の綴り）
+byDocType  Catalog / Pages / Page / Font / ObjStm / XRef / Metadata …
+unreadable 表に載っているが読めなかった数
+```
+
+pdf-lib の `PDFCatalog` などが運んでいたのは辞書の `/Type` そのものなので、
+それは `byDocType` に分けた。§7.3 の型と `/Type` は別の問いで、1 つの数に畳むと
+「dict が 51,237 個」と「Page が 13,001 個」が同じ欄を取り合う。
+`PDFNumber` が畳んでいた整数と実数も分けた（R-7.3.3-6 が区別を要求している）。
+
+🔴 **破壊的変更である。** site のツールリファレンスもここから生成されるので、
+0.15.0 として出すときに再生成が要る。
+
+#### 2. 相互参照表に載っていないオブジェクトを数えなくなった（3,308 件）
+
+pdf-lib の `enumerateIndirectObjects()` はファイル全体を走査するので、
+**表に載っていない `N 0 obj` まで拾っていた**。recover は表が名指ししたものを読む。
+
+🔴 面 3 で 7 検体を裏取りした。`qpdf --show-object=<N>` は **`null`** を返す
+——「そのオブジェクトは無い」と言う。recover の答えと一致する。
+
+> このとき照合スクリプトの側で 1 度誤報した。`qpdf` は WARNING を **stderr** に
+> 出すので、stdout と混ぜて `head -1` すると警告文を値として読む。
+> S1 の「辞書は 2 行目」と同じ形の間違いを、別の形でまた作った。
+
+S1 で `locate_objects` について出た「観測が増えた 379 件」（`/ObjStm` と `/XRef`
+**自身**）と向きが逆に見えるが、方針は 1 つである ——
+**相互参照表が名指ししたものを読む。**
+
+#### 3. 読めなかったオブジェクトが `unreadable` に移った（8 件）
+
+`stream` キーワードのあとに SPACE が入っている文書（§7.3.8.1 は CR LF か LF
+だけを許す。Isartor 6.1.7 t01 が測っている違反）などで、normativepdf が
+そのオブジェクトを受け取らない。pdf-lib は読んでいた。
+
+🔴 **合計は保存されている。** `isartor-6-1-7-t01-fail-a.pdf` で
+`totalObjects` 12 → 10、`unreadable` 0 → **2**。`render-page2-never-finishes.pdf`
+（pdf-lib が `PDFInvalidObject` として 1 件数えていた）も 10 → 9 + 1。
+数が減ったのではなく、**読めなかったことが別の欄で申告されるようになった。**
+
+#### 4. `note` を鍵が導けないときの文面に分けた（10 件）
+
+pdf-lib は `ignoreEncryption` で構造だけ歩けたので、鍵が導けない文書でも
+目録とページ数を返していた。recover は 1 つも読めない（ADR-0008）ので、
+そのままだと 3 つのツールが揃って **0 を返す** ——
+「ページが無い」「フォントが無い」「**署名フィールドが無い**」と読める。
+
+🔴 `inspect_signatures` は `'No AcroForm found in the document.'` と言っていた。
+**署名されている文書を「署名されていない」と報告する形**である（pdf-lib 版から
+そうだった）。3 関数とも「鍵が導けなかったので見に行けなかった」と言うようにした。
+
+#### 5. 数が動いた 6 呼び出し（誤った pass の数え直し）
+
+差 6,090 件のうち、**数そのものが動いたのは 6 呼び出しだけ**である。
+
+| 検体 / 呼び出し | 動いた数 | 申告 |
+|---|---|---|
+| `halves-fail-ok-password.pdf` / `inspect_structure` | ページ 1→0・目録 2→0・箱 1→0 | `unreadable: 6` と `note` |
+| 同 / `inspect_fonts` | フォント 1→0 | `note` |
+| `6-1-3-t02-fail-a.pdf` / `inspect_structure` | 箱 0→**1** | 増えた |
+| `7.16-t01-fail-a.pdf` / `inspect_structure` | 箱 0→**1** | 増えた |
+| 同 / `inspect_fonts` | フォント 0→**2**・埋め込み 0→**2** | 増えた |
+| `6-1-4-t01-fail-b.pdf` / `inspect_structure` | 目録 6→5 | 🔴 下記 |
+
+🔴 **最後の 1 件は、申告が出力に届いていない。** この検体は最後の相互参照節の
+subsection 見出しが `11   1`（空白 3 つ）で §7.5.4 に反する。recover は受け取らず
+回復方針で古い入口から入り、`scope.newestSectionUnreadable = true` /
+`recovered = true` と**申告している**。しかし `inspect_structure` は
+`ReadingScope` を出力に載せていない（0.14.0 で載せたのは `read_text` 系 5 ツール）。
+利用者からは「目録は 5 エントリ」としか見えず、最新リビジョンで足された
+`/PageMode` が消えたことは分からない。`qpdf` は寛容に読んで 6 エントリを返す。
+
+**これは S4 が作った欠陥ではない**（pdf-lib 版には `scope` 自体が無かった）が、
+**tier2 のツールに射程の申告が無い**ことがここで見えた。#26 の続きとして
+別の段に置く（§0.15「S4 が返さなかった借り」）。
+
+`isError` は S3 の 71 件から **61 件**に減った。減った 10 件は
+「pdf-lib が開けなかった文書を recover が読んだ」10 件とちょうど一致し、
+**増えた isError は 0 件**である。
+
 ### 🔴 その確認で計器の欠陥が 1 つ出た（直した）
 
 96 件が全部 `P 返した画像が変わった（枚数・バイト列）` に入っていた。
@@ -266,9 +394,15 @@ recover は回復方針で組み立てて読むので、観測が付くように
    どれも device_bash の VM にある（`mutool` と `verapdf` は無い）。
    立たないツール（`inspect_tags` / `validate_tagged` など）は「立たない」と書く
 3. **pdfjs と pdf-lib の切り分け** → 下の §0.1 に実測を置いた
-4. **S4 の前**: `analyzeSignatures` の答えを reader が返すのか verify に委ねるのか（§0.15）
-5. **コアの穴 2 つ**: `/LZWDecode` の未実装と、`inflate` が ADLER32 の後の
-   余りバイトを拒むこと。reader で埋める場所ではない（§0.15「S3 が返さなかった借り」）
+4. ~~`analyzeSignatures` を reader が返すのか verify に委ねるのか~~ → **reader が返す**。
+   ツールの description が前から「フィールドの構造だけを見る。暗号的検証はしない」と
+   書いており、family の切り分けは既に決まっていた。読む範囲も pdf-lib と同じ
+   「AcroForm の `/Fields` から `/Kids` を降りる」に揃えてある
+   （verify の `collectFieldNames` は `/FT /Sig` を数え上げる**別の問い**で、
+   フォームに繋がっていない孤児まで拾う）
+5. ~~`inspect_structure` の型名の語彙~~ → **§7.3 の型 + `/Type` の内訳**（§0「S4 の帰属」1 節）
+6. **コアの穴 2 つ**: `/LZWDecode` の未実装と、`inflate` が ADLER32 の後の
+   余りバイトを拒むこと。reader で埋める場所ではない（§0.15 の借り）
 
 ### 0.1 pdf-lib に届くのは 19 ツール中 18（import グラフの実測）
 
@@ -286,48 +420,54 @@ reader が pdf-lib から import している記号は **14 種**で、うち 3 
 | `PDFPageLeaf` | `enumerateDicts` + `get` |
 | `PDFDocument` | `openDocument` の戻り |
 
-### 0.15 次のセッションが最初に読む所（S4 から始める）
+### 0.15 次のセッションが最初に読む所（撤去は終わった）
 
 ```
-基準       .golden/json-S3.json / .golden/md-S3.json  ← S4 はここと比べる
+基準       .golden/json-S4b.json / .golden/md-S4.json  ← 次の変更はここと比べる
            （.golden/json-0.14.0.json は撤去前の原点。消さない）
-残り       S4 pdflib-service(562)・loadWithPdfLib を消す
-           L3 pdf-lib を devDependencies へ / L4 受入 3 面
+残り       版を 0.15.0 として出す（破壊的変更あり）→ site の再生成
+           下の「S4 が返さなかった借り」
 ```
 
-#### S4 の対象（S3 のあとの実測）
+#### いまの形（S4 のあとの実測）
 
-`src` で pdf-lib を import しているのは **`services/pdflib-service.ts` 1 本だけ**である。
-そこから出ている公開関数のうち、まだ呼ばれているのは 3 つ。
+`src` に pdf-lib は 1 行も無い。`tests/fixtures/` の検体生成 2 本だけが使うので
+`devDependencies` に落としてある（`npm ls --omit=dev pdf-lib` は `(empty)`）。
 
-| 関数 | 呼び出し元 |
+| 元 `pdflib-service.ts` の関数 | 移した先 |
 |---|---|
-| `analyzeStructure` | `tools/tier2/inspect-structure.ts` / `services/validation-service.ts` |
-| `analyzeSignatures` | `tools/tier2/inspect-signatures.ts` |
-| `analyzeFontsWithPdfLib` | `tools/tier2/inspect-fonts.ts` / `services/validation-service.ts` |
+| `analyzeStructure` / `resolvePdfVersion` | `services/structure-service.ts` |
+| `analyzeFontsWithPdfLib` → `analyzeFonts` | `services/font-service.ts` |
+| `analyzeSignatures` | `services/signature-service.ts` |
+| `loadWithPdfLib` / `loadWithPdfLibFromData` / `detectEncryption` | 消えた（`recover-service.ts` の `openPdf` へ） |
 
-`loadWithPdfLib` / `loadWithPdfLibFromData` / `detectEncryption` /
-`resolvePdfVersion` は**このファイルの中からしか呼ばれていない**。
+#### 🔴 0.15.0 は破壊的変更である
 
-🔴 `analyzeSignatures` は pdf-verify-mcp が同じ問いを別の実装で持っている。
-**移す前に、どちらの答えを reader が返すのかを決めること**（`inspect_signatures` は
-「署名がある」までを言い、有効性は verify が言う、という切り分けが family にある）。
+`inspect_structure` の型名の語彙が変わった（§0「S4 の帰属」1 節）。
+`objectStats` に `byDocType` と `unreadable` が増え、`catalog[].type` の綴りも
+変わる。**site のツールリファレンスはここから生成される**ので、
+出す前に reader で `npm run build` してから再生成すること
+（[[pdf-agent-stack-site-reference]] の轍）。
 
-#### S3 が返さなかった借り
+#### S4 が返さなかった借り
 
-1. **`@normativepdf` が `/LZWDecode`（§7.4.4）を持っていない。**
-   `filter/decode.js` にあるのは `FlateDecode` だけである。PDF/A の禁止フィルタの
-   試験ファイル 2 件で観測が減った（§0 の S3 帰属 4）
-2. **`inflate` が ADLER32 の後の余りバイトを拒む。**
-   `/Length` が `endstream` の前の改行まで数えている文書がそれに当たる。
-   pdf-lib と node の `zlib` は余りを無視して展開する。
-   「読めたところまで返して、余りを申告する」に変えられるかは normativepdf の判断
-3. **#26 の混ざった 2 通り（ok/fail・fail/ok）を出す検体が無い。**
-   規約は `tests/tier1/reading-scope.test.ts` が stub で押さえてある。
-   実ファイルの検体は借りのまま（§0 の S3 帰属 5）
-4. **`unresolvedReason: 'encrypted'` を出す検体が無くなった。**
-   鍵が導けない文書は pdfjs も開けないので、`searchText` がそこまで進まない。
-   経路は残してある（pdfjs と recover が暗号方式で食い違えば出る）が、測れていない
+1. 🔴 **tier2 のツールに射程（`ReadingScope`）の申告が無い。**
+   0.14.0 で載せたのは `read_text` 系 5 ツールだけである。`inspect_structure` は
+   recover が `newestSectionUnreadable` / `recovered` を申告していても出力に
+   載せないので、**回復方針で古いリビジョンを読んだことが利用者に届かない**。
+   実測: `PDF_A-1b/…/6-1-4-t01-fail-b.pdf` で目録のエントリが 1 つ消える
+   （§0「S4 の帰属」5 節）。#26 の続きとして別の段に置く
+2. **`/FT` の継承を読んでいない**（§12.7.4.2）。pdf-lib 版がそうだったので
+   合わせてある。継承を足すと `inspect_signatures` が拾う件数が変わるので、
+   撤去とは別の変更として測ること
+3. **`analyzeFonts` は資源辞書に載っているフォントを数える**（描画に使われた
+   ものではない）。使われたほうは `content-stream-service` の `usedFonts` が
+   持っている。どちらを `inspect_fonts` が返すかは
+   [[fonts-embedded-counts-dicts-not-usage]] の続き
+4. S3 から持ち越し: `@normativepdf` が `/LZWDecode`（§7.4.4）を実装していない /
+   `inflate` が ADLER32 の後の余りバイトを拒む /
+   #26 の混ざった 2 通り（ok/fail・fail/ok）を出す実ファイルが無い /
+   `unresolvedReason: 'encrypted'` を出す検体が無い
 
 #### 環境（この会話で分かったこと。§7 の追加）
 
@@ -434,7 +574,11 @@ ESBUILD_BINARY_PATH=$HOME/linux-natives/node_modules/@esbuild/linux-arm64/bin/es
 ---
 
 
-## 1. いま何が載っているか（実測）
+## 1. ~~いま何が載っているか~~（2026-08-29 の実測。撤去前の記録）
+
+> **2026-08-31: この節は歴史である。** いまの形は §0.15 を見よ。
+> `dependencies` から pdf-lib は消え、`@normativepdf/recover` 0.1.2 と
+> normativepdf 0.9.0 が入っている。
 
 ```
 pdf-reader-mcp 0.13.0   src 46 ファイル・10,959 行
@@ -537,7 +681,7 @@ flowchart TD
 各段で `diff` を採り、**差を 1 件ずつ帰属する**。数を減らすのが目的ではなく、
 **説明が付いていない差を 0 にする**のが目的。
 
-## 6. 受入 3 面（verify B2 と同じ）
+## 6. 受入 3 面（verify B2 と同じ）—— **3 面とも閉じた（2026-08-31）**
 
 | 面 | 何を見るか |
 |---|---|
@@ -563,7 +707,7 @@ flowchart TD
 - publish は **tag `v*` の push で発火**（npm Trusted Publisher / OIDC）。
   🔴 `--follow-tags` を忘れると版が欠番になる（verify 0.20.0 で実際に起きた）
 
-## 8. 先に決めること
+## 8. 先に決めたこと（全部決まった）
 
 1. ~~B2 の 3 ファイルをコピーするか、共有に上げるか~~ → **決まった**（§4・ADR-0010）。
    `@normativepdf/recover` の切り出しが**この作業の前**に入る
