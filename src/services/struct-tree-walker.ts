@@ -120,27 +120,33 @@ export async function deref(
 }
 
 /**
- * Read a text-ish value (`PDFString` / `PDFHexString`) from a dictionary.
+ * Read a text-ish value (a string object) from a dictionary.
  *
- * **Encrypted documents yield nothing.** ISO 32000-2 §7.6.2 encrypts *strings
- * and streams* and nothing else, so an encrypted file's structure tree still
- * walks correctly — the names, numbers and references are all in the clear —
- * but every string in it is ciphertext, and pdf-lib does not decrypt (it is
- * loaded with `ignoreEncryption`, which ignores, not decrypts).
+ * **鍵が導けなかった文書は何も返さない。** ISO 32000-2 §7.6.2 が暗号化するのは
+ * *文字列とストリーム*だけなので、構造木そのものは歩ける —— 名前も数も参照も
+ * 平文である —— が、その中の文字列は暗号文である。
  *
- * Returning the ciphertext would be far worse than returning nothing: measured
- * on `PDF32000_2008.pdf` (owner-password encrypted, fully readable in any
- * viewer), the tree carries **18026** `/ActualText` entries, every one of them
- * bytes like `&)ð`. Since #18 those entries *replace* page text, so this
- * would have substituted garbage for the body of every such document.
+ * 暗号文をそのまま返すのは、何も返さないより悪い: `PDF32000_2008.pdf`
+ * （所有者パスワードつき・どの閲覧器でも読める）で数えると、木は
+ * `/ActualText` を **18026 件**持ち、そのどれもが読めないバイト列だった。
+ * #18 以降そのエントリはページの文字を*置き換える*ので、そういう文書すべての
+ * 本文が化けることになる。
+ *
+ * 🔴 **見るのは「暗号化されているか」ではなく「鍵が導けたか」である**
+ * （S3・2026-08-31 に直した）。pdf-lib は `ignoreEncryption` で開いていて
+ * 復号しなかったので、`/Encrypt` があれば必ず暗号文だった。recover は鍵が
+ * 導ければ復号する（ADR-0008）ので、利用者パスワードが空の文書では
+ * `/ActualText` は平文で返る。`scope.encrypted` で切ると、読めている文字を
+ * 捨てたうえで `search_text` が「見つからなかった」と自信を持って答える ——
+ * 実測 `tests/fixtures/encrypted-actualtext.pdf` の "Difficult"。
  */
 async function textEntry(
   doc: PdfDocument,
-  encrypted: boolean,
+  lockedOut: boolean,
   dict: CosDict,
   key: string,
 ): Promise<string | null> {
-  if (encrypted) return null;
+  if (lockedOut) return null;
   return textOf(await resolved(doc, get(dict, key)));
 }
 
@@ -265,7 +271,7 @@ async function kidsOf(doc: PdfDocument, dict: CosDict): Promise<CosObject[]> {
  */
 async function walkElement(
   doc: PdfDocument,
-  encrypted: boolean,
+  lockedOut: boolean,
   dict: CosDict,
   inheritedPg: CosRef | undefined,
   classMap: CosDict | null,
@@ -288,9 +294,9 @@ async function walkElement(
 
   const element: StructElement = {
     role,
-    actualText: await textEntry(doc, encrypted, dict, 'ActualText'),
-    alt: await textEntry(doc, encrypted, dict, 'Alt'),
-    lang: await textEntry(doc, encrypted, dict, 'Lang'),
+    actualText: await textEntry(doc, lockedOut, dict, 'ActualText'),
+    alt: await textEntry(doc, lockedOut, dict, 'Alt'),
+    lang: await textEntry(doc, lockedOut, dict, 'Lang'),
     contentRefs: [],
     children: [],
     layoutBBox: await layoutBBoxOf(doc, dict, classMap),
@@ -328,7 +334,7 @@ async function walkElement(
     if (get(child, 'S') !== undefined) {
       if (kidRef && ancestors.has(kidRef.objectNumber)) continue; // 循環（§14.7.2 は木を求める）
       const next = kidRef ? new Set(ancestors).add(kidRef.objectNumber) : ancestors;
-      const walked = await walkElement(doc, encrypted, child, pg, classMap, next, depth + 1);
+      const walked = await walkElement(doc, lockedOut, child, pg, classMap, next, depth + 1);
       if (walked) element.children.push(walked);
     }
   }
@@ -345,10 +351,13 @@ async function walkElement(
  *
  * Note this reads only `StructTreeRoot`; it needs neither `/ParentTree` nor
  * `/StructParents`, which pdfjs's per-page `getStructTree()` does require.
+ *
+ * @param lockedOut 暗号化されていて鍵が導けなかった（`lockedOut(scope)`）。
+ *                  木の形は歩けるが、その中の文字列は返さない（`textEntry`）。
  */
 export async function walkStructTree(
   doc: PdfDocument,
-  encrypted: boolean,
+  lockedOut: boolean,
 ): Promise<StructElement[] | null> {
   const catalog = asDict(await doc.getCatalog().catch(() => null));
   const root = asDict(await resolved(doc, get(catalog, 'StructTreeRoot')));
@@ -364,7 +373,7 @@ export async function walkStructTree(
     const child = asDict(await resolved(doc, kid));
     if (child && get(child, 'S') !== undefined) {
       const seed = new Set<number>(kidRef ? [kidRef.objectNumber] : []);
-      const element = await walkElement(doc, encrypted, child, undefined, classMap, seed, 0);
+      const element = await walkElement(doc, lockedOut, child, undefined, classMap, seed, 0);
       if (element) elements.push(element);
     }
   }

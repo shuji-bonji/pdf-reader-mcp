@@ -333,29 +333,34 @@ describe('02 - search_text', () => {
     expect(pages[0].text).toBe('Bäckerei');
   });
 
-  // ── #18: an encrypted document's /ActualText is ciphertext, not text ──
-  // §7.6.2 encrypts strings and streams; pdf-lib is loaded with
-  // `ignoreEncryption`, which ignores encryption rather than undoing it. So the
-  // /ActualText it hands back is RC4 output. Resolving it would substitute
-  // garbage for the body of every permissions-encrypted PDF — measured on
-  // PDF32000_2008.pdf, 18026 such entries, and page 1's title came out as
-  // "Document management&)ð — 6±o Portable document format".
-  it('ST-14: an encrypted document falls back to glyphs instead of ciphertext', async () => {
+  // ── #18 / S3: 鍵が導ける暗号化文書は、置き換え文字まで平文で読む ──
+  //
+  // §7.6.2 が暗号化するのは文字列とストリームである。pdf-lib は
+  // `ignoreEncryption` で開いていて復号しないので、そこから取れる
+  // `/ActualText` は RC4 の出力だった —— それを本文に差し込むと、
+  // 権限だけを掛けた PDF すべての本文が化ける（`PDF32000_2008.pdf` で
+  // 18026 件、1 ページ目の題が "Document management&)... Portable document
+  // format" になった）。そのため pdf-lib のときは、暗号化文書では
+  // 置き換えを諦めて素のグリフを返していた。
+  //
+  // 🔴 recover は §7.6.4.3.2 のとおり空の利用者パスワードで鍵を導き、復号する
+  // （ADR-0008）。だから諦める条件は「暗号化されているか」ではなく
+  // **「鍵が導けたか」**になった（S3・2026-08-31）。
+  it('ST-14: an encrypted document resolves /ActualText once the key is derived', async () => {
     const pages = await extractText(FIXTURES.encryptedActualText);
-    // The glyphs, decrypted by pdfjs. Not "Difficult", and not RC4 output.
-    expect(pages[0].text).toContain('Dif');
-    expect(pages[0].text).not.toContain('Difficult');
+    // §14.9.4 の置き換え文字。素のグリフ（"Dif"）でも RC4 の出力でもない。
+    expect(pages[0].text).toContain('Difficult');
   });
 
-  // The reason matters as much as the fact: "encrypted" means no tool on this
-  // server will do better, whereas "unaligned" is worth retrying elsewhere.
-  it('ST-15: search_text reports the encrypted page, and says why', async () => {
+  // 「探せなかった」と「探して見つからなかった」を混ぜない。鍵が導けたので
+  // ここは後者ですらなく、**見つかった**。
+  it('ST-15: search_text finds the replacement text of an encrypted document', async () => {
     const { matches, unresolvedPages, unresolvedReason } = await searchText(
       FIXTURES.encryptedActualText,
       'Difficult',
     );
-    expect(matches).toHaveLength(0);
-    expect(unresolvedPages).toEqual([1]);
-    expect(unresolvedReason).toBe('encrypted');
+    expect(matches).toHaveLength(1);
+    expect(unresolvedPages).toEqual([]);
+    expect(unresolvedReason).toBeUndefined();
   });
 });

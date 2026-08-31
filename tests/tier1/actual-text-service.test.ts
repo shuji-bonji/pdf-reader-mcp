@@ -15,7 +15,7 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { openDocument } from '@normativepdf/recover';
-import { PDFDocument } from 'pdf-lib';
+import type { PdfDocument } from 'normativepdf';
 import { describe, expect, it } from 'vitest';
 import {
   buildSpanActualTextMap,
@@ -138,19 +138,17 @@ describe('foldActualText', () => {
 });
 
 describe('buildSpanActualTextMap', () => {
-  async function load(name: string): Promise<PDFDocument> {
+  // S3 以降、Span 側の内容ストリームも @normativepdf/recover が読む。
+  async function load(name: string): Promise<PdfDocument> {
     const data = await readFile(resolve(FIXTURES, name));
-    return PDFDocument.load(data, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-      throwOnInvalidObject: false,
-    });
+    const { doc } = await openDocument(new Uint8Array(data));
+    return doc;
   }
 
   it('reads the Span property lists the content stream carries', async () => {
     const doc = await load('actual-text-span.pdf');
-    expect(buildSpanActualTextMap(doc, 0, 1)).toEqual(new Map([[0, 'c']]));
-    expect(buildSpanActualTextMap(doc, 1, 2)).toEqual(
+    expect(await buildSpanActualTextMap(doc, 0, 1, false)).toEqual(new Map([[0, 'c']]));
+    expect(await buildSpanActualTextMap(doc, 1, 2, false)).toEqual(
       new Map([
         [0, 'Bäcke'],
         [1, 'rei'],
@@ -164,13 +162,20 @@ describe('buildSpanActualTextMap', () => {
   // text on the wrong glyphs would be a new kind of wrong.
   it('returns undefined when the marker count disagrees with pdfjs', async () => {
     const doc = await load('actual-text-span.pdf');
-    expect(buildSpanActualTextMap(doc, 0, 2)).toBeUndefined();
-    expect(buildSpanActualTextMap(doc, 0, 0)).toBeUndefined();
+    expect(await buildSpanActualTextMap(doc, 0, 2, false)).toBeUndefined();
+    expect(await buildSpanActualTextMap(doc, 0, 0, false)).toBeUndefined();
   });
 
   it('is empty, not undefined, for a page with no marked content', async () => {
     const doc = await load('simple.pdf');
-    expect(buildSpanActualTextMap(doc, 0, 0)?.size).toBe(0);
+    expect((await buildSpanActualTextMap(doc, 0, 0, false))?.size).toBe(0);
+  });
+
+  // 鍵が導けない文書では内容ストリームを 1 バイトも読めない。0 件の地図を
+  // 返すと「置き換えるものは無かった」と言ったことになるので、undefined を返す。
+  it('is undefined when the key could not be derived', async () => {
+    const doc = await load('actual-text-span.pdf');
+    expect(await buildSpanActualTextMap(doc, 0, 1, true)).toBeUndefined();
   });
 });
 
@@ -200,11 +205,22 @@ describe('decodeTextString', () => {
     expect(decodeTextString(bytes)).toBe('Bä');
   });
 
-  // §14.9.4 defers to §7.9.2.2: a leading escape sequence "shall override the
+  // §14.9.4 defers to §7.9.2.2: an escape sequence "shall override the
   // prevailing Lang entry", so it is metadata about the string, not content.
-  it('strips the leading language escape sequence', () => {
+  it('strips the language escape sequence from a UTF-16BE string', () => {
+    // ESC d e ESC D r u c k e r
+    const units = [0x1b, 0x64, 0x65, 0x1b, ...[...'Drucker'].map((c) => c.charCodeAt(0))];
+    const bytes = new Uint8Array([0xfe, 0xff, ...units.flatMap((u) => [u >> 8, u & 0xff])]);
+    expect(decodeTextString(bytes)).toBe('Drucker');
+  });
+
+  // §7.9.2.2.2 は「Escape sequences may appear anywhere in a **Unicode** text
+  // string」と書き、要素 a) で UTF-16BE と UTF-8 だけを名指ししている。
+  // PDFDocEncoding にエスケープは無く、Table D.3 でバイト 0x1B は U+02D9 である
+  // —— そこを落とすのは本文の文字を消すことになる。
+  it('keeps byte 0x1B in a PDFDocEncoded string (Table D.3: U+02D9)', () => {
     const escaped = `\u001bde\u001bDrucker`;
     const bytes = new Uint8Array([...escaped].map((c) => c.charCodeAt(0)));
-    expect(decodeTextString(bytes)).toBe('Drucker');
+    expect(decodeTextString(bytes)).toBe('\u02d9de\u02d9Drucker');
   });
 });

@@ -4,7 +4,7 @@
  * Centralizes all pdfjs-dist interactions for reuse across tools.
  */
 
-import type { PDFDocument as PdfLibDocument } from 'pdf-lib';
+import type { PdfDocument } from 'normativepdf';
 import {
   getDocument,
   ImageKind,
@@ -44,8 +44,7 @@ import {
   flattenAlphaOverWhite,
   type Samples,
 } from './image-resampler.js';
-import { loadWithPdfLib } from './pdflib-service.js';
-import { detectEncryption, openPdf } from './recover-service.js';
+import { detectEncryption, lockedOut, openPdf } from './recover-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
@@ -147,20 +146,23 @@ export interface ExtractTextOptions {
 
 /**
  * Everything `/ActualText` resolution needs that pdfjs cannot supply (#18):
- * a pdf-lib view of the same file, for the structure tree and the content
- * streams. Absent when the file could not be opened with pdf-lib, in which case
- * extraction falls back to raw glyphs.
+ * a `@normativepdf/recover` view of the same file, for the structure tree and
+ * the content streams. Absent when the file could not be opened at all, in which
+ * case extraction falls back to raw glyphs.
  */
 interface ActualTextResolution {
-  libDoc: PdfLibDocument;
+  doc: PdfDocument;
   structActualText: ReadonlyMap<string, string>;
   /**
-   * The document is encrypted, so neither path can run: §7.6.2 encrypts strings
-   * and streams, and pdf-lib is loaded with `ignoreEncryption`. Recorded so the
-   * caller can say *why* nothing was resolved — "the content stream did not
-   * line up" would be a wrong and unactionable explanation here.
+   * 暗号化されていて**鍵が導けなかった**。このとき §14.9.4 の 2 つの経路は
+   * どちらも走らない —— §7.6.2 が暗号化するのは文字列とストリームで、そのどちらも
+   * 読めないからである。`unresolvedPages` の理由を言うために持っている
+   * （「内容ストリームが揃わなかった」はここでは誤った、手の打ちようのない説明になる）。
+   *
+   * 🔴 「暗号化されているか」ではない。利用者パスワードが空の文書は暗号化されていても
+   * 鍵が導けるので、両方の経路が走る（S3・2026-08-31）。
    */
-  encrypted: boolean;
+  lockedOut: boolean;
 }
 
 /** One page's extracted text, plus whether `Span`-level replacement was resolved. */
@@ -182,24 +184,26 @@ interface RawTextContentItem {
 }
 
 /**
- * Open the same file with pdf-lib so `/ActualText` can be resolved.
+ * Open the same file with `@normativepdf/recover` so `/ActualText` can be
+ * resolved.
  *
- * Returns `undefined` rather than throwing: a file pdf-lib cannot parse is
- * still readable by pdfjs, and the pre-#18 behaviour (raw glyphs) is a valid
- * fallback. Callers report the degradation instead of failing.
+ * Returns `undefined` rather than throwing: a file that cannot be opened this
+ * way is still readable by pdfjs, and the pre-#18 behaviour (raw glyphs) is a
+ * valid fallback. Callers report the degradation instead of failing.
+ *
+ * S3（2026-08-31）でこの関数から pdf-lib の口が消えた。構造木の側と
+ * `Span` の側が**同じ 1 つの文書**を読むので、同じファイルを 2 回開いていた
+ * のも無くなった。
  */
 async function loadActualTextResolution(
   filePath: string,
 ): Promise<ActualTextResolution | undefined> {
   try {
-    // 🔴 いまは 2 つの読み手が要る。構造木は recover へ移したが、
-    // Span 側（`buildSpanActualTextMap` → `content-stream-service`）はまだ pdf-lib で、
-    // S3 でそちらを移すとこの pdf-lib の口は消える。
-    const [libDoc, opened] = await Promise.all([loadWithPdfLib(filePath), openPdf(filePath)]);
+    const { doc, scope } = await openPdf(filePath);
     return {
-      libDoc,
-      structActualText: await buildStructActualTextMap(opened.doc, opened.scope.encrypted),
-      encrypted: opened.scope.encrypted,
+      doc,
+      structActualText: await buildStructActualTextMap(doc, lockedOut(scope)),
+      lockedOut: lockedOut(scope),
     };
   } catch {
     return undefined;
@@ -264,10 +268,11 @@ export interface SearchTextResult {
    */
   unresolvedPages: number[];
   /**
-   * Why `unresolvedPages` is non-empty. `encrypted` means the whole document is
-   * out of reach and no other tool of this server will do better; `unaligned`
-   * means the content stream of those particular pages could not be matched up
-   * with the extracted text.
+   * Why `unresolvedPages` is non-empty. `encrypted` means the document is
+   * encrypted and its key could not be derived, so the whole of it is out of
+   * reach and no other tool of this server will do better; `unaligned` means the
+   * content stream of those particular pages could not be matched up with the
+   * extracted text.
    */
   unresolvedReason?: 'encrypted' | 'unaligned';
 }
@@ -307,12 +312,12 @@ export async function searchText(
     );
 
     const unresolvedPages = pageTexts.filter((p) => !p.markedContentResolved).map((p) => p.pageNum);
-    // Encryption disables both paths for the whole document, so it outranks the
-    // per-page alignment explanation whenever it applies.
+    // 鍵が導けないことは文書全体で 2 つの経路を止めるので、ページごとの
+    // 「揃わなかった」より先に立つ。
     const unresolvedReason =
       unresolvedPages.length === 0
         ? undefined
-        : resolution?.encrypted
+        : resolution?.lockedOut
           ? ('encrypted' as const)
           : ('unaligned' as const);
 
@@ -698,8 +703,13 @@ async function extractPageText(
 
   let spanActualText: Map<number, string> | undefined;
   let markedContentResolved = true;
-  if (resolution?.libDoc) {
-    spanActualText = buildSpanActualTextMap(resolution.libDoc, page.pageNumber - 1, beginCount);
+  if (resolution) {
+    spanActualText = await buildSpanActualTextMap(
+      resolution.doc,
+      page.pageNumber - 1,
+      beginCount,
+      resolution.lockedOut,
+    );
     markedContentResolved = spanActualText !== undefined;
   } else {
     markedContentResolved = beginCount === 0;

@@ -5,11 +5,12 @@
 > verify = `mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`（+ `scope-in-output.md`）。
 >
 > 実測日 2026-08-29。reader **0.13.0** / normativepdf **0.9.0**。
-> **2026-08-31 追記: L0 / L1 / S1 / S2 が閉じた。§0 と §0.15 を先に読むこと。**
+> **2026-08-31 追記: L0 / L1 / S1 / S2 / S3 が閉じた。§0 と §0.15 を先に読むこと。**
 
 ## 0. いまここ（2026-08-31）
 
-**L0 / L1 / S1 / S2 は終わった。次は S3。**
+**L0 / L1 / S1 / S2 / S3 は終わった。次は S4。**
+`src` で pdf-lib を import しているのは **`services/pdflib-service.ts` 1 本だけ**になった。
 
 > 別セッションで続けるなら、**§0.15「次のセッションが最初に読む所」から読む**。
 > 基準ファイル・残りの段・環境の落とし穴・面 3 の叩き方がそこに揃えてある。
@@ -22,7 +23,7 @@
 | L1 | `detectEncryption` → `recover-service.ts` | **差 0 件**（json / markdown 両方） |
 | S1 | `object-locator.ts`（`locate_objects`） | 差 91 件・全件帰属（json / markdown で同じ 91 件） |
 | S2 | `struct-tree-walker` / `struct-tree-service` / `actual-text-service` | 差 23 件・全件帰属（json / markdown で同じ 23 件） |
-| S3 | `content-stream-service` / `text-extractability-service` | まだ |
+| S3 | `content-stream-service` / `text-extractability-service`（+ `struct-tree-walker` の暗号の見方） | 差 95 件・全件帰属（json / markdown で同じ 95 件） |
 | S4 | `pdflib-service`（`loadWithPdfLib` を消す） | まだ |
 
 各段で `openPdf`（recover）と `loadWithPdfLib`（pdf-lib）が**併存する**。
@@ -125,6 +126,96 @@ pdf-read Phase 1 の停止条件になるためである。壊れても何も落
 `get_metadata` / `summarize` / `validate_metadata` で 96 件の差が出た。
 `isEncrypted` は kept に入っており、diff はそれを見ている。
 
+### S3 の帰属（95 件・11 ファイル）
+
+`read_text` / `read_text#cols2-compact` / `search_text#hit` / `search_text#miss` /
+`read_url` / `summarize` / `extract_structured_text` / 同 `#bbox` の 8 呼び出しが
+11 ファイルで動いた（8 × 11 = 88）。残り 7 件は
+`halves-fail-ok-password.pdf` の `get_page_count` / `get_metadata` /
+`read_images` / `render_page` / `inspect_annotations` / `validate_tagged` /
+`validate_metadata` で、**エラーの hint の文面だけ**が変わったものである。
+**誤った pass は 0 件。**
+
+| 何が変わったか | ファイル | 件数 |
+|---|---|---:|
+| **鍵が導けない文書が「読めなかった」と言うようになった** | `{specimens}/halves-fail-ok-password.pdf` | 15 |
+| **利用者パスワードが空の暗号化文書を復号して読むようになった** | `{fixtures}/encrypted-actualtext.pdf` / `{veraPDF}/PDF_UA-1/7.16 Security/7.16-t01-fail-a.pdf` | 16 |
+| **pdf-lib が開けなかったヘッダ・トレーラの文書を recover が読む** | `6-1-2-t01-fail-b`（ヘッダ）/ `isartor-6-1-3-t02` / `PDF_A-2b 6-1-3-t02` / `PDF_A-4 6-1-3-t02`（トレーラ）/ `{specimens}/halves-ok-fail-header.pdf` | 40 |
+| **`/Length` が実バイト数と違う内容ストリームを復号しなくなった** | `isartor-6-1-7-t03-fail-a` | 8 |
+| **`/LZWDecode` を復号しなくなった** | `6-1-10-t01-fail-a` / `6-1-6-2-t01-fail-a` | 16 |
+
+#### 1. 鍵が導けない文書（15 件）—— S1 で受け入れた後退が 2 か所目に出た
+
+`observeExtractability` は**空の一覧を返さない**ようにした。recover は鍵が導けないと
+間接オブジェクトを 1 つも渡さない（ADR-0008）ので、`readPageTree` は 0 ページを返す。
+それをそのまま返すと「この文書にページは無い」と言ったことになる ——
+#21 が分けようとしている「読めなかった」と「無かった」を、出力がまた 1 つに畳む。
+いまは §7.6.4.3.2 を名指しして投げるので、`read_text` は 2 つの半分が両方とも
+失敗した形（`isError`・2 つの理由を両方載せる）になる。
+
+🔴 **pdf-lib はここで 1 ページを `not_observed` として返せていた。**
+`ignoreEncryption` は復号せずに構造を歩いたので、§7.6.2 が暗号化の対象から
+外している名前と数は読めた。**その分の観測は失われる。** S1 で
+`locate_objects` について受け入れたのと同じ後退が、ここに 2 か所目として出た。
+
+`isError` は 65 件（S2）から **71 件**（S3）に増えた。増えた 6 件はこの検体の
+`read_text` / `read_text#cols2-compact` / `search_text#hit` / `search_text#miss` /
+`read_url` / `summarize` で、ちょうど一致する。
+
+#### 2. 利用者パスワードが空の暗号化文書（16 件）
+
+`struct-tree-walker` の `textEntry` が見ていたのを **`scope.encrypted` から
+`lockedOut(scope)` に変えた**。pdf-lib は `ignoreEncryption` で開いていて復号
+しなかったので「`/Encrypt` があれば必ず暗号文」だったが、recover は鍵が導ければ
+復号する。`scope.encrypted` のままだと、**読めている平文を捨てたうえで
+`search_text` が「見つからなかった」と自信を持って答える** ——
+`encrypted-actualtext.pdf` の `/ActualText (Difficult)` で実際にそうなった
+（S3 の途中で ST-15 が緑のまま誤った答えを出した）。
+
+🔴 面 3: `qpdf --show-encryption` が `User password = `（空）と言い、
+`qpdf --decrypt` した写しに `/ActualText (Difficult)` が**平文で**入っている。
+`pdftotext` は §14.9.4 の置き換えを行わないので `Dif‘cult` を返す ——
+reader の新しい答えはこの 2 つと矛盾しない。
+`PDF_UA-1/7.16-t01-fail-a.pdf`（AESv2・利用者パスワードは空）も同じ形で、
+`pdftotext` が本文を返す。
+
+#### 3. ヘッダ・トレーラの壊れた文書（40 件）
+
+S1 / S2 で出ていた `%PDF-`（版の数が無いヘッダ）と同じ筋である。
+pdf-lib は版の数を読もうとして止まり、観測の半分が `INVALID_PDF` になっていた。
+recover は回復方針で組み立てて読むので、観測が付くようになった。
+
+#### 4. 🔴 観測が減った 24 件（C）—— reader ではなくコアの穴
+
+**どちらも誤った pass ではない。** `not_observed` は「観測できなかった」であって
+「違反していない」ではない。ただし pdf-lib のときは観測できていた。
+
+| 検体 | 何を復号できないか | 面 3 の答え |
+|---|---|---|
+| `isartor-6-1-7-t03-fail-a` | `/Filter /FlateDecode /Length 9` に対して zlib のデータは 8 バイトで、9 バイト目は `endstream` の前の改行（§7.3.8.1 はその EOL をデータに含めない）。normativepdf の `inflate` は `FilterError: 1 byte(s) after ADLER32 (RFC 1950 §2.2)` を投げる。pdf-lib と node の zlib は余りを無視して 0 バイトを返す | `qpdf --decrypt --qdf` の写しで内容ストリームは **0 バイト**。`pdftotext` も何も返さない。**S2 の `extracted`（文字は無い）が正しかった** |
+| `6-1-10-t01-fail-a` / `6-1-6-2-t01-fail-a` | `/Filter /LZWDecode`（§7.4.4）。normativepdf の `filter/decode.js` が持っているのは `FlateDecode` だけである | 写しの内容ストリームは 98 バイト、`pdftotext` は `Hello World` を返す。**S2 の `extracted` が正しかった** |
+
+どちらも `@normativepdf` 側の穴で、reader で埋める場所ではない。**S4 の前に
+決めること**として §8 に置いた。
+
+#### 5. #26 の 4 通りのうち、混ざった 2 通りの検体が無くなった
+
+`tests/e2e/15-reading-scope.test.ts` は「文字の取り出し」と「観測」が別々に
+成功・失敗する 4 通りを実ファイルで測っていた。S3 のあと、実ファイルで出るのは
+2 通りだけである。
+
+| 検体 | pdf-lib のとき | recover のいま |
+|---|---|---|
+| `halves-ok-fail-header.pdf` | ok/fail | **ok/ok** |
+| `halves-fail-ok-password.pdf` | fail/ok | **fail/fail** |
+
+混ざった 2 通りを作れないか実測した（ヘッダ無し・`/Count` 不一致・版の無い
+ヘッダ）が、**3 つとも両方の半分が成功した**。recover は pdfjs より厳しくない。
+
+🔴 **検体が無いことは、規約が要らなくなったことではない。** 混ざった 2 通りは
+`Promise.all` に戻した瞬間に壊れる経路なので、`tests/tier1/reading-scope.test.ts`
+を新しく置いて stub で 4 通りとも固定した。実ファイルの検体は **S4 以降の借り**である。
+
 ### 🔴 その確認で計器の欠陥が 1 つ出た（直した）
 
 96 件が全部 `P 返した画像が変わった（枚数・バイト列）` に入っていた。
@@ -175,6 +266,9 @@ pdf-read Phase 1 の停止条件になるためである。壊れても何も落
    どれも device_bash の VM にある（`mutool` と `verapdf` は無い）。
    立たないツール（`inspect_tags` / `validate_tagged` など）は「立たない」と書く
 3. **pdfjs と pdf-lib の切り分け** → 下の §0.1 に実測を置いた
+4. **S4 の前**: `analyzeSignatures` の答えを reader が返すのか verify に委ねるのか（§0.15）
+5. **コアの穴 2 つ**: `/LZWDecode` の未実装と、`inflate` が ADLER32 の後の
+   余りバイトを拒むこと。reader で埋める場所ではない（§0.15「S3 が返さなかった借り」）
 
 ### 0.1 pdf-lib に届くのは 19 ツール中 18（import グラフの実測）
 
@@ -192,26 +286,48 @@ reader が pdf-lib から import している記号は **14 種**で、うち 3 
 | `PDFPageLeaf` | `enumerateDicts` + `get` |
 | `PDFDocument` | `openDocument` の戻り |
 
-### 0.15 次のセッションが最初に読む所（S3 から始める）
+### 0.15 次のセッションが最初に読む所（S4 から始める）
 
 ```
-基準       .golden/json-S2.json / .golden/md-S2.json  ← S3 はここと比べる
+基準       .golden/json-S3.json / .golden/md-S3.json  ← S4 はここと比べる
            （.golden/json-0.14.0.json は撤去前の原点。消さない）
-残り       S3 content-stream-service(701) + text-extractability-service(349)
-           S4 pdflib-service(544)・loadWithPdfLib を消す
+残り       S4 pdflib-service(562)・loadWithPdfLib を消す
            L3 pdf-lib を devDependencies へ / L4 受入 3 面
 ```
 
-#### S3 の継ぎ目（S2 で作った借り）
+#### S4 の対象（S3 のあとの実測）
 
-`pdfjs-service.ts` の `loadActualTextResolution` は **いま 2 回開いている**。
-構造木側は recover、Span 側（`buildSpanActualTextMap` → `content-stream-service`）は
-まだ pdf-lib である。S3 で `content-stream-service` を移すと、この pdf-lib の口は消える。
-`ActualTextResolution.libDoc` が残っているのはそのためで、S3 の完了条件でもある。
+`src` で pdf-lib を import しているのは **`services/pdflib-service.ts` 1 本だけ**である。
+そこから出ている公開関数のうち、まだ呼ばれているのは 3 つ。
 
-`text-extractability-service` は 0.14.0 の `scope`（行われなかった読み）が乗っている
-経路そのもので、`read_text` / `summarize` / `search_text` / `read_url` /
-`extract_structured_text` を支える。**A/B で最も差が出やすい段**である。
+| 関数 | 呼び出し元 |
+|---|---|
+| `analyzeStructure` | `tools/tier2/inspect-structure.ts` / `services/validation-service.ts` |
+| `analyzeSignatures` | `tools/tier2/inspect-signatures.ts` |
+| `analyzeFontsWithPdfLib` | `tools/tier2/inspect-fonts.ts` / `services/validation-service.ts` |
+
+`loadWithPdfLib` / `loadWithPdfLibFromData` / `detectEncryption` /
+`resolvePdfVersion` は**このファイルの中からしか呼ばれていない**。
+
+🔴 `analyzeSignatures` は pdf-verify-mcp が同じ問いを別の実装で持っている。
+**移す前に、どちらの答えを reader が返すのかを決めること**（`inspect_signatures` は
+「署名がある」までを言い、有効性は verify が言う、という切り分けが family にある）。
+
+#### S3 が返さなかった借り
+
+1. **`@normativepdf` が `/LZWDecode`（§7.4.4）を持っていない。**
+   `filter/decode.js` にあるのは `FlateDecode` だけである。PDF/A の禁止フィルタの
+   試験ファイル 2 件で観測が減った（§0 の S3 帰属 4）
+2. **`inflate` が ADLER32 の後の余りバイトを拒む。**
+   `/Length` が `endstream` の前の改行まで数えている文書がそれに当たる。
+   pdf-lib と node の `zlib` は余りを無視して展開する。
+   「読めたところまで返して、余りを申告する」に変えられるかは normativepdf の判断
+3. **#26 の混ざった 2 通り（ok/fail・fail/ok）を出す検体が無い。**
+   規約は `tests/tier1/reading-scope.test.ts` が stub で押さえてある。
+   実ファイルの検体は借りのまま（§0 の S3 帰属 5）
+4. **`unresolvedReason: 'encrypted'` を出す検体が無くなった。**
+   鍵が導けない文書は pdfjs も開けないので、`searchText` がそこまで進まない。
+   経路は残してある（pdfjs と recover が暗号方式で食い違えば出る）が、測れていない
 
 #### 環境（この会話で分かったこと。§7 の追加）
 
@@ -265,10 +381,40 @@ node scripts/golden.mjs diff .golden/json-0.14.0.json .golden/<版>.json [--deta
 node scripts/golden.mjs t3 .golden/<版>.json
 ```
 
+- 🔴 **`--budget-ms` の実測値（2026-08-31・呼び出しの上限 175 秒）**: 3 本並列で
+  `--budget-ms 130000`。持ち場 1 は 1 回で採り切れるが、持ち場 2 と 3 は
+  `--resume` を 1 回足す（2 回目は 3 秒 / 70 秒で終わる）
 - 🔴 **markdown は `--format markdown` で別に採る。** 形式の違うゴールデンは diff が拒む
 - 🔴 **計器（kept）を直したら採り直す。** 0.14.0 で出力の形を変えたとき、
   kept が古い形を読んでいて 2,942 件すべてで `pageCount = 0` を返していた
 - 遅い検体は 5 秒を越えると名指しされる（最も遅いのは Isartor のマニュアルで 91 秒）
+
+#### 🔴 `$HOME` の道具は毎セッション入れ直す（2026-08-31 実測）
+
+`$HOME`（マウントの外）は**セッションごとに消える**。`linux-natives` /
+`tsc-tool` / `node20` は次のセッションで存在しない。§0.3 の手順をそのまま
+もう一度打つこと（VM から npm registry へは通った・所要 3 分ほど）。
+
+#### 🔴 `$HOME` 側のディスクは 9.8 GB しかない
+
+マウント（`$HOME/mnt/...`）は 900 GB 空いているが、`$HOME` と `/tmp` が乗っている
+`/sessions` は 9.8 GB で、道具を入れた時点で残り 1 GB ほどになる。
+`golden.mjs t3` は 1 件ごとに 61 MB を 2 つ書くので（23 件 = 2.8 GB）、
+**既定の `TMPDIR` では途中で `ENOSPC` になる**。マウント側へ逃がして、
+終わったら 0 バイトに切り詰める（unlink はできない）。
+
+```sh
+mkdir -p .golden/_scratch/t3tmp
+TMPDIR=$(pwd)/.golden/_scratch/t3tmp node scripts/golden.mjs t3 .golden/<版>.json
+for f in .golden/_scratch/t3tmp/pdf-reader-golden-t3/*.json; do : > "$f"; done
+```
+
+🔴 **マウント上で `rm` も `mv`（別ファイルシステムへの）も通らない。**
+一時ファイルは `.golden/_scratch/` に作り、要らなくなったら `: > file` で
+0 バイトにする。`git checkout --` も同じ理由で失敗するので、
+性能テストが書き換える `tests/e2e/baseline.json` は
+`git show HEAD:<path> > $HOME/x && cat $HOME/x > <path>` で戻す
+（`/tmp` は書けないことがある）。
 
 ### 0.3 gate は device_bash で全部回る（2026-08-30 に解けた）
 
@@ -417,7 +563,7 @@ flowchart TD
 - publish は **tag `v*` の push で発火**（npm Trusted Publisher / OIDC）。
   🔴 `--follow-tags` を忘れると版が欠番になる（verify 0.20.0 で実際に起きた）
 
-## 8. 先に決めること 3 つ
+## 8. 先に決めること
 
 1. ~~B2 の 3 ファイルをコピーするか、共有に上げるか~~ → **決まった**（§4・ADR-0010）。
    `@normativepdf/recover` の切り出しが**この作業の前**に入る

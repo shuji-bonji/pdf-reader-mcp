@@ -31,23 +31,59 @@
  *  - `Do` on a **Form** XObject is walked inline at that point, using the
  *    form's own `/Resources` and falling back to the parent's — exactly what
  *    pdfjs's `case OPS.paintXObject` does.
+ *
+ * ## COS の読み口（S3・2026-08-31）
+ *
+ * pdf-lib の `PDFDict` / `PDFRef` / `PDFStream` を `@normativepdf/recover` の
+ * `asDict` / `asRef` / `asStream` に替えた。違いは 2 つある。
+ *
+ * 1. **参照の解決とストリームの復号が非同期になった。** `doc.context.lookup()` は
+ *    同期だったが `resolved(doc, …)` は Promise を返す。演算子ごとに `await` を
+ *    置くと、内容ストリームのトークン 1 つごとにマイクロタスクが 1 つ入る
+ *    （本文 1 ページで数万件）。そこで**走査の本体は同期のまま**にし、
+ *    `handleOperator` は解決が要るときだけ Promise を返す
+ *    （`BDC` の名前が初出のとき・`Do`・`Tf` のフォントが初出のとき）。
+ *    それ以外の演算子は 1 つも `await` を通らない。
+ * 2. **暗号化された文書が読めるようになった。** pdf-lib は `ignoreEncryption` で
+ *    開いていたので内容ストリームは暗号文のままで、`doc.isEncrypted` が真なら
+ *    走査を諦めていた。recover は鍵が導ければ復号するので、諦めるのは
+ *    **鍵が導けなかったとき**だけになった（`lockedOut(scope)`）。
  */
 
 import {
-  decodePDFRawStream,
-  PDFArray,
-  PDFDict,
-  type PDFDocument,
-  PDFHexString,
-  PDFName,
-  type PDFPageLeaf,
-  PDFRawStream,
-  PDFRef,
-  PDFStream,
-  PDFString,
-  pdfDocEncodingDecode,
-  utf16Decode,
-} from 'pdf-lib';
+  asArray,
+  asDict,
+  asRef,
+  asStream,
+  decodedBytes,
+  get,
+  nameOf,
+  refKey,
+  resolved,
+  textOf,
+} from '@normativepdf/recover';
+import {
+  type CosDict,
+  decodeTextString,
+  inheritedAttribute,
+  type PageTree,
+  type PdfDocument,
+  readPageTree,
+} from 'normativepdf';
+
+/**
+ * テキスト文字列（§7.9.2.2）の復号。**コアの 1 本を使う。**
+ *
+ * pdf-lib 版はここに自前の実装を持っており、`PDFDocEncoding` のバイト列からも
+ * 先頭の `ESC <lang> ESC` を落としていた。§7.9.2.2.2 は
+ * 「Escape sequences may appear anywhere in a **Unicode** text string」と書き、
+ * 要素 a) で「for strings encoded in UTF-16BE … for strings encoded in UTF-8」と
+ * 名指ししている。PDFDocEncoding は名指しされていない —— そして Table D.3 では
+ * バイト 0x1B は U+02D9（DOT ABOVE）なので、落としていたのは本文の文字だった。
+ * 再輸出しているのは、コアの版が上がってこの復号が変わったときに
+ * reader の試験が気づくようにするためである。
+ */
+export { decodeTextString };
 
 /**
  * One `BMC` / `BDC` / `EMC` operator, in content-stream order.
@@ -83,12 +119,39 @@ export interface TextOperatorTally {
   textShowingOperators: number;
   /** `Do` on an Image XObject, plus `BI` inline images. */
   imageOperators: number;
-  usedFonts: Map<string, PDFDict | null>;
+  usedFonts: Map<string, CosDict | null>;
 }
 
 /** Mutable scan state for {@link TextOperatorTally}; `currentFont` is the `Tf` in effect. */
 interface TextSink extends TextOperatorTally {
   currentFont: string | null;
+}
+
+/**
+ * 走査中に引く資源辞書（§7.8.3）を、**解決した形で 1 度だけ持つ**。
+ *
+ * `/Font` `/Properties` `/XObject` の 3 つは辞書そのものをここで解いておき、
+ * その中の 1 件を引くのは初出のときだけ行う。演算子ごとに `resolved()` を
+ * 呼ぶと、本文 1 ページ分のトークンすべてに Promise が 1 つ付く。
+ */
+interface ScanResources {
+  /** 資源辞書そのもの。入れ子のフォームが `/Resources` を持たないときはこれを引き継ぐ */
+  readonly dict: CosDict | null;
+  readonly fonts: CosDict | null;
+  readonly properties: CosDict | null;
+  readonly xobjects: CosDict | null;
+  /** 名前つき property list の `/ActualText`。値が無いことも憶える（`undefined` を入れる） */
+  readonly actualTextByName: Map<string, string | undefined>;
+}
+
+async function prepareResources(doc: PdfDocument, dict: CosDict | null): Promise<ScanResources> {
+  return {
+    dict,
+    fonts: asDict(await resolved(doc, get(dict, 'Font'))),
+    properties: asDict(await resolved(doc, get(dict, 'Properties'))),
+    xobjects: asDict(await resolved(doc, get(dict, 'XObject'))),
+    actualTextByName: new Map(),
+  };
 }
 
 /**
@@ -114,54 +177,6 @@ function isRegular(b: number): boolean {
   return !WHITESPACE.has(b) && !DELIMITER.has(b);
 }
 
-/**
- * The optional language escape sequence at the head of a text string
- * (§7.9.2.2): `ESC`, a language code, `ESC`.
- *
- * §14.9.4 defers to that clause — such a sequence "shall override the prevailing
- * Lang entry" — so it is metadata *about* the replacement text, not part of it,
- * and is stripped rather than emitted as control characters in `read_text`
- * output.
- *
- * It has to come off before PDFDocEncoding decoding: that encoding maps 0x1B to
- * U+02D9 (dot above), not U+001B, so a string-level strip would run after the
- * delimiters had already turned into content.
- */
-const MAX_LANGUAGE_CODE_BYTES = 8;
-const ESCAPE = 0x1b;
-
-/** Drop a leading `ESC <lang> ESC` from single-byte-encoded bytes. */
-function stripLanguageEscapeBytes(bytes: Uint8Array): Uint8Array {
-  if (bytes[0] !== ESCAPE) return bytes;
-  const close = bytes.indexOf(ESCAPE, 1);
-  if (close === -1 || close > MAX_LANGUAGE_CODE_BYTES + 1) return bytes;
-  return bytes.subarray(close + 1);
-}
-
-/** The same, for text already decoded from UTF-16, where ESC survives as U+001B. */
-const LANGUAGE_ESCAPE = new RegExp(`^\u001b[^\u001b]{1,${MAX_LANGUAGE_CODE_BYTES}}\u001b`);
-
-function stripLanguageEscape(text: string): string {
-  return text.replace(LANGUAGE_ESCAPE, '');
-}
-
-/**
- * Decode a PDF *text string* (§7.9.2.2) from its raw bytes.
- *
- * Mirrors pdf-lib's `PDFString.decodeText` (UTF-16BE when the BOM is present,
- * else PDFDocEncoding) and adds the UTF-8 BOM that PDF 2.0 introduced, which
- * pdf-lib 1.x does not handle.
- */
-export function decodeTextString(bytes: Uint8Array): string {
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    return stripLanguageEscape(utf16Decode(bytes));
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
-    return new TextDecoder('utf-8').decode(stripLanguageEscapeBytes(bytes.subarray(3)));
-  }
-  return pdfDocEncodingDecode(stripLanguageEscapeBytes(bytes));
-}
-
 /** A parsed operand. Only the shapes the scanner acts on are distinguished. */
 type Operand =
   | { type: 'name'; value: string }
@@ -175,22 +190,24 @@ type Operand =
  * `resources` is the resource dictionary in effect, needed to resolve a `BDC`
  * whose property list is named rather than inline (`/Span /P1 BDC` →
  * `/Properties /P1`, §14.6.2) and to follow `Do` into Form XObjects.
+ *
+ * 🔴 **走査の本体は同期である。** `handleOperator` は解決が要るときだけ
+ * Promise を返し、返したときだけ呼び出し側が `await` する。演算子ごとに
+ * `await` を置くと、トークン 1 つごとにマイクロタスクが 1 つ入る。
  */
-function scanStream(
-  doc: PDFDocument,
+async function scanStream(
+  doc: PdfDocument,
   bytes: Uint8Array,
-  resources: PDFDict | undefined,
+  resources: ScanResources,
   out: MarkedContentEvent[],
   visiting: Set<string>,
   depth: number,
   text?: TextSink,
-): void {
+): Promise<void> {
   const n = bytes.length;
   let i = 0;
   /** Operands accumulate until an operator consumes them (§7.8.2 postfix form). */
   let operands: Operand[] = [];
-
-  /** `i` is on `/`. Names may carry `#xx` hex escapes (§7.3.5). */
   const readName = (): string => {
     i++;
     const chars: number[] = [];
@@ -356,38 +373,68 @@ function scanStream(
     return word;
   };
 
-  const handleOperator = (op: string): void => {
+  /**
+   * 1 つの演算子を処理する。**解決が要るときだけ Promise を返す。**
+   *
+   * 返すのは 3 つの場合だけである: `BDC` の property list が名前で、その名前が
+   * この資源辞書で初めて出たとき / `Do` / `Tj` 系でそのとき選ばれているフォントが
+   * まだ `usedFonts` に無いとき。それ以外の演算子は 1 つも `await` を通らない。
+   */
+  const handleOperator = (op: string): Promise<void> | undefined => {
+    // §7.8.2 の後置形。演算子を読んだ時点でオペランドは使い切る。
+    const ops = operands;
+    operands = [];
     switch (op) {
       case 'BMC': {
-        const tag = operands.at(-1);
+        const tag = ops.at(-1);
         out.push({ kind: 'begin', tag: tag?.type === 'name' ? tag.value : undefined });
-        break;
+        return undefined;
       }
       case 'BDC': {
-        const tag = operands.at(-2);
-        const actualText = resolveActualText(doc, operands.at(-1), resources);
-        out.push({
-          kind: 'begin',
-          tag: tag?.type === 'name' ? tag.value : undefined,
-          actualText,
+        const tag = ops.at(-2);
+        const tagName = tag?.type === 'name' ? tag.value : undefined;
+        const props = ops.at(-1);
+        // インラインの property list（§14.6.2）。参照は無いので解決は要らない。
+        if (props?.type === 'dict') {
+          const actual = props.value.get('ActualText');
+          out.push({
+            kind: 'begin',
+            tag: tagName,
+            actualText: actual?.type === 'string' ? decodeTextString(actual.bytes) : undefined,
+          });
+          return undefined;
+        }
+        if (props?.type !== 'name') {
+          out.push({ kind: 'begin', tag: tagName, actualText: undefined });
+          return undefined;
+        }
+        const name = props.value;
+        if (resources.actualTextByName.has(name)) {
+          out.push({
+            kind: 'begin',
+            tag: tagName,
+            actualText: resources.actualTextByName.get(name),
+          });
+          return undefined;
+        }
+        return namedActualText(doc, resources, name).then((actualText) => {
+          out.push({ kind: 'begin', tag: tagName, actualText });
         });
-        break;
       }
       case 'EMC':
         out.push({ kind: 'end' });
-        break;
+        return undefined;
       case 'Do': {
-        const name = operands.at(-1);
-        if (name?.type === 'name')
-          scanFormXObject(doc, name.value, resources, out, visiting, depth, text);
-        break;
+        const name = ops.at(-1);
+        if (name?.type !== 'name') return undefined;
+        return scanFormXObject(doc, name.value, resources, out, visiting, depth, text);
       }
       case 'BI':
         // Inline image (§8.9.7): the bytes between `ID` and `EI` are arbitrary
         // binary and cannot be tokenized, so skip the object wholesale.
         if (text) text.imageOperators++;
         i = skipInlineImage(bytes, i);
-        break;
+        return undefined;
       case 'Tf': {
         // `Tf` takes the font's *resource* name and a size (§9.3.1). The name is
         // recorded rather than the dictionary: the same name means a different
@@ -398,25 +445,25 @@ function scanStream(
         // report loss on a page that shows nothing. The font is registered at
         // the point text is actually shown, below.
         if (text) {
-          const name = operands.at(-2);
+          const name = ops.at(-2);
           text.currentFont = name?.type === 'name' ? name.value : null;
         }
-        break;
+        return undefined;
       }
       case 'Tj':
       case 'TJ':
       case "'":
-      case '"':
+      case '"': {
         // The four text-showing operators of §9.4.3 Table 107.
-        if (text) {
-          text.textShowingOperators++;
-          if (text.currentFont) noteFontUse(doc, text, text.currentFont, resources);
-        }
-        break;
+        if (!text) return undefined;
+        text.textShowingOperators++;
+        const font = text.currentFont;
+        if (!font || text.usedFonts.has(font)) return undefined;
+        return noteFontUse(doc, text, font, resources);
+      }
       default:
-        break;
+        return undefined;
     }
-    operands = [];
   };
 
   while (i < n) {
@@ -430,7 +477,8 @@ function scanStream(
       // A keyword at operand position is an operator.
       const word = readKeyword();
       if (word !== null) {
-        handleOperator(word);
+        const pending = handleOperator(word);
+        if (pending) await pending;
         continue;
       }
     }
@@ -444,31 +492,22 @@ function scanStream(
 }
 
 /**
- * Resolve the `/ActualText` of a `BDC` property list, which is either an inline
- * dictionary or a name looked up in the resource dictionary's `/Properties`
- * (§14.6.2).
+ * Resolve the `/ActualText` of a `BDC` property list named in the resource
+ * dictionary's `/Properties` (§14.6.2).
+ *
+ * 引けなかったことも `actualTextByName` に憶える。同じ名前が 1 ページで
+ * 何百回も出る文書があり、そのたびに引き直すと解決の回数がその回数になる。
  */
-function resolveActualText(
-  doc: PDFDocument,
-  props: Operand | undefined,
-  resources: PDFDict | undefined,
-): string | undefined {
-  if (props?.type === 'dict') {
-    const actual = props.value.get('ActualText');
-    return actual?.type === 'string' ? decodeTextString(actual.bytes) : undefined;
-  }
-  if (props?.type !== 'name' || !resources) return undefined;
-
-  const properties = deref(doc, resources.get(PDFName.of('Properties')));
-  if (!(properties instanceof PDFDict)) return undefined;
-  const entry = deref(doc, properties.get(PDFName.of(props.value)));
-  if (!(entry instanceof PDFDict)) return undefined;
-
-  const actual = deref(doc, entry.get(PDFName.of('ActualText')));
-  if (actual instanceof PDFString || actual instanceof PDFHexString) {
-    return decodeTextString(actual.asBytes());
-  }
-  return undefined;
+async function namedActualText(
+  doc: PdfDocument,
+  resources: ScanResources,
+  name: string,
+): Promise<string | undefined> {
+  const entry = asDict(await resolved(doc, get(resources.properties, name)));
+  const actual = entry ? textOf(await resolved(doc, get(entry, 'ActualText'))) : null;
+  const value = actual ?? undefined;
+  resources.actualTextByName.set(name, value);
+  return value;
 }
 
 /**
@@ -479,62 +518,52 @@ function resolveActualText(
  * shown with a font the file does not describe is a real observation, and
  * silently omitting it would make the page look fully mappable.
  */
-function noteFontUse(
-  doc: PDFDocument,
+async function noteFontUse(
+  doc: PdfDocument,
   text: TextSink,
   name: string,
-  resources: PDFDict | undefined,
-): void {
+  resources: ScanResources,
+): Promise<void> {
   if (text.usedFonts.has(name)) return;
-  const fonts = resources ? deref(doc, resources.get(PDFName.of('Font'))) : undefined;
-  const dict = fonts instanceof PDFDict ? deref(doc, fonts.get(PDFName.of(name))) : undefined;
-  text.usedFonts.set(name, dict instanceof PDFDict ? dict : null);
+  text.usedFonts.set(name, asDict(await resolved(doc, get(resources.fonts, name))));
 }
 
 /** Follow `Do` into a Form XObject, in place, like pdfjs's `paintXObject`. */
-function scanFormXObject(
-  doc: PDFDocument,
+async function scanFormXObject(
+  doc: PdfDocument,
   name: string,
-  resources: PDFDict | undefined,
+  resources: ScanResources,
   out: MarkedContentEvent[],
   visiting: Set<string>,
   depth: number,
   text?: TextSink,
-): void {
-  if (depth >= MAX_XOBJECT_DEPTH || !resources) return;
+): Promise<void> {
+  if (depth >= MAX_XOBJECT_DEPTH || !resources.dict || !resources.xobjects) return;
 
-  const xobjects = deref(doc, resources.get(PDFName.of('XObject')));
-  if (!(xobjects instanceof PDFDict)) return;
-
-  const ref = xobjects.get(PDFName.of(name));
-  const key = ref instanceof PDFRef ? ref.toString() : `${name}@${depth}`;
+  const entry = get(resources.xobjects, name);
+  const ref = asRef(entry);
+  const key = ref ? refKey(ref) : `${name}@${depth}`;
   if (visiting.has(key)) return;
 
-  const stream = deref(doc, ref);
-  if (!(stream instanceof PDFStream)) return;
-  const subtype = deref(doc, stream.dict.get(PDFName.of('Subtype')));
-  if (!(subtype instanceof PDFName)) return;
-  if (subtype.decodeText() === 'Image') {
+  const stream = asStream(await resolved(doc, entry));
+  if (!stream) return;
+  const subtype = nameOf(await resolved(doc, get(stream.dict, 'Subtype')));
+  if (subtype === null) return;
+  if (subtype === 'Image') {
     if (text) text.imageOperators++;
     return;
   }
-  if (subtype.decodeText() !== 'Form') return;
+  if (subtype !== 'Form') return;
 
-  const contents = decodeStream(stream);
-  if (!contents) return;
-  const formResources = deref(doc, stream.dict.get(PDFName.of('Resources')));
+  const { bytes } = await decodedBytes(doc, stream);
+  if (!bytes) return;
+
+  const own = asDict(await resolved(doc, get(stream.dict, 'Resources')));
+  const inner = own ? await prepareResources(doc, own) : resources;
 
   visiting.add(key);
   try {
-    scanStream(
-      doc,
-      contents,
-      formResources instanceof PDFDict ? formResources : resources,
-      out,
-      visiting,
-      depth + 1,
-      text,
-    );
+    await scanStream(doc, bytes, inner, out, visiting, depth + 1, text);
   } finally {
     visiting.delete(key);
   }
@@ -572,19 +601,35 @@ function skipInlineImage(bytes: Uint8Array, from: number): number {
   return n;
 }
 
-/** Resolve a value that may be an indirect reference. */
-function deref(doc: PDFDocument, obj: unknown): unknown {
-  return obj instanceof PDFRef ? doc.context.lookup(obj) : obj;
+/**
+ * ページ木は 1 文書につき 1 回だけ歩く。
+ *
+ * pdf-lib の `doc.getPage(i)` は文書が持っている配列を引くだけだったが、
+ * `readPageTree` は §7.7.3 の木を毎回歩き直す。`read_text` は
+ * ページごとにこの入口を呼ぶので、200 ページの文書では歩きが 200 回になる。
+ * 出力は変わらない —— 変わるのは歩く回数だけである。
+ */
+const pageTrees = new WeakMap<PdfDocument, Promise<PageTree | null>>();
+
+function pageTreeOf(doc: PdfDocument): Promise<PageTree | null> {
+  const cached = pageTrees.get(doc);
+  if (cached) return cached;
+  const walking = readPageTree(doc).catch(() => null);
+  pageTrees.set(doc, walking);
+  return walking;
 }
 
-/** Decode a stream's bytes, tolerating filters pdf-lib cannot handle. */
-function decodeStream(stream: PDFStream): Uint8Array | null {
-  try {
-    if (stream instanceof PDFRawStream) return decodePDFRawStream(stream).decode();
-    return stream.getContents();
-  } catch {
-    return null;
-  }
+/**
+ * この文書のページ数。**木に届かなかったときは `null`** を返す。
+ *
+ * 🔴 `0` を返さない。`0` は「ページが 1 つも無い木を読んだ」という観測結果であり、
+ * 「木を読めなかった」ではない。同じ数で両方を言うと、後者が前者の顔をする
+ * （このファイルの `scanPage` が `null` と空の観測を分けているのと同じ理由）。
+ */
+export async function pageCountOf(doc: PdfDocument): Promise<number | null> {
+  const tree = await pageTreeOf(doc);
+  if (!tree?.reached) return null;
+  return tree.pages.length;
 }
 
 /**
@@ -598,26 +643,30 @@ function decodeStream(stream: PDFStream): Uint8Array | null {
  * the #15 note); mis-resolving it would be a new and worse failure.
  *
  * @param pageIndex 0-based page index.
+ * @param lockedOut 暗号化されていて鍵が導けなかった（`lockedOut(scope)`）。
  */
-export function scanPageMarkedContent(
-  doc: PDFDocument,
+export async function scanPageMarkedContent(
+  doc: PdfDocument,
   pageIndex: number,
-): MarkedContentEvent[] | null {
-  return scanPage(doc, pageIndex)?.events ?? null;
+  lockedOut: boolean,
+): Promise<MarkedContentEvent[] | null> {
+  return (await scanPage(doc, pageIndex, lockedOut))?.events ?? null;
 }
 
 /**
  * The same scan, with the text-showing tally #21 needs kept as well.
  *
- * Returns `null` for the same reasons `scanPageMarkedContent` does — an
- * encrypted document, a missing or undecodable content stream. A `null` here is
- * "not observed", never "no text": the difference is the whole point of #21.
+ * Returns `null` for the same reasons `scanPageMarkedContent` does — a document
+ * whose key could not be derived, a missing or undecodable content stream. A
+ * `null` here is "not observed", never "no text": the difference is the whole
+ * point of #21.
  */
-export function scanPageTextOperators(
-  doc: PDFDocument,
+export async function scanPageTextOperators(
+  doc: PdfDocument,
   pageIndex: number,
-): { tally: TextOperatorTally; actualTextEntries: number } | null {
-  const scanned = scanPage(doc, pageIndex);
+  lockedOut: boolean,
+): Promise<{ tally: TextOperatorTally; actualTextEntries: number } | null> {
+  const scanned = await scanPage(doc, pageIndex, lockedOut);
   if (!scanned) return null;
   return {
     tally: scanned.text,
@@ -625,62 +674,66 @@ export function scanPageTextOperators(
   };
 }
 
-function scanPage(
-  doc: PDFDocument,
+function emptySink(): TextSink {
+  return { textShowingOperators: 0, imageOperators: 0, usedFonts: new Map(), currentFont: null };
+}
+
+async function scanPage(
+  doc: PdfDocument,
   pageIndex: number,
-): { events: MarkedContentEvent[]; text: TextSink } | null {
-  // An encrypted document's content streams are ciphertext to pdf-lib, which
-  // loads with `ignoreEncryption` and so never decrypts them (§7.6.2 encrypts
-  // strings and streams). Inflate would fail anyway — "Unknown compression
-  // method" — but saying so here keeps the reason from looking like corruption.
-  if (doc.isEncrypted) return null;
+  lockedOut: boolean,
+): Promise<{ events: MarkedContentEvent[]; text: TextSink } | null> {
+  // 鍵が導けなかった暗号化文書では、間接オブジェクトを 1 つも読めない
+  // （ADR-0008 —— normativepdf は暗号文を平文の顔で返さない）。内容ストリームも
+  // 同じで、読めないことを申告するのは呼び出し側の仕事である。
+  // 🔴 pdf-lib 版はここが `doc.isEncrypted` だった。pdf-lib は `ignoreEncryption`
+  // で開いていて復号しないので、**鍵が導ける文書まで諦めていた**。
+  if (lockedOut) return null;
 
-  let node: PDFPageLeaf;
-  try {
-    node = doc.getPage(pageIndex).node;
-  } catch {
-    return null;
-  }
+  const page = (await pageTreeOf(doc))?.pages[pageIndex];
+  if (!page) return null;
 
-  const contents = node.Contents();
-  if (!contents) {
+  const contentsEntry = get(page.dict, 'Contents');
+  if (contentsEntry === undefined) {
     // §7.7.3.3 makes /Contents optional, and its absence has a definite
     // meaning: the page is empty. That is an observation, not a failure to
     // observe — returning `null` here would report a blank page as "could not
     // be read", which is the confusion #21 is about.
-    return {
-      events: [],
-      text: { textShowingOperators: 0, imageOperators: 0, usedFonts: new Map(), currentFont: null },
-    };
+    return { events: [], text: emptySink() };
   }
 
+  const contents = await resolved(doc, contentsEntry);
   const streams: Uint8Array[] = [];
-  if (contents instanceof PDFArray) {
-    for (const item of contents.asArray()) {
-      const resolved = deref(doc, item);
-      if (resolved instanceof PDFStream) {
-        const decoded = decodeStream(resolved);
-        if (decoded) streams.push(decoded);
-      }
+  const parts = asArray(contents);
+  if (parts) {
+    for (const item of parts.items) {
+      const stream = asStream(await resolved(doc, item));
+      if (!stream) continue;
+      const { bytes } = await decodedBytes(doc, stream);
+      if (bytes) streams.push(bytes);
     }
-  } else if (contents instanceof PDFStream) {
-    const decoded = decodeStream(contents);
-    if (decoded) streams.push(decoded);
+  } else {
+    const stream = asStream(contents);
+    if (stream) {
+      const { bytes } = await decodedBytes(doc, stream);
+      if (bytes) streams.push(bytes);
+    }
   }
   if (streams.length === 0) return null;
 
-  const resources = node.Resources();
+  // `/Resources` は継承する（Table 31・§7.7.3.4）。pdf-lib の
+  // `PDFPageLeaf.Resources()` も親を辿っていたので、そこは同じ読み方である。
+  const resources = await prepareResources(
+    doc,
+    asDict(await resolved(doc, inheritedAttribute(page, 'Resources'))),
+  );
+
   const events: MarkedContentEvent[] = [];
-  const text: TextSink = {
-    textShowingOperators: 0,
-    imageOperators: 0,
-    usedFonts: new Map(),
-    currentFont: null,
-  };
+  const text = emptySink();
   try {
     // §7.8.2: the parts of a /Contents array form one stream, and the division
     // may occur only between lexical tokens — a single separator restores it.
-    scanStream(doc, joinWithNewline(streams), resources ?? undefined, events, new Set(), 0, text);
+    await scanStream(doc, joinWithNewline(streams), resources, events, new Set(), 0, text);
   } catch {
     return null;
   }

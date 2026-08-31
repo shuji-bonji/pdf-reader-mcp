@@ -78,11 +78,16 @@ describe('12 - text extractability', () => {
     }
   });
 
-  // TE-8: 暗号化文書は not_observed（extracted に数えない）
-  it('TE-8: an encrypted document is not_observed, never extracted', async () => {
+  // TE-8: 鍵が導ける暗号化文書は観測できる（S3・2026-08-31 に変わった）
+  //
+  // 🔴 pdf-lib のときは `not_observed` だった。`ignoreEncryption` で開いていて
+  // 内容ストリームを復号しなかったので、利用者パスワードが空の文書でも
+  // 「観測できなかった」と答えていた。recover は §7.6.4.3.2 のとおり空の
+  // パスワードで鍵を導いて復号するので、いまは観測できる。
+  it('TE-8: an encrypted document whose key is derivable is observed', async () => {
     const [page] = await observeExtractability(FIXTURES.encryptedActualText);
-    expect(page.state).toBe('not_observed');
-    expect(page.reason).toContain('encrypted');
+    expect(page.state).toBe('extracted');
+    expect(page.textShowingOperators).toBeGreaterThan(0);
   });
 
   // TE-9: 文書全体の畳み込みは、読めないページを優先する

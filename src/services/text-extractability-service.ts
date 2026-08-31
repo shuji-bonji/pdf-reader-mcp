@@ -16,14 +16,35 @@
  * What it does NOT do: judge. `not_extractable` says the file offers no route
  * from these character codes to Unicode — not that the document is wrong, and
  * not that the text pdfjs did return is worthless. The caller decides.
+ *
+ * ## COS の読み口（S3・2026-08-31）
+ *
+ * pdf-lib から `@normativepdf/recover` に替えた。読む鍵も条文も同じで、
+ * 変わったのは 2 つである。
+ *
+ * 1. 参照の解決が非同期になったので、フォントの判定も非同期になった。
+ * 2. **鍵が導ける暗号化文書が観測できるようになった。** pdf-lib は
+ *    `ignoreEncryption` で開いて内容ストリームを復号しなかったので、
+ *    `/Encrypt` がある文書は利用者パスワードが空でも `not_observed` だった。
+ *    いま `not_observed` に落ちるのは**鍵が導けなかったとき**だけである。
  */
 
-import type { PDFDocument } from 'pdf-lib';
-import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRef, PDFStream, PDFString } from 'pdf-lib';
+import {
+  asArray,
+  asDict,
+  asStream,
+  nameOf as cosNameOf,
+  type DocumentScope,
+  get,
+  numberOf,
+  resolved,
+  textOf,
+} from '@normativepdf/recover';
+import type { CosDict, PdfDocument } from 'normativepdf';
 import type { PageExtractability, UnmappableFont } from '../types.js';
 import { resolvePageNumbers } from '../utils/pdf-helpers.js';
-import { scanPageTextOperators } from './content-stream-service.js';
-import { loadWithPdfLib, loadWithPdfLibFromData } from './pdflib-service.js';
+import { pageCountOf, scanPageTextOperators } from './content-stream-service.js';
+import { lockedOut, openPdf, openPdfFromData } from './recover-service.js';
 
 /**
  * Character collections §9.10.2 names as reachable, via the
@@ -60,45 +81,37 @@ interface FontVerdict {
   reason: string;
 }
 
-function deref(doc: PDFDocument, value: unknown): unknown {
-  return value instanceof PDFRef ? doc.context.lookup(value) : value;
-}
-
-function nameOf(doc: PDFDocument, dict: PDFDict, key: string): string | null {
-  const value = deref(doc, dict.get(PDFName.of(key)));
-  return value instanceof PDFName ? value.decodeText() : null;
+/** 辞書の 1 件を名前として読む（参照なら解決してから）。 */
+async function nameEntry(doc: PdfDocument, dict: CosDict, key: string): Promise<string | null> {
+  return cosNameOf(await resolved(doc, get(dict, key)));
 }
 
 /** The descendant CIDFont of a Type0 font (Table 119; the array may be indirect). */
-function descendantFont(doc: PDFDocument, font: PDFDict): PDFDict | null {
-  const descendants = deref(doc, font.get(PDFName.of('DescendantFonts')));
-  if (!(descendants instanceof PDFArray) || descendants.size() === 0) return null;
-  const first = deref(doc, descendants.get(0));
-  return first instanceof PDFDict ? first : null;
+async function descendantFont(doc: PdfDocument, font: CosDict): Promise<CosDict | null> {
+  const descendants = asArray(await resolved(doc, get(font, 'DescendantFonts')));
+  if (!descendants || descendants.items.length === 0) return null;
+  return asDict(await resolved(doc, descendants.items[0]));
 }
 
 /** `/CIDSystemInfo /Ordering` of a CIDFont, e.g. `Japan1` (Table 115). */
-function cidOrdering(doc: PDFDocument, cidFont: PDFDict): string | null {
-  const info = deref(doc, cidFont.get(PDFName.of('CIDSystemInfo')));
-  if (!(info instanceof PDFDict)) return null;
-  const ordering = deref(doc, info.get(PDFName.of('Ordering')));
-  if (ordering instanceof PDFString) return ordering.decodeText();
-  return null;
+async function cidOrdering(doc: PdfDocument, cidFont: CosDict): Promise<string | null> {
+  const info = asDict(await resolved(doc, get(cidFont, 'CIDSystemInfo')));
+  if (!info) return null;
+  return textOf(await resolved(doc, get(info, 'Ordering')));
 }
 
 /** `/Flags` of the font descriptor, or `null` when there is no descriptor. */
-function descriptorFlags(doc: PDFDocument, font: PDFDict): number | null {
-  const descriptor = deref(doc, font.get(PDFName.of('FontDescriptor')));
-  if (!(descriptor instanceof PDFDict)) return null;
-  const flags = deref(doc, descriptor.get(PDFName.of('Flags')));
-  return flags instanceof PDFNumber ? flags.asNumber() : null;
+async function descriptorFlags(doc: PdfDocument, font: CosDict): Promise<number | null> {
+  const descriptor = asDict(await resolved(doc, get(font, 'FontDescriptor')));
+  if (!descriptor) return null;
+  return numberOf(await resolved(doc, get(descriptor, 'Flags')));
 }
 
 /**
  * Decide whether §9.10.2 offers any route from this font's character codes to
  * Unicode, in the priority the clause gives.
  */
-function classifyFont(doc: PDFDocument, font: PDFDict | null): FontVerdict {
+async function classifyFont(doc: PdfDocument, font: CosDict | null): Promise<FontVerdict> {
   if (!font) {
     return {
       mappable: false,
@@ -107,31 +120,30 @@ function classifyFont(doc: PDFDocument, font: PDFDict | null): FontVerdict {
   }
 
   // §9.10.2, first method — a /ToUnicode CMap outranks everything else.
-  const toUnicode = deref(doc, font.get(PDFName.of('ToUnicode')));
-  if (toUnicode instanceof PDFStream) {
+  if (asStream(await resolved(doc, get(font, 'ToUnicode')))) {
     return { mappable: true, reason: 'has a /ToUnicode CMap (§9.10.2, first method)' };
   }
 
-  const subtype = nameOf(doc, font, 'Subtype');
+  const subtype = await nameEntry(doc, font, 'Subtype');
 
   if (subtype === 'Type0') {
     // §9.10.2, third method — a predefined CJK CMap other than Identity-H/V, or
     // a descendant CIDFont in one of the named character collections.
-    const encoding = nameOf(doc, font, 'Encoding');
+    const encoding = await nameEntry(doc, font, 'Encoding');
     if (encoding && !IDENTITY_CMAPS.has(encoding)) {
       return {
         mappable: true,
         reason: `predefined CMap /${encoding} (§9.10.2, third method)`,
       };
     }
-    const cidFont = descendantFont(doc, font);
+    const cidFont = await descendantFont(doc, font);
     if (!cidFont) {
       return {
         mappable: false,
         reason: 'Type0 without /DescendantFonts, so no character collection to map through',
       };
     }
-    const ordering = cidOrdering(doc, cidFont);
+    const ordering = await cidOrdering(doc, cidFont);
     if (ordering && MAPPABLE_CID_ORDERINGS.has(ordering)) {
       return {
         mappable: true,
@@ -150,8 +162,8 @@ function classifyFont(doc: PDFDocument, font: PDFDict | null): FontVerdict {
     // §9.6.5.4: glyph *names* exist only on the MacRoman/WinAnsi or nonsymbolic
     // path; otherwise selection goes straight through the font program's "cmap"
     // and §9.10.2's second method has no name to look up in the AGL.
-    const flags = descriptorFlags(doc, font);
-    const encoding = nameOf(doc, font, 'Encoding');
+    const flags = await descriptorFlags(doc, font);
+    const encoding = await nameEntry(doc, font, 'Encoding');
     const symbolic = flags !== null && (flags & FLAG_SYMBOLIC) !== 0;
     const nonsymbolic = flags !== null && (flags & FLAG_NONSYMBOLIC) !== 0;
     if (nonsymbolic || (!symbolic && encoding && TRUETYPE_NAMED_ENCODINGS.has(encoding))) {
@@ -160,7 +172,7 @@ function classifyFont(doc: PDFDocument, font: PDFDict | null): FontVerdict {
         reason: 'glyph names via the Adobe Glyph List (§9.10.2, second method)',
       };
     }
-    if (!symbolic && deref(doc, font.get(PDFName.of('Encoding'))) instanceof PDFDict) {
+    if (!symbolic && asDict(await resolved(doc, get(font, 'Encoding')))) {
       return {
         mappable: true,
         reason: 'glyph names from the /Encoding dictionary (§9.6.5.4, §9.10.2 second method)',
@@ -187,25 +199,30 @@ function classifyFont(doc: PDFDocument, font: PDFDict | null): FontVerdict {
   };
 }
 
-function describeFont(
-  doc: PDFDocument,
+async function describeFont(
+  doc: PdfDocument,
   resourceName: string,
-  font: PDFDict | null,
+  font: CosDict | null,
   reason: string,
-): UnmappableFont {
+): Promise<UnmappableFont> {
   return {
     resourceName,
-    baseFont: font ? nameOf(doc, font, 'BaseFont') : null,
-    subtype: font ? nameOf(doc, font, 'Subtype') : null,
-    encoding: font ? nameOf(doc, font, 'Encoding') : null,
+    baseFont: font ? await nameEntry(doc, font, 'BaseFont') : null,
+    subtype: font ? await nameEntry(doc, font, 'Subtype') : null,
+    encoding: font ? await nameEntry(doc, font, 'Encoding') : null,
     reason,
   };
 }
 
 /** Observe one page. `pageIndex` is 0-based; the reported `page` is 1-based. */
-function observePage(doc: PDFDocument, pageIndex: number): PageExtractability {
+async function observePage(
+  doc: PdfDocument,
+  scope: DocumentScope,
+  pageIndex: number,
+): Promise<PageExtractability> {
   const page = pageIndex + 1;
-  const scanned = scanPageTextOperators(doc, pageIndex);
+  const locked = lockedOut(scope);
+  const scanned = await scanPageTextOperators(doc, pageIndex, locked);
 
   if (!scanned) {
     return {
@@ -216,8 +233,9 @@ function observePage(doc: PDFDocument, pageIndex: number): PageExtractability {
       textShowingOperators: 0,
       imageOperators: 0,
       actualTextEntries: 0,
-      reason: doc.isEncrypted
-        ? 'the document is encrypted, so its content streams could not be read here'
+      reason: locked
+        ? 'the document is encrypted and its key could not be derived, so no object in it — ' +
+          'including this page’s content stream — could be read'
         : 'the page has no readable content stream',
     };
   }
@@ -241,17 +259,49 @@ function observePage(doc: PDFDocument, pageIndex: number): PageExtractability {
 
   const unmappable: UnmappableFont[] = [];
   for (const [resourceName, font] of tally.usedFonts) {
-    const verdict = classifyFont(doc, font);
-    if (!verdict.mappable) unmappable.push(describeFont(doc, resourceName, font, verdict.reason));
+    const verdict = await classifyFont(doc, font);
+    if (!verdict.mappable) {
+      unmappable.push(await describeFont(doc, resourceName, font, verdict.reason));
+    }
   }
 
   if (unmappable.length === 0) return { ...base, state: 'extracted' };
   return { ...base, state: 'not_extractable', unmappableFonts: unmappable };
 }
 
-function observeDocument(doc: PDFDocument, pages?: string): PageExtractability[] {
-  const pageNumbers = resolvePageNumbers(pages, doc.getPageCount());
-  return pageNumbers.map((pageNumber) => observePage(doc, pageNumber - 1));
+/**
+ * 🔴 ページは**順に**観測する。`Promise.all` で並べると、1 ページが投げたときに
+ * 他のページの答えが捨てられ、どのページの理由が残るかが実行ごとに変わる
+ * （0.14.0 で 3 ツール分を直したのと同じ形）。
+ */
+async function observeDocument(
+  doc: PdfDocument,
+  scope: DocumentScope,
+  pages?: string,
+): Promise<PageExtractability[]> {
+  // 🔴 **空の一覧を返さない。** 鍵が導けない文書では間接オブジェクトを 1 つも
+  // 読めないので、ページ数も分からない（ADR-0008）。`[]` を返すと
+  // 「この文書にページは無い」と言ったことになる —— #21 が分けようとしている
+  // 「読めなかった」と「無かった」を、出力がまた 1 つに畳む。
+  // pdf-lib 版はここで 1 ページを `not_observed` として返せていた
+  // （`ignoreEncryption` は復号せずに構造だけ歩いたので、§7.6.2 が暗号化の
+  // 対象から外している名前と数は読めた）。その分の観測は失われる。
+  if (lockedOut(scope)) {
+    throw new Error(
+      'the document is encrypted and the key could not be derived from the empty user ' +
+        'password (§7.6.4.3.2), so no object in it — not even the page tree — could be read',
+    );
+  }
+  const pageCount = await pageCountOf(doc);
+  if (pageCount === null) {
+    throw new Error('the page tree could not be reached from the catalogue (§7.7.3)');
+  }
+  const pageNumbers = resolvePageNumbers(pages, pageCount);
+  const observed: PageExtractability[] = [];
+  for (const pageNumber of pageNumbers) {
+    observed.push(await observePage(doc, scope, pageNumber - 1));
+  }
+  return observed;
 }
 
 /** Observe the pages of a PDF on disk. */
@@ -259,7 +309,8 @@ export async function observeExtractability(
   filePath: string,
   pages?: string,
 ): Promise<PageExtractability[]> {
-  return observeDocument(await loadWithPdfLib(filePath), pages);
+  const { doc, scope } = await openPdf(filePath);
+  return observeDocument(doc, scope, pages);
 }
 
 /** The same, for bytes already in hand (`read_url`). */
@@ -267,7 +318,8 @@ export async function observeExtractabilityFromData(
   data: Uint8Array,
   pages?: string,
 ): Promise<PageExtractability[]> {
-  return observeDocument(await loadWithPdfLibFromData(data), pages);
+  const { doc, scope } = await openPdfFromData(data);
+  return observeDocument(doc, scope, pages);
 }
 
 /**

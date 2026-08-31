@@ -62,7 +62,7 @@ import {
   type RunBox,
   resolveLineBreaks,
 } from './pdfjs-service.js';
-import { openPdf, pageBox } from './recover-service.js';
+import { lockedOut, openPdf, pageBox } from './recover-service.js';
 import {
   type ContentRef,
   collectContentRefs,
@@ -578,7 +578,7 @@ export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
   const { doc, scope } = await openPdf(filePath);
   const catalog = asDict(await doc.getCatalog().catch(() => null));
   const isTagged = await isMarked(doc, catalog);
-  return analyzeTagsFromStructTree(await walkStructTree(doc, scope.encrypted), isTagged);
+  return analyzeTagsFromStructTree(await walkStructTree(doc, lockedOut(scope)), isTagged);
 }
 
 /**
@@ -605,7 +605,7 @@ export async function extractStructuredText(
   const catalog = asDict(await libDoc.getCatalog().catch(() => null));
   const isTagged = await isMarked(libDoc, catalog);
 
-  const roots = await walkStructTree(libDoc, scope.encrypted);
+  const roots = await walkStructTree(libDoc, lockedOut(scope));
 
   if (!isTagged || !roots || roots.length === 0) {
     return {
@@ -759,7 +759,7 @@ export async function extractTables(
   const catalog = asDict(await libDoc.getCatalog().catch(() => null));
   const isTagged = await isMarked(libDoc, catalog);
 
-  const roots = await walkStructTree(libDoc, scope.encrypted);
+  const roots = await walkStructTree(libDoc, lockedOut(scope));
 
   if (!isTagged || !roots || roots.length === 0) {
     return {

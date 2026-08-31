@@ -10,11 +10,25 @@
  * 失敗したほうの理由で拒否するので、片方が成功していてもその結果ごと捨てられ、
  * どちらが失敗したのかも出力に残らなかった。
  *
- * ここで固定するのは **4 通りすべての振る舞い**である。検体は 4 通りを 1 件ずつ
- * 持つように作ってある（`tests/e2e/halves-specimens.ts`）。
- *
  * 🔴 この試験が守っているのは「読めなかったこと」と「読んで無かったこと」の区別で、
  * 文言ではない。`null` を `0` や `''` や `false` に変えると落ちる。
+ *
+ * ## 2026-08-31（S3・pdf-lib 撤去）以降、実ファイルで出るのは 2 通りである
+ *
+ * 検体は 4 通りを 1 件ずつ持つように作ってあるが、観測側の読み手が
+ * `@normativepdf/recover` に変わったことで、混ざった 2 通りが出なくなった。
+ *
+ * | 検体 | pdf-lib のとき | recover のいま |
+ * |---|---|---|
+ * | `halves-ok-fail-header.pdf` | ok/fail（版の数が無いヘッダで pdf-lib が止まる） | **ok/ok**（recover は読む） |
+ * | `halves-fail-ok-password.pdf` | fail/ok（`ignoreEncryption` で構造だけ歩けた） | **fail/fail**（鍵が導けないと 1 つも読めない・ADR-0008） |
+ *
+ * 混ざった 2 通りを作れないか実測した（ヘッダ無し・`/Count` 不一致・版の無い
+ * ヘッダ）が、3 つとも両方の半分が成功した。recover は pdfjs より厳しくない。
+ *
+ * 🔴 **検体が無いことは、規約が要らなくなったことではない。** 混ざった 2 通りの
+ * 規約は `tests/tier1/reading-scope.test.ts` が stub で固定している。
+ * ここは実ファイルで出る 2 通りだけを測る。
  */
 
 import { createHash } from 'node:crypto';
@@ -127,43 +141,44 @@ describe('15 - reading scope', () => {
     expect(body.pages[1].extractability.reason).toBeTruthy();
   });
 
-  // ---- ok/fail ----
-  it('RS-3: 観測が失敗しても、取り出せた文字を捨てない', async () => {
+  // ---- 版の数が無いヘッダ（pdf-lib のときは ok/fail だった） ----
+  it('RS-3: 版の数が無いヘッダは、いま両方の半分が読む（§7.5.2）', async () => {
     const { isError, body } = await callTool('read_text', { file_path: paths.okFail });
     expect(isError).toBe(false);
     expect(body.scope.textExtraction.status).toBe('read');
-    expect(body.scope.extractabilityObservation.status).toBe('failed');
-    expect(body.scope.extractabilityObservation.reason).toBeTruthy();
-    expect(body.pages[0].text).toContain('One page with readable text');
-    // 観測できなかったので、観測の欄は付けない。0 を並べた観測を作らない。
-    expect(body.pages[0].extractability).toBeUndefined();
-  });
-
-  it('RS-4: 観測が失敗したことを、この server の落ち度として報告しない', async () => {
-    const { body } = await callTool('read_text', { file_path: paths.okFail });
-    // ファイルが条文どおりでないことは INVALID_PDF。INTERNAL_ERROR は
-    // 「この server が落ちた」を意味するので、そちらに倒さない。
-    expect(body.scope.extractabilityObservation.code).toBe('INVALID_PDF');
-  });
-
-  // ---- fail/ok ----
-  it('RS-5: 文字が取り出せなくても、観測できたことは返す', async () => {
-    const { isError, body } = await callTool('read_text', { file_path: paths.failOk });
-    expect(isError).toBe(false);
-    expect(body.scope.textExtraction.status).toBe('failed');
-    expect(body.scope.textExtraction.code).toBe('ENCRYPTED_PDF');
+    // 🔴 pdf-lib はここで版の数を読もうとして止まっていた。recover は読む。
     expect(body.scope.extractabilityObservation.status).toBe('read');
-    expect(body.pages).toHaveLength(1);
-    // 🔴 '' と書くと「このページに文字は無い」と言ったことになる。それは測っていない。
-    expect(body.pages[0].text).toBeNull();
-    expect(body.pages[0].extractability.state).toBe('not_observed');
+    expect(body.pages[0].text).toContain('One page with readable text');
+    expect(body.pages[0].extractability.state).toBe('extracted');
+  });
+
+  it('RS-4: 観測が読めたときは、そのページに観測の欄が付く', async () => {
+    const { body } = await callTool('read_text', { file_path: paths.okFail });
+    // 0 を並べた観測を作らないことは変わらない —— 観測できたから数が入っている。
+    expect(body.pages[0].extractability.textShowingOperators).toBe(1);
+    expect(body.pages[0].extractability.fontsUsed).toBe(1);
+  });
+
+  // ---- 鍵が導けない文書（pdf-lib のときは fail/ok だった） ----
+  it('RS-5: 鍵が導けない文書は、ページ数を 0 と書かずに両方の失敗を返す', async () => {
+    const { isError, body } = await callTool('read_text', { file_path: paths.failOk });
+    // 🔴 recover は鍵が導けないと間接オブジェクトを 1 つも渡さない（ADR-0008）ので、
+    // ページ数も分からない。`pages: []` を返すと「この文書にページは無い」と
+    // 言ったことになる —— それはこの試験が分けようとしている混同そのものである。
+    expect(isError).toBe(true);
+    expect(body.pages).toBeUndefined();
+    const cause: string = body.detail?.cause ?? '';
+    expect(cause).toContain('text extraction: ENCRYPTED_PDF');
+    expect(cause).toContain('extractability observation: ENCRYPTED_PDF');
   });
 
   it('RS-6: 鍵が導けないことを、暗号化 PDF に対応していないと言い換えない', async () => {
     const { body } = await callTool('read_text', { file_path: paths.failOk });
-    const hint: string = body.scope.textExtraction.hint ?? '';
+    const hint: string = body.hint ?? '';
     expect(hint).toContain('7.6.4.3.2');
     expect(hint).not.toContain('サポートしていません');
+    // 観測が「続いている」とも書かない —— 続いていない。
+    expect(hint).not.toContain('続けています');
   });
 
   // ---- fail/fail ----
@@ -190,33 +205,30 @@ describe('15 - reading scope', () => {
       file_path: paths.failOk,
       query: 'text',
     });
-    expect(isError).toBe(false);
-    expect(body.scope.textExtraction.status).toBe('failed');
-    expect(body.totalMatches).toBeNull();
-    expect(body.matches).toBeNull();
+    expect(isError).toBe(true);
+    // 🔴 0 件は「探して見つからなかった」であり、ここでは探せていない。
+    expect(body.totalMatches).toBeUndefined();
+    expect(body.matches).toBeUndefined();
   });
 
   it('RS-10: search_text は探せたときは数を返す', async () => {
     const { body } = await callTool('search_text', { file_path: paths.okFail, query: 'readable' });
-    expect(body.scope.extractabilityObservation.status).toBe('failed');
+    expect(body.scope.textExtraction.status).toBe('read');
     expect(body.totalMatches).toBe(1);
   });
 
-  it('RS-11: summarize は読まなかった項目を null にする（0 や false にしない）', async () => {
+  it('RS-11: summarize は読まなかった項目を 0 や false で埋めない', async () => {
     const { isError, body } = await callTool('summarize', { file_path: paths.failOk });
-    expect(isError).toBe(false);
-    expect(body.scope.metadata.status).toBe('failed');
-    expect(body.metadata).toBeNull();
-    expect(body.imageCount).toBeNull();
-    expect(body.hasText).toBeNull();
-    // 観測は動いたので、そちらは埋まる
-    expect(body.scope.extractabilityObservation.status).toBe('read');
-    expect(body.textExtractability).toBe('not_observed');
+    expect(isError).toBe(true);
+    const text = JSON.stringify(body);
+    expect(text).not.toContain('"imageCount":0');
+    expect(text).not.toContain('"hasText":false');
+    expect(text).not.toContain('"pageCount":0');
   });
 
   it('RS-12: summarize は観測できなかった前提から next を出さない', async () => {
     const { body } = await callTool('summarize', { file_path: paths.failOk });
-    expect(body.next).toEqual([]);
+    expect(body.next).toBeUndefined();
   });
 
   it('RS-14: read_url は取ってきた文書の文字を返す（配列を使い回して空にしない）', async () => {
@@ -229,10 +241,10 @@ describe('15 - reading scope', () => {
     expect(body.pages[0].extractability.state).toBe('extracted');
   });
 
-  it('RS-15: read_url も read_text と同じ 4 通りの規約に従う', async () => {
-    const { body } = await callTool('read_url', { url: `${origin}/failOk` });
-    expect(body.scope.textExtraction.status).toBe('failed');
-    expect(body.pages[0].text).toBeNull();
+  it('RS-15: read_url も read_text と同じ規約に従う', async () => {
+    const locked = await callTool('read_url', { url: `${origin}/failOk` });
+    expect(locked.isError).toBe(true);
+    expect(String(locked.body.detail?.cause ?? '')).toContain('extractability observation:');
     const bad = await callTool('read_url', { url: `${origin}/failFail` });
     expect(bad.isError).toBe(true);
     expect(String(bad.body.detail?.cause ?? '')).toContain('extractability observation:');

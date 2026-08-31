@@ -34,7 +34,6 @@
  */
 
 import type { PdfDocument } from 'normativepdf';
-import type { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { scanPageMarkedContent } from './content-stream-service.js';
 import type { StructElement } from './struct-tree-walker.js';
 import { collectContentRefs, walkStructTree } from './struct-tree-walker.js';
@@ -79,10 +78,10 @@ interface RawItem {
  */
 export async function buildStructActualTextMap(
   doc: PdfDocument,
-  encrypted: boolean,
+  lockedOut: boolean,
 ): Promise<Map<string, string>> {
   const map = new Map<string, string>();
-  const roots = await walkStructTree(doc, encrypted);
+  const roots = await walkStructTree(doc, lockedOut);
   if (!roots) return map;
 
   const visit = (element: StructElement): void => {
@@ -232,13 +231,15 @@ export function foldActualText(
  *
  * @param pageIndex 0-based.
  * @param pdfjsBeginCount How many begin markers pdfjs reported for the page.
+ * @param lockedOut 暗号化されていて鍵が導けなかった（`lockedOut(scope)`）。
  */
-export function buildSpanActualTextMap(
-  doc: PdfLibDocument,
+export async function buildSpanActualTextMap(
+  doc: PdfDocument,
   pageIndex: number,
   pdfjsBeginCount: number,
-): Map<number, string> | undefined {
-  const events = scanPageMarkedContent(doc, pageIndex);
+  lockedOut: boolean,
+): Promise<Map<number, string> | undefined> {
+  const events = await scanPageMarkedContent(doc, pageIndex, lockedOut);
   if (!events) return pdfjsBeginCount === 0 ? new Map() : undefined;
 
   const begins = events.filter((e) => e.kind === 'begin');
