@@ -269,9 +269,26 @@ function keptPages(list) {
   };
 }
 
+/**
+ * 応答が申告する射程（0.14.0 から）。
+ * 🔴 ここを凍結しないと、「どこまで読んだか」が動いたことを計器が言えない。
+ * verify の計器が `observation` を記録しておらず、A/B が差 0 件を出した形と同じ。
+ */
+function keptScope(raw) {
+  const scope = raw?.scope;
+  if (!scope || typeof scope !== 'object') return null;
+  const out = {};
+  for (const [part, outcome] of Object.entries(scope)) {
+    out[part] = outcome?.status === 'read' ? 'read' : `failed:${outcome?.code ?? '?'}`;
+  }
+  return out;
+}
+
 function keptOf(key, raw) {
   if (raw == null) return null;
   const tool = CALL_BY_KEY.get(key)?.tool ?? key;
+  const scope = keptScope(raw);
+  const withScope = (o) => (scope ? { scope, ...o } : o);
   switch (tool) {
     case 'get_page_count':
       return { pageCount: typeof raw === 'number' ? raw : (raw?.pageCount ?? null) };
@@ -289,19 +306,20 @@ function keptOf(key, raw) {
           'creationDate', 'modificationDate'].filter((k) => len(raw[k]) > 0),
       };
     case 'read_text':
-      return keptPages(raw);
     case 'read_url':
-      // 本文は read_text と同じ形。上の階層に url が付く形なら中身を取り出す
-      return Array.isArray(raw) ? keptPages(raw) : keptPages(raw?.pages ?? raw?.text ?? []);
+      // 🔴 0.14.0 で最上位が配列から `{ scope, pages }` になった。
+      // **両方の形を読む** —— 片方しか読まないと、形が変わっただけの版で
+      // 「1 ページも取れていない」と報告する（実際にそう報告した）。
+      return withScope(keptPages(Array.isArray(raw) ? raw : (raw?.pages ?? [])));
     case 'search_text':
-      return {
+      return withScope({
         totalMatches: raw.totalMatches ?? null,
         matches: N(raw.matches),
         truncated: raw.truncated ?? null,
         pagesHit: [...new Set((raw.matches ?? []).map((m) => m.page))].sort((a, b) => a - b),
-      };
+      });
     case 'summarize':
-      return {
+      return withScope({
         pageCount: raw.metadata?.pageCount ?? null,
         pdfVersion: raw.metadata?.pdfVersion ?? null,
         isTagged: raw.metadata?.isTagged ?? null,
@@ -311,9 +329,10 @@ function keptOf(key, raw) {
         imageCount: raw.imageCount ?? null,
         textExtractability: raw.textExtractability ?? null,
         unreadablePages: N(raw.unreadablePages),
-        previewChars: len(raw.textPreview),
+        // 🔴 null（その読みが回らなかった）と 0（回って 0 だった）を潰さない
+        previewChars: raw.textPreview === null ? null : len(raw.textPreview),
         nextCount: N(raw.next),
-      };
+      });
     case 'inspect_structure':
       return {
         catalogKeys: (raw.catalog ?? []).map((e) => e.key).sort(),
@@ -372,10 +391,11 @@ function keptOf(key, raw) {
       };
     case 'extract_structured_text': {
       const els = raw.elements ?? [];
-      return {
-        isTagged: raw.isTagged ?? null,
+      return withScope({
+        isTagged: raw.isTagged === null ? 'null' : (raw.isTagged ?? null),
         lang: raw.lang ?? null,
-        elements: els.length,
+        // 🔴 null（構造木を読めなかった）と 0（読んで要素が無かった）を分ける
+        elements: raw.elements === null ? null : els.length,
         roles: els.map((e) => e.role ?? null),
         totalChars: els.reduce((a, e) => a + len(e.text), 0),
         withBbox: els.filter((e) => e.bbox != null).length,
@@ -384,7 +404,7 @@ function keptOf(key, raw) {
         withBoxNote: els.filter((e) => e.boxNote != null).length,
         bboxBasis: [...new Set(els.map((e) => e.bbox?.basis).filter(Boolean))].sort(),
         states: (raw.extractability ?? []).map((p) => p.state ?? null),
-      };
+      });
     }
     case 'locate_objects':
       return {
@@ -406,6 +426,8 @@ function keptOf(key, raw) {
         warnings: raw.warnings ?? null,
         issues: (raw.issues ?? []).map((i) => [i.severity ?? null, i.code ?? null]),
         metadata: raw.metadata ?? null,
+        // 🔴 前提を観測できずに回らなかった検査。0.14.0 で足した項目
+        notChecked: (raw.notChecked ?? []).map((n) => n.code).sort(),
       };
     case 'compare_structure':
       return {
@@ -1493,9 +1515,13 @@ function t3(goldenPath) {
     return g;
   }, (t) => /^F 観測できた対象が増えた/m.test(t));
 
+  // 🔴 0.14.0 で read_text の最上位が配列から `{ scope, pages }` になった。
+  // 壊す先も両方の形を見る —— 古いゴールデンを t3 にかけても回るように。
+  const pagesOf = (entry) => (Array.isArray(entry.raw) ? entry.raw : entry.raw.pages);
+
   add('8 🔴 取り出せた文字が減る', (g) => {
     const e = g.files[textKey].calls.read_text;
-    const p = e.raw.find((x) => len(x.text) > 5);
+    const p = pagesOf(e).find((x) => len(x.text) > 5);
     p.text = p.text.slice(0, 3);
     refresh(e, 'read_text');
     return g;
@@ -1503,18 +1529,29 @@ function t3(goldenPath) {
 
   add('9 取り出せた文字が増える', (g) => {
     const e = g.files[textKey].calls.read_text;
-    e.raw[0].text = `${e.raw[0].text}T-3`;
+    const p = pagesOf(e)[0];
+    p.text = `${p.text}T-3`;
     refresh(e, 'read_text');
     return g;
   }, (t) => /^O 取り出せた文字が増えた/m.test(t));
 
   add('10 ページの抽出の申告が extracted から降りる', (g) => {
     const e = g.files[textKey].calls.read_text;
-    const p = e.raw.find((x) => x.extractability?.state === 'extracted');
+    const p = pagesOf(e).find((x) => x.extractability?.state === 'extracted');
     p.extractability.state = 'not_extractable';
     refresh(e, 'read_text');
     return g;
   }, (t) => /^C 判定が変わった/m.test(t));
+
+  add('18 🔴 射程だけが動く（判定は動かない）', (g) => {
+    const e = g.files[textKey].calls.read_text;
+    e.raw.scope = {
+      textExtraction: { status: 'read' },
+      extractabilityObservation: { status: 'failed', code: 'INVALID_PDF', reason: 'T-3' },
+    };
+    refresh(e, 'read_text');
+    return g;
+  }, (t) => /差: [1-9]/.test(t) && /read_text/.test(t));
 
   add('11 見つかっていたオブジェクトが見つからなくなる', (g) => {
     const e = g.files[locKey].calls['locate_objects#1-10'];
