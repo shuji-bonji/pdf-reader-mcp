@@ -5,11 +5,15 @@
 > verify = `mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`（+ `scope-in-output.md`）。
 >
 > 実測日 2026-08-29。reader **0.13.0** / normativepdf **0.9.0**。
-> **2026-08-31 追記: L0 と L1 の 1 本目が閉じた。§0 を先に読むこと。**
+> **2026-08-31 追記: L0 / L1 / S1 / S2 が閉じた。§0 と §0.15 を先に読むこと。**
 
 ## 0. いまここ（2026-08-31）
 
-**L0 は終わった。L1 は `detectEncryption` 1 本を移し終えた。次は L1 の続き。**
+**L0 / L1 / S1 / S2 は終わった。次は S3。**
+
+> 別セッションで続けるなら、**§0.15「次のセッションが最初に読む所」から読む**。
+> 基準ファイル・残りの段・環境の落とし穴・面 3 の叩き方がそこに揃えてある。
+> この §0 の残りは、そこまでに何を測って何が分かったかの記録である。
 
 ### L1 / L2 の進み
 
@@ -187,6 +191,64 @@ reader が pdf-lib から import している記号は **14 種**で、うち 3 
 | `pdfDocEncodingDecode` / `utf16Decode` | `textOf` |
 | `PDFPageLeaf` | `enumerateDicts` + `get` |
 | `PDFDocument` | `openDocument` の戻り |
+
+### 0.15 次のセッションが最初に読む所（S3 から始める）
+
+```
+基準       .golden/json-S2.json / .golden/md-S2.json  ← S3 はここと比べる
+           （.golden/json-0.14.0.json は撤去前の原点。消さない）
+残り       S3 content-stream-service(701) + text-extractability-service(349)
+           S4 pdflib-service(544)・loadWithPdfLib を消す
+           L3 pdf-lib を devDependencies へ / L4 受入 3 面
+```
+
+#### S3 の継ぎ目（S2 で作った借り）
+
+`pdfjs-service.ts` の `loadActualTextResolution` は **いま 2 回開いている**。
+構造木側は recover、Span 側（`buildSpanActualTextMap` → `content-stream-service`）は
+まだ pdf-lib である。S3 で `content-stream-service` を移すと、この pdf-lib の口は消える。
+`ActualTextResolution.libDoc` が残っているのはそのためで、S3 の完了条件でもある。
+
+`text-extractability-service` は 0.14.0 の `scope`（行われなかった読み）が乗っている
+経路そのもので、`read_text` / `summarize` / `search_text` / `read_url` /
+`extract_structured_text` を支える。**A/B で最も差が出やすい段**である。
+
+#### 環境（この会話で分かったこと。§7 の追加）
+
+- **`device_bash` の裏で走らせられない。** 呼び出しが終わると `--die-with-parent` で
+  子ごと落ちる（`setsid nohup` でも同じ）。しかも各呼び出しは別の PID 名前空間なので
+  `pgrep` は前の呼び出しのプロセスを**見つけられない** —— 落ちているのに
+  「動いている」と読めてしまう
+- **採取は budget を呼び出し時間より十分下に置く。** 実測で通った値:
+  3 本並列なら `--budget-ms 70000`、1 本だけなら `100000`〜`110000`。
+  🔴 呼び出しの timeout で殺されると**書きかけの JSON が残る**（`Unterminated string`）。
+  その持ち場は `--resume` できないので、`--resume` を付けずに採り直す
+- **git はマウント越しでロックを消せない。** `.git/index.lock` が残って次の
+  `git add` が「File exists」で止まる。消せないので**脇へ退避する**:
+  `mkdir -p .git/_stale-locks && mv .git/index.lock .git/_stale-locks/…`。
+  identity も毎回渡す（`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`）
+- **マウントの `node_modules` に recover を入れた方法**: `npm pack` した tarball を
+  展開して置いた（`npm install` はホストの darwin バイナリを linux のものに
+  置き換えるので打てない）。`package.json` / `package-lock.json` は
+  `npm install --package-lock-only` が書いた内容と同じにしてある。
+  🔴 その際 linux 側の npm は lock から `libc` の行を落とすので、**lock は手で足す**
+  （root の `dependencies` + `node_modules/<pkg>` の 2 か所）
+
+#### 面 3（独立オラクル）の使い方
+
+`qpdf` / `pdftotext` / `pdfinfo` はこの VM に**入っている**（`mutool` と `verapdf` は無い）。
+
+| 訊きたいこと | 叩き方 |
+|---|---|
+| そのオブジェクトは在るか・型は何か | `qpdf --show-object=N <file>` |
+| 暗号化と利用者パスワード | `qpdf --show-encryption <file>` |
+| 復号した中身 | `qpdf --decrypt --qdf --object-streams=disable <in> <out>` |
+| 相互参照表の中身 | `qpdf --show-xref <file>` |
+
+🔴 **`qpdf --show-object` は辞書を 2 行目に書く。** `head -1` で切ると
+`Object is stream.  Dictionary:` しか取れず、型の照合が**全件不一致**になる。
+S1 で実際にこれを踏み、「0/10 一致」と報告した検査が何も読んでいなかった。
+`head -3` まで取ること。
 
 ### 0.2 計器の回し方
 
