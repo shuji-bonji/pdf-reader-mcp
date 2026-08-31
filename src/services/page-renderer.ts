@@ -21,12 +21,17 @@
  * is stated in the tool description rather than hidden: a rendering difference
  * between the two is possible, and pretending one engine produced both outputs
  * would misattribute any such difference.
+ *
+ * 🔴 描画そのものは Worker で走る（#27）。PDFium は WASM の中で同期に走るので、
+ * 終わらない文書があるとイベントループごと止まり、サーバは応答を返さなくなる。
+ * JavaScript 側の時限では割り込めない（タイマーの印が 1 つも出ないことを実測）。
+ * `worker.terminate()` は止まった PDFium を実際に止められるので、そこに移した。
+ * 詳細と実例は `page-renderer.worker.ts` の冒頭にある。
  */
 
+import { Worker } from 'node:worker_threads';
 import { DEFAULT_IMAGE_QUALITY, MAX_IMAGE_PIXELS, MAX_IMAGE_RESPONSE_BYTES } from '../constants.js';
 import { readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
-import { encodeJpeg, encodePng } from './image-encoder.js';
-import { downscale, type Samples } from './image-resampler.js';
 
 /** One rendered page, as an encoded image file. */
 export interface RenderedPage {
@@ -59,6 +64,12 @@ export interface RenderResult {
 export interface RenderOptions {
   /** Rasterisation density. Default 150 — text is legible, files stay small. */
   dpi?: number;
+  /**
+   * 1 ページの描画に許す時間（ミリ秒）。既定 20,000。
+   * 越えたページは描画を止め、`omitted` に理由を書いて次へ進む。
+   * 環境変数 `PDF_READER_RENDER_TIMEOUT_MS` でも変えられる。
+   */
+  pageTimeoutMs?: number;
   /** Cap on the rendered width in pixels; overrides dpi when smaller. */
   maxWidth?: number;
   format?: 'png' | 'jpeg';
@@ -68,6 +79,13 @@ export interface RenderOptions {
 }
 
 export const DEFAULT_RENDER_DPI = 150;
+
+/**
+ * 1 ページの描画に許す時間。20 秒。
+ * 大きいページを高い dpi で描くのは正当に数秒かかるので、それより十分長く取る。
+ * 越えたページは「時間内に描画できなかった」として申告し、次のページへ進む。
+ */
+export const DEFAULT_PAGE_TIMEOUT_MS = 20_000;
 
 /** The pdfium module, loaded once. `null` after a failed attempt. */
 let pdfiumLibrary: unknown | null | undefined;
@@ -103,38 +121,6 @@ export const RENDERER_MISSING_MESSAGE =
   'WebAssembly), which is not installed here. Install it next to this server — ' +
   '`npm install @hyzyla/pdfium` — and call again. Every other tool works without it.';
 
-/** BGRA (PDFium's output order) to RGB, dropping alpha against white. */
-function bgraToRgb(width: number, height: number, bgra: Uint8Array): Samples {
-  const data = new Uint8Array(width * height * 3);
-  for (let i = 0; i < width * height; i++) {
-    const alpha = bgra[i * 4 + 3] / 255;
-    // PDFium fills the bitmap with opaque white before drawing, so alpha is
-    // normally 255; the blend is kept for the transparent-background case.
-    data[i * 3] = Math.round(bgra[i * 4 + 2] * alpha + 255 * (1 - alpha));
-    data[i * 3 + 1] = Math.round(bgra[i * 4 + 1] * alpha + 255 * (1 - alpha));
-    data[i * 3 + 2] = Math.round(bgra[i * 4] * alpha + 255 * (1 - alpha));
-  }
-  return { width, height, channels: 3, data };
-}
-
-interface PdfiumPageLike {
-  getOriginalSize(): { originalWidth: number; originalHeight: number };
-  render(options: {
-    scale: number;
-    render: 'bitmap';
-  }): Promise<{ width: number; height: number; data: Uint8Array }>;
-}
-
-interface PdfiumDocumentLike {
-  getPageCount(): number;
-  getPage(index: number): PdfiumPageLike;
-  destroy(): void;
-}
-
-interface PdfiumLibraryLike {
-  loadDocument(data: Uint8Array): Promise<PdfiumDocumentLike>;
-}
-
 /**
  * Render the requested pages to PNG or JPEG.
  *
@@ -146,84 +132,127 @@ export async function renderPages(
   pages: string,
   options: RenderOptions = {},
 ): Promise<RenderResult> {
-  const library = (await loadPdfium()) as PdfiumLibraryLike | null;
-  if (!library) throw new Error(RENDERER_MISSING_MESSAGE);
+  if (!(await rendererAvailable())) throw new Error(RENDERER_MISSING_MESSAGE);
 
-  const dpi = options.dpi ?? DEFAULT_RENDER_DPI;
   const format = options.format ?? 'png';
-  const quality = options.quality ?? DEFAULT_IMAGE_QUALITY;
-  const budget = options.maxTotalBytes ?? MAX_IMAGE_RESPONSE_BYTES;
+  const fromEnv = Number(process.env.PDF_READER_RENDER_TIMEOUT_MS);
+  const timeoutMs =
+    options.pageTimeoutMs ??
+    (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_PAGE_TIMEOUT_MS);
 
-  const data = await readPdfFile(filePath);
-  const document = await library.loadDocument(new Uint8Array(data));
+  // 🔴 ページ番号の解決とファイルの読み込みは、ここで済ませる。Worker は
+  // 型剥がしで動くので、`enum` を持つ constants.js に届く module を import できない。
+  const bytes = await readPdfFile(filePath);
 
-  try {
-    const pageNumbers = resolvePageNumbers(pages, document.getPageCount());
+  // 試験では .ts のまま、公開物では .js として起動する。同じ拡張子の兄弟を指す。
+  const workerUrl = new URL(
+    import.meta.url.endsWith('.ts') ? './page-renderer.worker.ts' : './page-renderer.worker.js',
+    import.meta.url,
+  );
 
-    const rendered: RenderedPage[] = [];
-    const omitted: OmittedRender[] = [];
-    let totalEncodedBytes = 0;
+  const rendered: RenderedPage[] = [];
+  const omitted: OmittedRender[] = [];
+  let totalEncodedBytes = 0;
+  let planned: number[] | null = null;
+  let inFlight: number | null = null;
 
-    for (const pageNumber of pageNumbers) {
-      const page = document.getPage(pageNumber - 1);
-      const { originalWidth, originalHeight } = page.getOriginalSize();
+  await new Promise<void>((resolve, reject) => {
+    const worker = new Worker(workerUrl, {
+      workerData: {
+        bytes,
+        pages,
+        dpi: options.dpi ?? DEFAULT_RENDER_DPI,
+        maxWidth: options.maxWidth,
+        format,
+        quality: options.quality ?? DEFAULT_IMAGE_QUALITY,
+        budget: options.maxTotalBytes ?? MAX_IMAGE_RESPONSE_BYTES,
+        maxPixels: MAX_IMAGE_PIXELS,
+      },
+    });
 
-      // dpi → scale: PDF points are 1/72 inch (ISO 32000-2 §8.3.2.3).
-      let scale = dpi / 72;
-      if (options.maxWidth && originalWidth * scale > options.maxWidth) {
-        scale = options.maxWidth / originalWidth;
+    let timer: NodeJS.Timeout;
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      if (error) reject(error);
+      else resolve();
+    };
+
+    /**
+     * 🔴 時限はメッセージが届くたびに引き直す。1 ページごとの予算であって、
+     * 呼び出し全体の予算ではない —— 10 ページを 5 秒ずつ描くのは正常な仕事である。
+     */
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        // 止まったページと、まだ始まっていないページを、理由付きで申告する。
+        // 🔴 黙って落とすと「描画するものが無かった」と見分けが付かなくなる。
+        const stuck = inFlight;
+        if (stuck !== null) {
+          omitted.push({
+            page: stuck,
+            reason:
+              `rendering did not finish within ${timeoutMs} ms and was stopped. ` +
+              'A page can take unbounded time to rasterise — for example a tiling ' +
+              'pattern (ISO 32000-2 §8.7.3.1) whose /XStep or /YStep is a near-zero ' +
+              'magnitude, which asks for an astronomical number of tiles. Lower dpi ' +
+              'or pass max_width if the page is merely large; otherwise this page ' +
+              'cannot be rasterised here.',
+          });
+        }
+        for (const page of planned ?? []) {
+          if (stuck !== null && page > stuck) {
+            omitted.push({
+              page,
+              reason: `not attempted — rendering stopped at page ${stuck}.`,
+            });
+          }
+        }
+        finish();
+      }, timeoutMs);
+    };
+    arm();
+
+    worker.on('message', (message: Record<string, unknown>) => {
+      arm();
+      switch (message.t) {
+        case 'pagecount': {
+          try {
+            planned = resolvePageNumbers(pages, message.pageCount as number);
+          } catch (error) {
+            finish(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+          worker.postMessage({ pageNumbers: planned });
+          return;
+        }
+        case 'plan':
+          planned = message.pageNumbers as number[];
+          return;
+        case 'start':
+          inFlight = message.page as number;
+          return;
+        case 'page':
+          inFlight = null;
+          rendered.push(message.rendered as RenderedPage);
+          totalEncodedBytes += (message.rendered as RenderedPage).encodedBytes;
+          return;
+        case 'omit':
+          inFlight = null;
+          omitted.push({ page: message.page as number, reason: message.reason as string });
+          return;
+        case 'done':
+          finish();
+          return;
       }
+    });
 
-      if (originalWidth * scale * originalHeight * scale > MAX_IMAGE_PIXELS) {
-        omitted.push({
-          page: pageNumber,
-          reason:
-            `${Math.round(originalWidth * scale)}×${Math.round(originalHeight * scale)} at ` +
-            `${dpi} dpi exceeds the ${MAX_IMAGE_PIXELS.toLocaleString()} pixel limit. ` +
-            'Lower dpi or pass max_width.',
-        });
-        continue;
-      }
+    worker.on('error', (error) => finish(error));
+    worker.on('exit', () => finish());
+  });
 
-      const bitmap = await page.render({ scale, render: 'bitmap' });
-      let samples = bgraToRgb(bitmap.width, bitmap.height, bitmap.data);
-      if (options.maxWidth && samples.width > options.maxWidth) {
-        samples = downscale(samples, options.maxWidth);
-      }
-
-      const bytes =
-        format === 'jpeg'
-          ? encodeJpeg(samples.width, samples.height, 3, samples.data, quality)
-          : encodePng(samples.width, samples.height, 2, 8, samples.data);
-      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-
-      if (totalEncodedBytes + bytes.length > budget) {
-        omitted.push({
-          page: pageNumber,
-          reason:
-            `${bytes.length.toLocaleString()} bytes would take the response past the ` +
-            `${budget.toLocaleString()}-byte budget. Render fewer pages per call, lower dpi, ` +
-            'or pass format: "jpeg".',
-        });
-        continue;
-      }
-
-      totalEncodedBytes += bytes.length;
-      rendered.push({
-        page: pageNumber,
-        width: samples.width,
-        height: samples.height,
-        pointWidth: Math.round(originalWidth),
-        pointHeight: Math.round(originalHeight),
-        effectiveDpi: Math.round((samples.width / originalWidth) * 72),
-        mimeType,
-        encodedBytes: bytes.length,
-        dataBase64: bytes.toString('base64'),
-      });
-    }
-
-    return { pages: rendered, omitted, totalEncodedBytes };
-  } finally {
-    document.destroy();
-  }
+  return { pages: rendered, omitted, totalEncodedBytes };
 }

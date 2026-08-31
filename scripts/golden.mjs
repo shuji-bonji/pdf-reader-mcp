@@ -655,6 +655,7 @@ async function take(outPath, opts) {
         stoppedEarly = true;
         break;
       }
+      const tFile = Date.now();
       const stat = statSync(t.path);
       const bytes = readFileSync(t.path);
       const entry = {
@@ -731,7 +732,11 @@ async function take(outPath, opts) {
         };
       }
       files[t.key] = entry;
-      if ((i + 1) % 100 === 0) {
+      // 🔴 時間のかかった検体を名指しする。どこで止まっているのか分からないまま
+      // 待つことになるのを避ける（1 検体で 83 秒かかるものが実在した）。
+      const fileMs = Date.now() - tFile;
+      if (fileMs > 5000) process.stderr.write(`  遅い検体 ${fileMs}ms  ${t.key}\n`);
+      if ((i + 1) % 25 === 0) {
         flush(false);
         process.stderr.write(`  ${i + 1}/${assigned.length} (${Date.now() - t0}ms)\n`);
       }

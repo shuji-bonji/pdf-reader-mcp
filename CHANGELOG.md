@@ -33,6 +33,27 @@ actually done. Output shapes change — read **Changed** before upgrading.
   `Expected instance of PDF...`) fell through to `INTERNAL_ERROR`; they are
   `INVALID_PDF`.
 
+- **A 3.4 KB file could stop the server for good.** `render_page` called PDFium
+  on the main thread, and PDFium runs synchronously inside WebAssembly. Two
+  files in the veraPDF corpus (`TWG test suite A018-pdfa2-pass-b.pdf` and
+  `-fail-b.pdf`) never came back: twenty minutes in, the process still had to be
+  killed. A timer set to fire every second during the call fired zero times —
+  the event loop was blocked, so no timeout written in JavaScript could have
+  interrupted it.
+
+  The cause is in the file, and it is not a violation. The page is filled with a
+  tiling pattern (ISO 32000-2 §8.7.3.1) whose `/YStep` is `-1.175e-38`. Table 74
+  says `XStep` and `YStep` "may be either positive or negative but shall not be
+  zero"; this is not zero. It is the smallest magnitude a float32 can hold, so
+  tiling 500 points at that step asks for more than 10^38 tiles.
+
+  Rendering now runs in a worker thread with a **20-second budget per page**
+  (`PDF_READER_RENDER_TIMEOUT_MS` overrides it, or `pageTimeoutMs` in-process).
+  `worker.terminate()` does stop a wedged PDFium — measured. Pages rendered
+  before the stuck one are still returned; the stuck page is named in `omitted`
+  with the reason; pages after it are reported separately as `not attempted`,
+  because "could not be rendered" and "never started" are different answers.
+
 ### Changed
 
 - **Two readings, reported separately (#26).** Taking the characters off a page
@@ -105,6 +126,10 @@ actually done. Output shapes change — read **Changed** before upgrading.
   `--static-id` to keep the bytes identical run to run.
 - `scripts/golden.mjs` — freezes the output of all 19 tools across 23 calls, so
   the pdf-lib removal that follows can be attributed difference by difference.
+- `scripts/golden-specimens-render.mjs` and
+  `tests/e2e/16-render-timeout.test.ts` — a three-page specimen whose second
+  page never finishes rasterising, built from the clause rather than copied from
+  the corpus, plus the four tests that pin the behaviour above.
 
 ## [0.13.0] - 2026-08-27
 

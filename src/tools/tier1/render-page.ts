@@ -36,6 +36,8 @@ Args:
 Returns:
   A text block with per-page metadata (point size, pixel size, effective dpi, bytes) and any omissions, then one image content block per rendered page.
 
+Rasterising a page can take unbounded time — a tiling pattern (ISO 32000-2 §8.7.3.1) whose \`/XStep\` or \`/YStep\` is a near-zero magnitude asks for an astronomical number of tiles, and the clause forbids only zero. Each page therefore gets 20 seconds (\`PDF_READER_RENDER_TIMEOUT_MS\` overrides it); the rendering runs off the main thread, so a page that does not finish is stopped and named in the omissions rather than taking the server down with it. The pages rendered before it are still returned, and the pages after it are reported separately as not attempted — "could not be rendered" and "never started" are different answers.
+
 Examples:
   - A scanned page: { file_path: "/path/to/scan.pdf", pages: "1", format: "jpeg" }
   - A diagram at high detail: { file_path: "/path/to/doc.pdf", pages: "3", dpi: 300 }`,
