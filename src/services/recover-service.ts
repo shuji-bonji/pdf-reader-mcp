@@ -15,8 +15,36 @@
  * 握り潰しを直すのは A/B を採ったあとの別の段に置く（§L1 の後）。
  */
 
-import { openDocument } from '@normativepdf/recover';
+import { type DocumentScope, type OpenedDocument, openDocument } from '@normativepdf/recover';
 import { readPdfFile } from '../utils/pdf-helpers.js';
+
+export type { DocumentScope, OpenedDocument };
+
+/**
+ * ファイルを開く。`loadWithPdfLib` の置き換え先で、**`scope` を捨てない**のが違いである。
+ *
+ * pdf-lib 版は `PDFDocument` だけを返していたので、呼び出し側は
+ * 「読めたのか」「どこまで読めたのか」を訊けなかった。`scope` は
+ * `recovered` / `authenticated` / `chainStop` などを持つ（判定ではなく射程）。
+ */
+export async function openPdf(filePath: string): Promise<OpenedDocument> {
+  return openDocument(await readPdfFile(filePath));
+}
+
+/** バイト列から開く（`read_url` はパスを持たない）。 */
+export async function openPdfFromData(data: Uint8Array): Promise<OpenedDocument> {
+  return openDocument(data);
+}
+
+/**
+ * 暗号化されていて鍵が導けなかったか。**このとき間接オブジェクトは 1 つも読めない**
+ * —— normativepdf は暗号文を平文の顔で返さない（ADR-0008）。
+ * pdf-lib の `ignoreEncryption: true` は復号せずに構造だけ歩けたので、ここは
+ * 振る舞いが変わる。読めなかったことを申告するのは呼び出し側の仕事である。
+ */
+export function lockedOut(scope: DocumentScope): boolean {
+  return scope.encrypted && !scope.authenticated;
+}
 
 /**
  * trailer に `/Encrypt` があるか（ISO 32000-2 §7.6）。

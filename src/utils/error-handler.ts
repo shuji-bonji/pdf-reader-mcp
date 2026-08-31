@@ -87,6 +87,17 @@ function inferFamilyCodeFromMessage(message: string): LawErrorCode | undefined {
   ) {
     return 'INVALID_PDF';
   }
+  // normativepdf / @normativepdf/recover が投げるメッセージ。条文を名指しするので、
+  // 文面そのものは pdf-lib のものより役に立つ。**分類だけが付いていなかった** ——
+  // 拾わないと「ファイルが条文に反している」が INTERNAL_ERROR（= この server の
+  // 落ち度）として出て、hint も next_actions も付かない。
+  // 実測 2026-08-31: `no %PDF- header found (§7.5.2) (at byte 0)` が
+  // INTERNAL_ERROR になり、pdf-lib 版に付いていた hint と next_actions が消えた。
+  if (/\(§\d/.test(message) || /\(R-[\d.]+-\d/.test(message)) {
+    // 暗号は別の口へ（下の分岐より先にここへ来るので、ここで分ける）
+    if (message.includes('encrypted PDF') || message.includes('§7.6')) return 'ENCRYPTED_PDF';
+    return 'INVALID_PDF';
+  }
   if (message.includes('password') || message.includes('encrypted')) {
     return 'ENCRYPTED_PDF';
   }
@@ -203,6 +214,8 @@ function buildInferredError(
       return makeError(code, 'The file does not appear to be a valid PDF.', {
         hint: 'ファイルが破損していないか確認してください。',
         next_actions: [NEXT_ACTIONS.useInspectStructure()],
+        // 🔴 条文を名指しする文面はここに載せる。`original.name`（"ParseError"）に
+        // 畳むと、どの条文に反しているのか・ファイルのどこなのかが消える。
         detail: { cause: original.message },
       });
     case 'ENCRYPTED_PDF':

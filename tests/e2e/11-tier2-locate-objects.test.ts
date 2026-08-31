@@ -10,9 +10,29 @@
  * 動くので、そこに固定すると「フィクスチャを作り直したら落ちる」テストになる。
  * 広い範囲を投げて、返ってきた性質（Subtype / basis / page）で判定する。
  */
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { locateObjects } from '../../src/services/object-locator.js';
+import { HALVES_SPECIMENS } from './halves-specimens.js';
 import { FIXTURES } from './setup.js';
+
+const SCRATCH = mkdtempSync(join(tmpdir(), 'locate-objects-'));
+
+function writeSpecimen(name: string, base64: string): string {
+  const p = join(SCRATCH, name);
+  writeFileSync(p, Buffer.from(base64, 'base64'));
+  return p;
+}
+
+/**
+ * 相互参照表が 4 0 R を名指ししているのに、その値が null オブジェクトである文書
+ * （ISO 32000-2 §7.3.9）。qpdf も `null` と言う。
+ * バイト列をここに置くのは、この形が既存のフィクスチャに 1 件も無いためである。
+ */
+const NULL_VALUED_OBJECT =
+  'JVBERi0xLjcKJeLjz9MKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMTAwXSA+PgplbmRvYmoKNCAwIG9iagpudWxsCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA2NCAwMDAwMCBuIAowMDAwMDAwMTIxIDAwMDAwIG4gCjAwMDAwMDAxOTIgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA1IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoyMTIKJSVFT0YK';
 
 /** 総当たり用のオブジェクト番号。フィクスチャはどれも十分小さい。 */
 const RANGE = Array.from({ length: 30 }, (_, i) => i + 1);
@@ -113,5 +133,48 @@ describe('11 - locate_objects', () => {
     expect(objects.every((o) => o.fieldName === null)).toBe(true);
     // 型（名前オブジェクト）は読めている
     expect(objects.some((o) => o.type !== null)).toBe(true);
+  });
+
+  // ---- 以下 3 件は pdf-lib 撤去（S1）で入った。撤去前は 3 件とも通らない ----
+
+  // LO-8: オブジェクトストリームと相互参照ストリーム**自身**も、番号を持つ
+  // オブジェクトである。pdf-lib の enumerateIndirectObjects() はこの 2 つを
+  // 返さず「この番号のオブジェクトは存在しない」と答えていた（実測 379 件）。
+  // 🔴 qpdf --show-object も同じ番号に ObjStm / XRef を返す（独立オラクル）。
+  it('LO-8: the /ObjStm and /XRef containers are themselves found', async () => {
+    const { objects } = await locateObjects(FIXTURES.twoColumn, RANGE);
+    const types = objects.filter((o) => o.found).map((o) => o.type);
+    expect(types).toContain('ObjStm');
+    expect(types).toContain('XRef');
+  });
+
+  // LO-9: 表が名指ししているのに値が null（§7.3.9）。「無い」で正しいが、
+  // **表に載っていない**のとは別のことが起きている。読み手のすることが違う。
+  it('LO-9: a null-valued object says so, and is not called freed', async () => {
+    const path = writeSpecimen('null-valued.pdf', NULL_VALUED_OBJECT);
+    const { objects } = await locateObjects(path, [3, 4]);
+    const three = objects.find((o) => o.objectNumber === 3);
+    const four = objects.find((o) => o.objectNumber === 4);
+    expect(three?.found).toBe(true);
+    expect(four?.found).toBe(false);
+    expect(four?.reason).toMatch(/null object/);
+    expect(four?.reason).toMatch(/7\.3\.9/);
+    expect(four?.reason).not.toMatch(/freed by a later revision is expected/);
+  });
+
+  // LO-10: 空でない利用者パスワードの文書。鍵が導けないので 1 つも読めない。
+  // 🔴 それを「このオブジェクトは存在しない」と言ってはいけない ——
+  // 後の版が freed にしたのと同じ顔になる。次にすることが違う（パスワードを渡す）。
+  it('LO-10: a document whose key cannot be derived says so, not "no such object"', async () => {
+    const s = HALVES_SPECIMENS.failOk;
+    const path = writeSpecimen(s.name, s.base64);
+    const { objects, isEncrypted, notes } = await locateObjects(path, [1, 2, 3]);
+    expect(isEncrypted).toBe(true);
+    expect(objects.every((o) => o.found === false)).toBe(true);
+    for (const o of objects) {
+      expect(o.reason).toMatch(/7\.6\.4\.3\.2/);
+      expect(o.reason).not.toMatch(/No object with this number exists/);
+    }
+    expect(notes.join(' ')).toMatch(/could not be derived/);
   });
 });

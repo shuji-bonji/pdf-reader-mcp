@@ -11,14 +11,65 @@
 
 **L0 は終わった。L1 は `detectEncryption` 1 本を移し終えた。次は L1 の続き。**
 
-### L1 の進み
+### L1 / L2 の進み
 
-| 入口 | 移した先 | A/B |
+| 段 | 移したもの | A/B |
 |---|---|---|
-| `detectEncryption` | `services/recover-service.ts`（`openDocument` → `scope.encrypted`） | **差 0 件**（2,942 検体 × 23 呼び出し × json/markdown 両方） |
-| `loadWithPdfLib` / `loadWithPdfLibFromData` | まだ pdf-lib | — |
+| L1 | `detectEncryption` → `recover-service.ts` | **差 0 件**（json / markdown 両方） |
+| S1 | `object-locator.ts`（`locate_objects`） | 差 91 件・全件帰属（json / markdown で同じ 91 件） |
+| S2 | `struct-tree-walker` / `struct-tree-service` / `actual-text-service` | まだ |
+| S3 | `content-stream-service` / `text-extractability-service` | まだ |
+| S4 | `pdflib-service`（`loadWithPdfLib` を消す） | まだ |
 
-`detectEncryption` を選んだのは、呼び出し元が `pdfjs-service.ts:125` の
+各段で `openPdf`（recover）と `loadWithPdfLib`（pdf-lib）が**併存する**。
+移した段だけが recover で開き、残りは pdf-lib で開く。同じファイルを 2 回読むので
+遅くなるが、**その段の差だけが A/B に出る**。まとめて移すと、出た差がどの段の
+ものか言えなくなる。
+
+### S1 の帰属（91 件・すべて `locate_objects#1-10`）
+
+| 分類 | 件数 | 何が起きたか |
+|---|---:|---|
+| F 観測が増えた | 84 ファイル / 379 オブジェクト | `/ObjStm` と `/XRef` **自身**。pdf-lib の `enumerateIndirectObjects()` はこの 2 つを返さず「この番号のオブジェクトは存在しない」と答えていた |
+| B 読めない→読めた | 2 | `%PDF-`（版が無いヘッダ）。pdf-lib は版の数を読もうとして止まっていた |
+| E 観測が減った | 3 ファイル / 8 オブジェクト | 下の表 |
+| G その他 | 2 | `detail.cause` の文面が条文つきに変わっただけ（`code` / `hint` / `next_actions` は同じ） |
+
+🔴 **面 3（独立オラクル）で F の 379 件すべてを裏取りした。**
+`qpdf --show-object` が返す `/Type` と **379/379 一致**。pdf-lib の
+「存在しない」が誤りだったことを、reader の外側が確かめている。
+
+> このとき照合スクリプトの側に欠陥があり、最初は **0/10 一致**と出た。
+> qpdf は辞書を 2 行目に書くのに `head -1` で切っていた。
+> 「合わない」と report した検査が、実際には何も読んでいなかった。
+
+#### 読めていたものが読めなくなった 8 オブジェクト（面 2 の要注意）
+
+| ファイル | オブジェクト | 理由 |
+|---|---|---|
+| `halves-fail-ok-password.pdf` | 1〜6 | 空でない利用者パスワード。鍵が導けないので **1 つも読めない**（ADR-0008）。pdf-lib の `ignoreEncryption` は復号せずに構造だけ歩いていた |
+| `render-page2-never-finishes.pdf` | 8 | `/YStep -1.175e-38`。§7.3.3 は指数表記を許さないので、`e` が鍵の位置に来て `R-7.3.7-1` に反する。pdf-lib は黙って受けていた |
+| veraPDF `6-1-5-t02-pass-d.pdf` | 7 | 表は名指ししているが値が **null オブジェクト**（§7.3.9）。qpdf も `null` と言う。pdf-lib の `found: true` が誤りだった |
+
+後ろ 2 件は是正である。**残る 1 件（暗号化）は本当の後退で、判断が要る:**
+空でない利用者パスワードの文書について、pdf-lib 版は `/Type` を返していた
+（§7.6.2 は名前を暗号化の対象から外しているので、それ自体は正しい）。
+recover は鍵が無いとオブジェクトを渡さないので、いまは
+「鍵が導けなかった。パスワードを渡せ」と言って型を返さない。
+利用者パスワードが空の文書（`encrypted-actualtext.pdf` など）は影響を受けない
+—— recover が復号するので、むしろ文字列まで正しく読める。
+
+#### 「見つからない」を 3 つに分けた
+
+| 何が起きたか | どう言うか |
+|---|---|
+| 表に無い / free | この番号のオブジェクトは無い（後の版が freed にした形） |
+| 表にあるが値が null | 表は名指ししているが値は null オブジェクト（§7.3.9） |
+| 表にあるが読めない | 表は名指ししているが読めない + **条文を名指しした理由** |
+
+読み手にとって次にすることが 3 つとも違う。以前は 3 つとも同じ 1 文だった。
+
+L1 の 1 本目に `detectEncryption` を選んだのは、呼び出し元が `pdfjs-service.ts:125` の
 `metadata.isEncrypted` **1 箇所だけ**で、そこから `summarize` を経て
 pdf-read Phase 1 の停止条件になるためである。壊れても何も落ちない経路なので、
 差が出れば必ず A/B に出る。**振る舞いは変えていない** ——
