@@ -94,7 +94,7 @@ Examples:
       // now only where it is actually true, and say which of the two reasons
       // it is: they call for different next steps, and pointing an encrypted
       // document at extract_structured_text would waste the caller's time
-      // (that tool reads its replacement text through pdf-lib as well).
+      // (that tool reads its replacement text from the same document as well).
       if (
         allMatches !== null &&
         allMatches.length === 0 &&

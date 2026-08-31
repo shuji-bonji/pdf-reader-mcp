@@ -20,7 +20,14 @@ Args:
   - response_format ('markdown' | 'json'): Output format (default: 'markdown')
 
 Returns:
-  Catalog entries (keys and types), page tree info (page count, MediaBox samples), object statistics (total count, stream count, type distribution), and encryption status.
+  Catalog entries (keys and COS types), page tree info (page count, MediaBox samples), object statistics, and encryption status.
+
+Object statistics report three separate counts:
+  - byType: the COS type of each indirect object (ISO 32000-2 §7.3) — one of
+    dict, stream, array, name, string, integer, real, boolean, null, ref
+  - byDocType: the /Type of each dictionary (Catalog, Pages, Page, Font, ObjStm, XRef, ...)
+  - unreadable: objects the cross-reference table names but that could not be read.
+    This is counted apart from totalObjects: 0 means "every object was read", not "nothing was checked".
 
 Examples:
   - Examine document catalog for structural features

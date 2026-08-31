@@ -371,16 +371,17 @@ read_text({ file_path: "/path/to/form.pdf", compact_whitespace: true })
 
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — text/image extraction, tag tree, annotations
-- **pdf-lib** — low-level object structure analysis
-- **Vitest** — unit + E2E testing (171 tests)
+- **normativepdf** + **@normativepdf/recover** — COS object access, read from
+  files whose cross-reference table does not follow ISO 32000-2 §7.5
+- **Vitest** — unit + E2E testing (483 tests)
 - **Biome** — linting + formatting
 - **Zod** — input validation
 
 ## Testing
 
 ```bash
-npm test              # Run all tests (unit: 39 tests)
-npm run test:e2e      # E2E tests only (132 tests)
+npm test              # Run all tests (unit + E2E: 483 tests)
+npm run test:e2e      # E2E tests only (283 tests)
 npm run test:watch    # Watch mode
 ```
 
@@ -399,7 +400,13 @@ pdf-reader-mcp/
 │   │   └── index.ts          # Tool registration
 │   ├── services/
 │   │   ├── pdfjs-service.ts        # pdfjs-dist wrapper (parallel page processing)
-│   │   ├── pdflib-service.ts       # pdf-lib wrapper
+│   │   ├── recover-service.ts      # @normativepdf/recover — opening a document,
+│   │   │                           #   and how far it could be read (DocumentScope)
+│   │   ├── structure-service.ts    # Catalog, page tree, object statistics
+│   │   ├── font-service.ts         # Fonts named in each page's /Resources
+│   │   ├── signature-service.ts    # Signature fields of the AcroForm (structure only)
+│   │   ├── content-stream-service.ts  # Marked-content operators, text-showing tally
+│   │   ├── struct-tree-service.ts  # Logical structure (tags, structured text)
 │   │   ├── validation-service.ts   # Validation & comparison logic
 │   │   └── url-fetcher.ts          # URL fetching
 │   ├── schemas/              # Zod validation schemas
@@ -410,7 +417,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # Error handling
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 132 tests)
+    └── e2e/                  # E2E tests (16 suites, 283 tests)
 ```
 
 ## Error Contract (houki-hub family)

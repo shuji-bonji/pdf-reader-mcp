@@ -365,16 +365,17 @@ read_text({ file_path: "/path/to/form.pdf", compact_whitespace: true })
 
 - **TypeScript** + MCP TypeScript SDK
 - **pdfjs-dist** (Mozilla) — テキスト/画像抽出、タグツリー、注釈
-- **pdf-lib** — 低レベルオブジェクト構造解析
-- **Vitest** — Unit + E2E テスト（171 tests）
+- **normativepdf** + **@normativepdf/recover** — COS オブジェクトの読み口。
+  相互参照表が ISO 32000-2 §7.5 のとおりでないファイルも読める範囲まで読む
+- **Vitest** — Unit + E2E テスト（483 tests）
 - **Biome** — lint + format
 - **Zod** — 入力バリデーション
 
 ## テスト
 
 ```bash
-npm test              # 全テスト実行（Unit: 39 tests）
-npm run test:e2e      # E2E のみ（132 tests）
+npm test              # 全テスト実行（Unit + E2E: 483 tests）
+npm run test:e2e      # E2E のみ（283 tests）
 npm run test:watch    # ウォッチモード
 ```
 
@@ -393,7 +394,11 @@ pdf-reader-mcp/
 │   │   └── index.ts          # ツール登録
 │   ├── services/
 │   │   ├── pdfjs-service.ts        # pdfjs-dist ラッパー（並列ページ処理）
-│   │   ├── pdflib-service.ts       # pdf-lib ラッパー
+│   │   ├── recover-service.ts      # @normativepdf/recover。文書を開く口と、
+│   │   │                           #   どこまで読めたかの申告（DocumentScope）
+│   │   ├── structure-service.ts    # 目録・ページ木・オブジェクトの数え上げ
+│   │   ├── font-service.ts         # 各ページの /Resources に載っているフォント
+│   │   ├── signature-service.ts    # AcroForm の署名フィールド（構造のみ）
 │   │   ├── validation-service.ts   # 検証・比較ロジック
 │   │   └── url-fetcher.ts          # URL 取得
 │   ├── schemas/              # Zod バリデーションスキーマ
@@ -404,7 +409,7 @@ pdf-reader-mcp/
 │       └── error-handler.ts  # エラーハンドリング
 └── tests/
     ├── tier1/                # Unit tests
-    └── e2e/                  # E2E tests (9 suites, 132 tests)
+    └── e2e/                  # E2E tests (16 suites, 283 tests)
 ```
 
 ## エラー応答 (houki-hub family contract)

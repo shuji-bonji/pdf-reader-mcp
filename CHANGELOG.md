@@ -5,6 +5,111 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-08-31
+
+pdf-lib is gone. Every reading that used it now goes through
+[`@normativepdf/recover`](https://www.npmjs.com/package/@normativepdf/recover),
+which reports **how far it got** instead of returning a partial answer silently.
+`inspect_structure` changes shape — read **Changed** before upgrading.
+
+The removal was measured against a frozen baseline of 2,942 specimens ×
+67,666 tool calls (veraPDF corpus, pdf20examples, and this repository's own
+specimens), in four stages. Every difference in every stage is attributed in
+`docs/handoff/pdflib-removal.md`; none of them is a wrong `pass`.
+
+### Changed
+
+- **BREAKING — `inspect_structure` reports COS types, not library class names.**
+  `objectStats.byType` and `catalog[].type` used to carry pdf-lib's internal
+  class names (`PDFCatalog`, `PDFPageTree`, `PDFPageLeaf`, `PDFRawStream`,
+  `PDFNumber`, `PDFInvalidObject`). None of those is a type in ISO 32000-2 §7.3 —
+  they are how pdf-lib chose to model the file — so the vocabulary could not
+  survive the removal. It is now the ten COS types of §7.3: `dict`, `stream`,
+  `array`, `name`, `string`, `integer`, `real`, `boolean`, `null`, `ref`.
+
+  What pdf-lib's `PDFCatalog` / `PDFPageTree` / `PDFPageLeaf` actually carried
+  was the dictionary's `/Type`, so that is now reported separately as
+  `objectStats.byDocType` (`Catalog`, `Pages`, `Page`, `Font`, `ObjStm`,
+  `XRef`, …). Counting the two in one field made "51,237 dictionaries" and
+  "13,001 pages" compete for the same slot.
+
+  `PDFNumber` folded integers and reals together; R-7.3.3-6 ("A real number
+  shall not be present when an integer is expected") asks for the distinction,
+  so `integer` and `real` are counted apart.
+
+- **BREAKING — `inspect_structure` no longer counts objects the cross-reference
+  table does not name.** pdf-lib scanned the whole file, so a `N 0 obj` written
+  into the bytes but absent from the table was counted. 3,308 calls change.
+  Checked against an independent implementation on seven specimens:
+  `qpdf --show-object=N` answers `null` for every one of them.
+
+- **`inspect_signatures` no longer says "No AcroForm found" when it could not
+  look.** When a document is encrypted and the key cannot be derived from the
+  empty user password (§7.6.4.3.2), not one indirect object is readable — the
+  catalogue included. Reporting "0 signature fields" there tells the caller a
+  signed document is unsigned. `inspect_structure` and `inspect_fonts` said the
+  same kind of thing with page and font counts; all three now name the reason.
+
+- **Encrypted documents whose key *can* be derived are now read.** pdf-lib was
+  loaded with `ignoreEncryption`, which ignores encryption rather than undoing
+  it, so a document with an empty user password was treated as unreadable.
+  §7.6.4.3.2 says to try the empty password first; `@normativepdf/recover` does,
+  and decrypts. `read_text` on such a file now returns its `/ActualText`
+  replacements (§14.9.4) instead of raw glyphs, and `search_text` finds them.
+
+- **Text strings are decoded by the core's one implementation.** The private
+  copy in this package stripped a leading `ESC <lang> ESC` sequence from
+  PDFDocEncoded bytes as well. §7.9.2.2.2 places language escapes in *Unicode*
+  text strings and names only UTF-16BE and UTF-8; in PDFDocEncoding, byte 0x1B
+  is U+02D9 (Table D.3), so what was being stripped was content.
+
+### Added
+
+- **`objectStats.unreadable`** — objects the cross-reference table names but
+  that could not be read. Counted apart from `totalObjects`, because folding
+  them in produces a number that is neither "how many were read" nor "how many
+  the table names". `0` is the result of looking, not the absence of looking.
+
+- **Cycle guards on the signature field walk.** pdf-lib's `getAllFields()` has
+  none, so a document whose `/Kids` point back at an ancestor never terminates —
+  and a walk that does not terminate is not an exception: it is caught by no
+  `try`/`catch` and by no test timeout. A specimen is checked in.
+
+### Fixed
+
+- **Embedded fonts reported as not embedded.** pdf-lib's `PDFDict.has` misses
+  keys that come from an object stream (`get` finds them, `has` does not), so
+  `inspect_fonts` said "not embedded" for fonts whose `FontDescriptor` carries a
+  `FontFile*`. Seven calls change.
+
+- **`#xx` escapes in name objects are resolved** (§7.3.5). `/BaseFont` values
+  such as `FreeMonoBold#c4` were reported verbatim rather than decoded.
+
+- **Documents pdf-lib could not open at all are now read.** Ten tool calls
+  across two specimens (a header with no version number, `%PDF-`) stop being
+  errors. Over the whole corpus, `isError` falls from 75 to 61 and **no call
+  became an error that was not one before**.
+
+### Removed
+
+- `pdf-lib` as a runtime dependency. It remains in `devDependencies`, where the
+  two test-fixture generators use it. `npm ls --omit=dev pdf-lib` reports
+  `(empty)`.
+
+### Known limitations
+
+- `inspect_structure` and the other Tier 2 tools do not yet report the
+  `ReadingScope` that `read_text` and friends gained in 0.14.0. When the newest
+  cross-reference section cannot be read and an older one is used instead, the
+  library says so but this server does not pass it on — measured on one
+  specimen, where a catalogue entry added by an incremental update disappears
+  from the answer without a word.
+- `normativepdf` does not implement `/LZWDecode` (§7.4.4), and its inflate
+  refuses a stream with trailing bytes after the ADLER32 checksum. Three
+  specimens whose content streams pdf-lib could decode are now reported as
+  `not_observed` rather than as text-free pages. Both are gaps in the core, not
+  in this server; neither turns a failed check into a passing one.
+
 ## [0.14.0] - 2026-08-30
 
 Text-returning tools now say which of the readings behind their answer were
