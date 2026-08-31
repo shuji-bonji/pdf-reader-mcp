@@ -3,58 +3,58 @@
   "entries": [
     {
       "operation": "getMetadata",
-      "durationMs": 70,
-      "timestamp": "2026-08-27T16:56:15.871Z"
+      "durationMs": 107,
+      "timestamp": "2026-08-31T02:02:40.680Z"
     },
     {
       "operation": "extractText-3pages",
-      "durationMs": 16,
-      "timestamp": "2026-08-27T16:56:15.888Z"
+      "durationMs": 19,
+      "timestamp": "2026-08-31T02:02:40.705Z"
     },
     {
       "operation": "searchText",
-      "durationMs": 7,
-      "timestamp": "2026-08-27T16:56:15.895Z"
+      "durationMs": 9,
+      "timestamp": "2026-08-31T02:02:40.714Z"
     },
     {
       "operation": "analyzeStructure",
-      "durationMs": 6,
-      "timestamp": "2026-08-27T16:56:15.901Z"
+      "durationMs": 2,
+      "timestamp": "2026-08-31T02:02:40.716Z"
     },
     {
       "operation": "analyzeFonts",
-      "durationMs": 7,
-      "timestamp": "2026-08-27T16:56:15.909Z"
+      "durationMs": 2,
+      "timestamp": "2026-08-31T02:02:40.718Z"
     },
     {
       "operation": "validateTagged",
-      "durationMs": 4,
-      "timestamp": "2026-08-27T16:56:15.913Z"
+      "durationMs": 6,
+      "timestamp": "2026-08-31T02:02:40.724Z"
     },
     {
       "operation": "validateMetadata",
-      "durationMs": 3,
-      "timestamp": "2026-08-27T16:56:15.916Z"
+      "durationMs": 44,
+      "timestamp": "2026-08-31T02:02:40.768Z"
     },
     {
       "operation": "compareStructure",
-      "durationMs": 7,
-      "timestamp": "2026-08-27T16:56:15.923Z"
+      "durationMs": 9,
+      "timestamp": "2026-08-31T02:02:40.778Z"
     },
     {
       "operation": "getMetadata-all-7",
-      "durationMs": 20,
-      "timestamp": "2026-08-27T16:56:15.943Z"
+      "durationMs": 24,
+      "timestamp": "2026-08-31T02:02:40.802Z"
     },
     {
       "operation": "countImages",
-      "durationMs": 7,
-      "timestamp": "2026-08-27T16:56:15.950Z"
+      "durationMs": 6,
+      "timestamp": "2026-08-31T02:02:40.808Z"
     },
     {
       "operation": "analyzeSignatures",
-      "durationMs": 5,
-      "timestamp": "2026-08-27T16:56:15.955Z"
+      "durationMs": 4,
+      "timestamp": "2026-08-31T02:02:40.813Z"
     }
   ]
 }

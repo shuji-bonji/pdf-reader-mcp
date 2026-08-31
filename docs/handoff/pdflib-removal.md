@@ -5,6 +5,98 @@
 > verify = `mcp/pdf-verify-mcp/docs/handoff/pdflib-removal.md`（+ `scope-in-output.md`）。
 >
 > 実測日 2026-08-29。reader **0.13.0** / normativepdf **0.9.0**。
+> **2026-08-31 追記: L0 は閉じた。§0 を先に読むこと。**
+
+## 0. いまここ（2026-08-31）
+
+**L0（撤去前の出力を凍結する）は終わった。次は L1。**
+
+```
+✅ 計器            scripts/golden.mjs（take / merge / diff / report / t3）
+                   19 ツール × 23 呼び出し。--shard k/n と merge で 3 本並べて採る
+✅ T-3             json 23 件 / markdown 12 件とも差を報告した。壊す先が無い検査 0 件
+✅ 撤去前の基準     .golden/json-0.14.0.json  検体 2,942・呼び出し 67,666・isError 75
+                   .golden/md-0.14.0.json    同上（markdown）
+                   🔴 **消さない。** pdf-lib が在るうちにしか採れない
+✅ 決定性          同じ集合を 2 回採って差 0 件（400 検体 9,200 呼び出し）
+```
+
+### 🔴 撤去の前に 3 つ直した（0.14.0 と #27）
+
+計器を書いたら、**何も変えずに同じ集合を 2 回採るだけで差が 3 件出た**。
+基準が実行ごとに変わるなら基準にならないので、先に直した。撤去とは無関係である。
+
+| 何 | どう出ていたか |
+|---|---|
+| `Promise.all` が 2 つの問いを 1 つの答えに畳んでいた | 同じ壊れた 1 ファイルに 12 回投げて `INVALID_PDF` 10 回・`INTERNAL_ERROR` 2 回。コーパス 2,931 件のうち 3 件で、取れていた文字が捨てられていた |
+| `read_url` が全検体で `isError` | pdfjs が渡された配列の中身を worker へ移すので、同じ配列を読む 2 人目が 0 バイトを読んでいた。40 検体中 40 件 |
+| `render_page` が返らない | PDFium は WASM の中で同期に走る。3.4 KB のファイル 2 件で 20 分待っても返らず、サーバは以後どの呼び出しにも答えない。タイリングパターンの `/YStep` が -1.175e-38（§8.7.3.1 Table 74 は 0 だけを禁じている） |
+
+**この 3 つは 0.14.0 として commit 済み・未 push・未 publish。**
+撤去の A/B はこの 0.14.0 の出力を基準に取る。
+
+### §8 の「先に決めること」の答え
+
+1. ~~B2 の 3 ファイル~~ → `@normativepdf/recover` として切り出し済み（ADR-0010）
+2. **面 3 の独立オラクル** → `qpdf --json`（構造・オブジェクト・暗号化）/
+   `pdftotext`（テキスト）/ `pdfinfo`（ページ数・メタデータ）を役割で割り当てる。
+   どれも device_bash の VM にある（`mutool` と `verapdf` は無い）。
+   立たないツール（`inspect_tags` / `validate_tagged` など）は「立たない」と書く
+3. **pdfjs と pdf-lib の切り分け** → 下の §0.1 に実測を置いた
+
+### 0.1 pdf-lib に届くのは 19 ツール中 18（import グラフの実測）
+
+届かないのは `render_page` だけ。多くは `pdfjs-service.ts` 経由で、そこが
+pdf-lib から取るのは `detectEncryption` と `loadWithPdfLib` の 2 本だけである。
+
+reader が pdf-lib から import している記号は **14 種**で、うち 3 種は §1 の一覧
+（COS 8 種）に無い。置き換え先は `@normativepdf/recover` 0.1.2 にすべて在る。
+
+| pdf-lib | recover |
+|---|---|
+| `PDFDict` / `PDFName` / `PDFString` / `PDFHexString` / `PDFNumber` / `PDFArray` / `PDFRef` / `PDFStream` | `asDict` / `nameOf` / `textOf` / `numberOf` / `asArray` / `asRef` / `asStream` ほか |
+| `PDFRawStream` / `decodePDFRawStream` | `decodedBytes` / `bytesOf` |
+| `pdfDocEncodingDecode` / `utf16Decode` | `textOf` |
+| `PDFPageLeaf` | `enumerateDicts` + `get` |
+| `PDFDocument` | `openDocument` の戻り |
+
+### 0.2 計器の回し方
+
+```sh
+SETS='--set .golden/specimens --set tests/fixtures \
+      --set ../../lib/normativepdf/corpus/veraPDF-corpus \
+      --set ../../lib/normativepdf/corpus/pdf20examples \
+      --set ../../lib/normativepdf/corpus/_wout'
+# 3 本並べて採る（1 回の device_bash に収まる。持ち場 3 は --resume が 1 回要る）
+for k in 1 2 3; do node scripts/golden.mjs take .golden/<版>-s$k.json $SETS \
+  --label <版> --shard $k/3 --budget-ms 150000 & done; wait
+node scripts/golden.mjs merge .golden/<版>.json .golden/<版>-s{1,2,3}.json --label <版>
+node scripts/golden.mjs diff .golden/json-0.14.0.json .golden/<版>.json [--detail '<file-key>']
+node scripts/golden.mjs t3 .golden/<版>.json
+```
+
+- 🔴 **markdown は `--format markdown` で別に採る。** 形式の違うゴールデンは diff が拒む
+- 🔴 **計器（kept）を直したら採り直す。** 0.14.0 で出力の形を変えたとき、
+  kept が古い形を読んでいて 2,942 件すべてで `pageCount = 0` を返していた
+- 遅い検体は 5 秒を越えると名指しされる（最も遅いのは Isartor のマニュアルで 91 秒）
+
+### 0.3 gate は device_bash で全部回る（2026-08-30 に解けた）
+
+```sh
+$HOME/tsc-tool/node_modules/.bin/tsc -p tsconfig.json
+NODE_PATH=$HOME/linux-natives/node_modules npx biome check ./src ./tests
+NODE_PATH=$HOME/linux-natives/node_modules \
+ESBUILD_BINARY_PATH=$HOME/linux-natives/node_modules/@esbuild/linux-arm64/bin/esbuild \
+  npx vitest run
+```
+
+マウントの**外**に linux-arm64 版のネイティブ拡張を置いてある
+（`typescript@7` / `@rollup/rollup-linux-arm64-gnu` / `@esbuild/linux-arm64` /
+`@biomejs/cli-linux-arm64`）。repo と同じ版を入れること。
+🔴 性能テストは `tests/e2e/baseline.json` を書き換えるので、commit 前に戻す。
+
+---
+
 
 ## 1. いま何が載っているか（実測）
 
@@ -53,7 +145,7 @@ normativepdf にテキスト抽出プリミティブは**まだ無い**
 両方に触れているので、切り分けを最初に測ること —— どの行がどちらの用事かを
 混ぜたまま置き換えると、A/B の差を帰属できなくなる。
 
-## 3. 🔴 reader には計器が無い
+## 3. ~~🔴 reader には計器が無い~~（2026-08-31 に書いた。§0 を見よ）
 
 verify（B2）と writer（Phase 3）はゴールデンの計器を持っていたが、reader は持っていない。
 
