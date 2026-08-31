@@ -54,6 +54,16 @@ actually done. Output shapes change — read **Changed** before upgrading.
   with the reason; pages after it are reported separately as `not attempted`,
   because "could not be rendered" and "never started" are different answers.
 
+  The worker is `src/services/page-renderer.worker.mjs` — plain JavaScript, not
+  TypeScript, and it imports nothing from `src`. Node runs it as it is: Node 20
+  has no type stripping and Node 22 does not enable it in every release, so a
+  `.ts` worker fails with `Unknown file extension ".ts"` (it did, on both CI Node
+  versions). For the same reason the worker only produces pixels; the BGRA-to-RGB
+  conversion, the downscale and the encoding stay on the calling side, with the
+  bitmap handed over as a transferable so nothing is copied. `npm run build`
+  copies the worker into `dist` (`scripts/copy-worker.mjs`), and a test fails if
+  that coupling is broken.
+
 ### Changed
 
 - **Two readings, reported separately (#26).** Taking the characters off a page

@@ -26,12 +26,21 @@
  * 終わらない文書があるとイベントループごと止まり、サーバは応答を返さなくなる。
  * JavaScript 側の時限では割り込めない（タイマーの印が 1 つも出ないことを実測）。
  * `worker.terminate()` は止まった PDFium を実際に止められるので、そこに移した。
- * 詳細と実例は `page-renderer.worker.ts` の冒頭にある。
+ * 詳細と実例は `page-renderer.worker.mjs` の冒頭にある。
+ *
+ * 🔴 **Worker が作るのは画素までで、符号化はこちら側で行う。** worker は
+ * `src` の module を 1 つも import できない —— TypeScript で書くと Node 20 には
+ * 型剥がしが無く、Node 22 でも版によっては既定で有効ではないので
+ * `Unknown file extension ".ts"` で落ちる（CI の Node 20 / 22 で実際に落とした）。
+ * だから worker は `.mjs` で、PDFium 以外に依存を持たない。画素は転送可能
+ * オブジェクトとして受け取るので、複製は起きない。
  */
 
 import { Worker } from 'node:worker_threads';
 import { DEFAULT_IMAGE_QUALITY, MAX_IMAGE_PIXELS, MAX_IMAGE_RESPONSE_BYTES } from '../constants.js';
 import { readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
+import { encodeJpeg, encodePng } from './image-encoder.js';
+import { downscale, type Samples } from './image-resampler.js';
 
 /** One rendered page, as an encoded image file. */
 export interface RenderedPage {
@@ -121,6 +130,20 @@ export const RENDERER_MISSING_MESSAGE =
   'WebAssembly), which is not installed here. Install it next to this server — ' +
   '`npm install @hyzyla/pdfium` — and call again. Every other tool works without it.';
 
+/** BGRA (PDFium's output order) to RGB, dropping alpha against white. */
+function bgraToRgb(width: number, height: number, bgra: Uint8Array): Samples {
+  const data = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    const alpha = bgra[i * 4 + 3] / 255;
+    // PDFium fills the bitmap with opaque white before drawing, so alpha is
+    // normally 255; the blend is kept for the transparent-background case.
+    data[i * 3] = Math.round(bgra[i * 4 + 2] * alpha + 255 * (1 - alpha));
+    data[i * 3 + 1] = Math.round(bgra[i * 4 + 1] * alpha + 255 * (1 - alpha));
+    data[i * 3 + 2] = Math.round(bgra[i * 4] * alpha + 255 * (1 - alpha));
+  }
+  return { width, height, channels: 3, data };
+}
+
 /**
  * Render the requested pages to PNG or JPEG.
  *
@@ -135,6 +158,8 @@ export async function renderPages(
   if (!(await rendererAvailable())) throw new Error(RENDERER_MISSING_MESSAGE);
 
   const format = options.format ?? 'png';
+  const quality = options.quality ?? DEFAULT_IMAGE_QUALITY;
+  const budget = options.maxTotalBytes ?? MAX_IMAGE_RESPONSE_BYTES;
   const fromEnv = Number(process.env.PDF_READER_RENDER_TIMEOUT_MS);
   const timeoutMs =
     options.pageTimeoutMs ??
@@ -144,11 +169,8 @@ export async function renderPages(
   // 型剥がしで動くので、`enum` を持つ constants.js に届く module を import できない。
   const bytes = await readPdfFile(filePath);
 
-  // 試験では .ts のまま、公開物では .js として起動する。同じ拡張子の兄弟を指す。
-  const workerUrl = new URL(
-    import.meta.url.endsWith('.ts') ? './page-renderer.worker.ts' : './page-renderer.worker.js',
-    import.meta.url,
-  );
+  // 🔴 拡張子は .mjs 固定。src からも dist からも、Node がそのまま実行できる形。
+  const workerUrl = new URL('./page-renderer.worker.mjs', import.meta.url);
 
   const rendered: RenderedPage[] = [];
   const omitted: OmittedRender[] = [];
@@ -160,12 +182,8 @@ export async function renderPages(
     const worker = new Worker(workerUrl, {
       workerData: {
         bytes,
-        pages,
         dpi: options.dpi ?? DEFAULT_RENDER_DPI,
         maxWidth: options.maxWidth,
-        format,
-        quality: options.quality ?? DEFAULT_IMAGE_QUALITY,
-        budget: options.maxTotalBytes ?? MAX_IMAGE_RESPONSE_BYTES,
         maxPixels: MAX_IMAGE_PIXELS,
       },
     });
@@ -235,11 +253,53 @@ export async function renderPages(
         case 'start':
           inFlight = message.page as number;
           return;
-        case 'page':
+        case 'bitmap': {
+          // 画素を受け取ってから符号化する。ここは有界な仕事なので、
+          // 止まる心配があるのは worker の側だけ。
           inFlight = null;
-          rendered.push(message.rendered as RenderedPage);
-          totalEncodedBytes += (message.rendered as RenderedPage).encodedBytes;
+          const pageNumber = message.page as number;
+          const pointWidth = message.pointWidth as number;
+          let samples = bgraToRgb(
+            message.width as number,
+            message.height as number,
+            message.data as Uint8Array,
+          );
+          if (options.maxWidth && samples.width > options.maxWidth) {
+            samples = downscale(samples, options.maxWidth);
+          }
+          const encoded =
+            format === 'jpeg'
+              ? encodeJpeg(samples.width, samples.height, 3, samples.data, quality)
+              : encodePng(samples.width, samples.height, 2, 8, samples.data);
+
+          if (totalEncodedBytes + encoded.length > budget) {
+            omitted.push({
+              page: pageNumber,
+              reason:
+                `${encoded.length.toLocaleString()} bytes would take the response past the ` +
+                `${budget.toLocaleString()}-byte budget. Render fewer pages per call, ` +
+                'lower dpi, or pass format: "jpeg".',
+            });
+            arm();
+            return;
+          }
+
+          totalEncodedBytes += encoded.length;
+          rendered.push({
+            page: pageNumber,
+            width: samples.width,
+            height: samples.height,
+            pointWidth: Math.round(pointWidth),
+            pointHeight: Math.round(message.pointHeight as number),
+            effectiveDpi: Math.round((samples.width / pointWidth) * 72),
+            mimeType: format === 'jpeg' ? 'image/jpeg' : 'image/png',
+            encodedBytes: encoded.length,
+            dataBase64: encoded.toString('base64'),
+          });
+          // 🔴 符号化のあとで時限を引き直す。符号化の時間を worker の予算から引かない。
+          arm();
           return;
+        }
         case 'omit':
           inFlight = null;
           omitted.push({ page: message.page as number, reason: message.reason as string });

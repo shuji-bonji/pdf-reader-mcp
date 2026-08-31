@@ -12,9 +12,10 @@
  *   3. 描けなかったページと、始めなかったページを、別の理由として申告する
  */
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { renderPages } from '../../src/services/page-renderer.js';
 import { RENDER_STALL_SPECIMEN } from './render-stall-specimen.js';
@@ -75,7 +76,23 @@ describe('16 - render timeout', () => {
     expect(ticks).toBeGreaterThan(3);
   }, 30_000);
 
-  it('RT-4: 普通の文書はこれまでどおり描ける', async () => {
+  /**
+   * 🔴 worker は TypeScript では書けない。Node 20 に型剥がしは無く、Node 22 でも
+   * 版によっては既定で有効ではないので、`.ts` の worker は
+   * `Unknown file extension ".ts"` で落ちる（CI の Node 20 / 22 で実際に落ちた）。
+   * そのため `.mjs` にしてあり、`tsc` は触らない —— build が dist へ複製する。
+   * その結び付きが切れると、公開物の render_page だけが worker を見つけられなくなる。
+   */
+  it('RT-4: worker は .mjs で、build が dist へ複製する', () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const root = resolve(here, '../..');
+    expect(existsSync(join(root, 'src/services/page-renderer.worker.mjs'))).toBe(true);
+    expect(existsSync(join(root, 'src/services/page-renderer.worker.ts'))).toBe(false);
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(pkg.scripts.build).toContain('copy-worker');
+  });
+
+  it('RT-5: 普通の文書はこれまでどおり描ける', async () => {
     const result = await renderPages(FIXTURES.tagged, '1-2', { dpi: 36, format: 'png' });
     expect(result.pages.map((p) => p.page)).toEqual([1, 2]);
     expect(result.omitted).toEqual([]);
