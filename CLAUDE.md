@@ -13,7 +13,7 @@ PDF の中身を**読み取り・報告**する MCP サーバ。PDF family に�
 
 - 残タスク: [`docs/TASKS.md`](./docs/TASKS.md)
 - 責務分担の提案: `mcps/pdf-family-role-architecture.md`
-- 上位仕様: `Document-Note/mcps/PDFfamily/foundation/pdf-reader-mcp.md`
+- 上位仕様: `pdf-agent-stack/docs/foundation/pdf-reader-mcp.md`
 
 ## ツール一覧（19・3 tier）
 
