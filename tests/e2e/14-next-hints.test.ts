@@ -53,11 +53,16 @@ describe('14 - summarize next hints', () => {
     expect(summary.next).toEqual([]);
   });
 
-  // NH-4: 暗号化文書 → 復号が先、以外を勧めない
-  it('NH-4: an encrypted document says decrypt first, and only that', async () => {
+  // NH-4: 暗号化文書 → 復号できたかどうかで助言が変わる
+  it('NH-4: an encrypted document that was read does not ask for decryption', async () => {
     const summary = await summarize(FIXTURES.encryptedActualText);
-    expect(summary.next).toHaveLength(1);
-    expect(summary.next[0]).toContain('isEncrypted');
+    // この検体は空の利用者パスワードで鍵が導ける（ISO 32000-2 §7.6.4.3.2）ので、復号して読める。
+    expect(summary.textExtractability).toBe('extracted');
+    expect(summary.next.some((line) => line.includes('isEncrypted'))).toBe(true);
+    // 🔴 全文が読めている文書に「復号してから出直せ」と言わない。
+    expect(summary.next.some((line) => line.includes('Decrypt the file first'))).toBe(false);
+    // 🔴 暗号化を理由にほかの助言を伏せない —— この検体はタグ付きでもある。
+    expect(summary.next.some((line) => line.includes('isTagged'))).toBe(true);
   });
 
   // NH-5: 助言は前提の観測名を名乗る（読む側が premise を検証できる）

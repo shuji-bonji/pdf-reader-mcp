@@ -49,12 +49,26 @@ function suggestNext(
   if (!metadata) return next;
 
   if (metadata.isEncrypted) {
+    // 🔴 読めたかどうかを言えるのは `isEncrypted` ではなく、観測のほうである。
+    // §7.6.4.3.2 は空の利用者パスワードを先に試すよう求めており、0.15.0 の
+    // `@normativepdf/recover` はそれで鍵が導ければ復号して読む。`isEncrypted` だけを見て
+    // 「復号してから出直せ」と言うと、**全文が読めている文書に未読の顔をさせる**。
+    if (textExtractability === null || textExtractability === 'not_observed') {
+      next.push(
+        `isEncrypted is true and textExtractability is ${textExtractability ?? 'null'}: ` +
+          'no content stream could be read here, so text and structure tools under-report ' +
+          '(ISO 32000-2 §7.6.2). Decrypt the file first if its content is needed.',
+      );
+      return next;
+    }
     next.push(
-      'isEncrypted is true: content streams and strings are ciphertext to this server ' +
-        '(ISO 32000-2 §7.6.2), so text and structure tools will under-report. Decrypt the ' +
-        'file first if its content is needed.',
+      `isEncrypted is true but textExtractability is ${textExtractability}: the file ` +
+        'encryption key was derived from the empty user password (ISO 32000-2 §7.6.4.3.2) ' +
+        'and the content was read. No separate decryption step is needed.',
     );
-    return next;
+    // 🔴 ここで返さない。復号できた文書には、ほかの観測から出る勧め（isTagged・pageCount・
+    // textExtractability）がそのまま当てはまる。暗号化を理由に伏せると、読める文書から
+    // 構造経路の案内が消える。
   }
 
   const unreadable = (unreadablePages ?? []).filter(
