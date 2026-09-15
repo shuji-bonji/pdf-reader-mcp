@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-09-15
+
+### Fixed
+
+- **`summarize` told the caller to decrypt a file it had already decrypted.**
+  The `next` suggestion for an encrypted document was derived from
+  `metadata.isEncrypted` alone, so it kept saying "content streams and strings
+  are ciphertext to this server (§7.6.2) … Decrypt the file first" even after
+  0.15.0 began deriving the file encryption key from the empty user password
+  (§7.6.4.3.2) and reading the content. On
+  `tests/fixtures/encrypted-actualtext.pdf` the same response reported
+  `textExtractability: "extracted"`, an empty `unreadablePages` and the page's
+  text — the advice contradicted the observation printed beside it.
+
+  The suggestion now follows the observation that says whether anything was
+  read. A document whose content was read is told the key was derived and that
+  no separate decryption step is needed; one where `textExtractability` is
+  `not_observed` or `null` keeps the original advice, which is what that state
+  means.
+
+- **An encrypted document was given no other advice.** The same branch returned
+  early, so the `isTagged`, `pageCount` and `textExtractability` suggestions
+  were withheld from documents that were fully readable — the fixture above is
+  tagged, and the pointer to `extract_structured_text` never appeared. Only the
+  branch where nothing could be read returns early now.
+
 ## [0.15.0] - 2026-08-31
 
 pdf-lib is gone. Every reading that used it now goes through
