@@ -1,5 +1,6 @@
 {
   "name": "@shuji-bonji/pdf-reader-mcp",
+  "mcpName": "io.github.shuji-bonji/pdf-reader-mcp",
   "version": "0.15.4",
   "description": "MCP server for PDF structure analysis - read, inspect, and validate PDF internals",
   "type": "module",

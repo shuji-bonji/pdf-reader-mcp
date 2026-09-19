@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.shuji-bonji/pdf-reader-mcp",
+  "title": "PDF Reader (PDF Agent Stack)",
+  "description": "Read PDF internals: text, structure, fonts, signatures and tags, with what was not read declared.",
+  "websiteUrl": "https://shuji-bonji.github.io/pdf-agent-stack/",
+  "repository": {
+    "url": "https://github.com/shuji-bonji/pdf-reader-mcp",
+    "source": "github"
+  },
+  "version": "0.15.5",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@shuji-bonji/pdf-reader-mcp",
+      "version": "0.15.5",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
