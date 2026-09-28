@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/anthropics/claude-code/main/.claude-plugin/plugin.schema.json",
   "name": "pdf-reader-mcp",
   "version": "0.15.5",
-  "description": "PDF 構造解析 MCP server。テキスト・画像・表の抽出、署名フィールド・フォント・注釈・タグ構造の inspect、PDF/UA タグ検証を提供。",
+  "description": "PDF 構造解析 MCP server（19 ツール）。テキスト・画像・表の抽出、署名フィールド・フォント・注釈・タグ構造の inspect、オブジェクト番号と構造要素から描画座標への変換（locate_objects / extract_structured_text の include_bbox）、PDF/UA タグ検証、ページの画像描画（render_page。optionalDependencies の @hyzyla/pdfium を使い、未導入でも他の 18 ツールは動く）を提供。テキストを返すツールは、ページごとのテキスト抽出可能性と、どの読みが行われたか（scope）を申告し、行われなかった読みの項目は null を返す。空のユーザーパスワードで鍵が導ける暗号化文書は復号して読む（v0.15.0）。npx @shuji-bonji/pdf-reader-mcp で起動。",
   "author": {
     "name": "shuji-bonji",
     "email": "bonji@mikuro.jp",
@@ -18,7 +18,10 @@
     "pdf-parser",
     "accessibility",
     "pdf-ua",
-    "signature"
+    "signature",
+    "render-page",
+    "scanned-pdf",
+    "text-extractability"
   ],
   "mcpServers": {
     "pdf-reader-mcp": {
