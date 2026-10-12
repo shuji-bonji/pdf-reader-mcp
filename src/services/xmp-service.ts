@@ -21,12 +21,17 @@ import type { CosDict, PdfDocument } from 'normativepdf';
 import type { XmpDeclarations, XmpMetadataInfo } from '../types.js';
 import { lockedOut, openPdf } from './recover-service.js';
 
-/** 名前空間 URI。XMP は prefix ではなく URI で名前空間を識別する（prefix は書き手が選べる）。 */
+/**
+ * 名前空間 URI。XMP は prefix ではなく URI で名前空間を識別する（prefix は書き手が選べる）。
+ *
+ * TDMRep は 2 つ書いてある。W3C Final Community Group Report（2024-05-10）の §6.6（PDF）は
+ * `http://www.w3.org/ns/tdmrep/`（末尾スラッシュ）、§6.5（EPUB 3）は `http://www.w3.org/ns/tdmrep#`
+ * と書いていて、文書の中で揃えていない。PDF の書き手がどちらを写すかは決められないので両方を受ける。
+ */
 export const XMP_NAMESPACES = {
-  pdfaid: 'http://www.aiim.org/pdfa/ns/id/',
-  pdfuaid: 'http://www.aiim.org/pdfua/ns/id/',
-  /** W3C TDM Reservation Protocol (TDMRep), Community Group Report. */
-  tdm: 'http://www.w3.org/ns/tdmrep#',
+  pdfaid: ['http://www.aiim.org/pdfa/ns/id/'],
+  pdfuaid: ['http://www.aiim.org/pdfua/ns/id/'],
+  tdm: ['http://www.w3.org/ns/tdmrep/', 'http://www.w3.org/ns/tdmrep#'],
 } as const;
 
 /** `include_xmp` で本体を返すときの上限（バイト）。XMP は通常数 KB、パケット全体でも数十 KB。 */
@@ -93,9 +98,9 @@ export function collectNamespaces(xml: string): { prefix: string; uri: string }[
  * （宣言を省いた不正な XMP でも、値そのものは読めるようにしておく）。
  */
 export function parseDeclarations(xml: string): XmpDeclarations {
-  const prefixes = (uri: string, fallback: string): string[] => {
+  const prefixes = (uris: readonly string[], fallback: string): string[] => {
     const found = collectNamespaces(xml)
-      .filter((n) => n.uri === uri)
+      .filter((n) => uris.includes(n.uri))
       .map((n) => n.prefix);
     return found.length > 0 ? found : [fallback];
   };

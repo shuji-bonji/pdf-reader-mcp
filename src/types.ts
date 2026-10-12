@@ -675,10 +675,13 @@ export interface XmpDeclarations {
   /** PDF/UA identification (`pdfuaid:part`). A claim about the structure tree, not a verdict on it. */
   pdfuaid: { part: number | null } | null;
   /**
-   * W3C TDM Reservation Protocol (TDMRep), namespace `http://www.w3.org/ns/tdmrep#`.
-   * `reservation` is 1 when the rights holder reserves text-and-data-mining rights, 0 when
-   * they do not; `policy` is the URL of the licensing policy when one is given. This server
-   * reports the statement; whether to honour it is the caller's decision (#28).
+   * W3C TDM Reservation Protocol (TDMRep), Final Community Group Report 2024-05-10, §6.6.
+   * Namespace `http://www.w3.org/ns/tdmrep/` (the report's EPUB section writes `…tdmrep#`;
+   * both are accepted). `reservation` is 1 when the rights holder reserves text-and-data-mining
+   * rights, 0 when they do not — the report (§5.1) says any other value is a protocol error to
+   * be treated as unset; it is returned here as written. `policy` is the URL of the TDM policy
+   * when one is given. This server reports the statement; whether to honour it is the caller's
+   * decision (#28).
    */
   tdm: { reservation: number | null; policy: string | null } | null;
 }

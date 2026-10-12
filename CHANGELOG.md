@@ -54,6 +54,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A document with no `/Metadata` reports all-null blocks with the reading `done`; one whose
   packet could not be read reports `null` and says so in `scope`.
 
+- **W3C TDMRep is read from XMP** (#28): `tdm:reservation` (1 = text-and-data-mining rights
+  reserved, 0 = not reserved) and `tdm:policy` (URL), per the TDM Reservation Protocol Final
+  Community Group Report (2024-05-10) §6.6. Both namespace spellings the report uses —
+  `http://www.w3.org/ns/tdmrep/` (its PDF section) and `http://www.w3.org/ns/tdmrep#` (its
+  EPUB section) — are recognised, and the prefix is resolved through the URI. The value is
+  returned in `inspect_catalog` (`metadata.declarations.tdm`) and `summarize`
+  (`declaredConformance.tdm`), as written. This server does not act on it: it reports the
+  rights holder's statement and leaves the decision to the caller. `get_metadata` is unchanged
+  — it reads the Info dictionary, which cannot carry this.
+
 - `tests/fixtures/catalog-features.pdf`: outlines on two levels, two layers, two attachments,
   an XMP packet declaring PDF/A-3B, PDF/UA-1 and a TDM reservation, a `GoTo` open action with
   a `/Next` JavaScript action, and a `WC` additional action.

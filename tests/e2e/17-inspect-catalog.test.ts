@@ -193,9 +193,16 @@ describe('17 - xmp-service', () => {
     expect(collectNamespaces(xml).map((n) => n.prefix)).toEqual(['rdf', 'ua', 'pdfaid']);
   });
 
-  it('XS-2: tdm:reservation 0 is a value, not an absence', () => {
-    const xml = `<r xmlns:tdm="http://www.w3.org/ns/tdmrep#"><tdm:reservation>0</tdm:reservation></r>`;
-    expect(parseDeclarations(xml).tdm).toEqual({ reservation: 0, policy: null });
+  it('XS-2: tdm:reservation 0 is a value, not an absence; both TDMRep namespace spellings are accepted', () => {
+    // §6.6 (PDF) of the report writes the URI with a trailing slash …
+    const slash = `<r xmlns:tdm="http://www.w3.org/ns/tdmrep/"><tdm:reservation>0</tdm:reservation></r>`;
+    expect(parseDeclarations(slash).tdm).toEqual({ reservation: 0, policy: null });
+    // … §6.5 (EPUB) writes it with a hash, and a PDF writer may copy either.
+    const hash = `<r xmlns:rights="http://www.w3.org/ns/tdmrep#" rights:reservation="1" rights:policy="https://p.example/x.json"/>`;
+    expect(parseDeclarations(hash).tdm).toEqual({
+      reservation: 1,
+      policy: 'https://p.example/x.json',
+    });
   });
 
   it('XS-3: a non-integer part is reported as null, not coerced', () => {

@@ -1785,7 +1785,7 @@ async function createCatalogFeaturesPdf(): Promise<void> {
     xmlns:dc="http://purl.org/dc/elements/1.1/"
     xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
     xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/"
-    xmlns:tdm="http://www.w3.org/ns/tdmrep#"
+    xmlns:tdm="http://www.w3.org/ns/tdmrep/"
     pdfaid:part="3" pdfaid:conformance="B">
    <dc:title><rdf:Alt><rdf:li xml:lang="x-default">Catalog features</rdf:li></rdf:Alt></dc:title>
    <pdfuaid:part>1</pdfuaid:part>
