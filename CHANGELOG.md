@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be honoured, and does not judge an action. `get_metadata` continues to read the Info
   dictionary (§14.3.3), which is a different object from the XMP packet.
 
+- **`summarize` reads the XMP declarations** (#29). A new `declaredConformance` field carries
+  what the packet (§14.3.2) declares — `pdfaid`, `pdfuaid`, `tdm` — as written, and `scope`
+  gains a fifth reading, `xmpDeclarations`. Until now the `next` suggestions were derived from
+  `MarkInfo /Marked` alone, so the author's PDF/UA declaration — the cue the PDF Association's
+  FAQ names for trusting the structure tree over inferred reading order — was invisible at the
+  entry point of the read. `next` now says, when `pdfuaid:part` is declared and the catalog is
+  marked, to take the structure route first; when it is declared but `/Marked` is not true, it
+  reports the disagreement and points at `inspect_tags` and pdf-verify-mcp
+  `validate_conformance`. The wording stays at *declares*: the claim is not verified here.
+  A document with no `/Metadata` reports all-null blocks with the reading `done`; one whose
+  packet could not be read reports `null` and says so in `scope`.
+
 - `tests/fixtures/catalog-features.pdf`: outlines on two levels, two layers, two attachments,
   an XMP packet declaring PDF/A-3B, PDF/UA-1 and a TDM reservation, a `GoTo` open action with
   a `/Next` JavaScript action, and a `WC` additional action.

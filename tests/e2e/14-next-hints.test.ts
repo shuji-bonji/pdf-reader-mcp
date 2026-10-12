@@ -7,12 +7,38 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ResponseFormat } from '../../src/constants.js';
+import { suggestNext } from '../../src/tools/tier1/summarize.js';
+import type { PdfMetadata } from '../../src/types.js';
 import { FIXTURES } from './setup.js';
+
+const META: PdfMetadata = {
+  title: null,
+  author: null,
+  subject: null,
+  keywords: null,
+  creator: null,
+  producer: null,
+  creationDate: null,
+  modificationDate: null,
+  pageCount: 3,
+  pdfVersion: '1.7',
+  isLinearized: false,
+  isEncrypted: false,
+  isTagged: true,
+  hasSignatures: false,
+  fileSize: 1,
+};
 
 /** Run the summarize tool handler the way the server would. */
 async function summarize(filePath: string): Promise<{
   next: string[];
   textExtractability: string;
+  declaredConformance: {
+    pdfaid: { part: number | null; conformance: string | null } | null;
+    pdfuaid: { part: number | null } | null;
+    tdm: { reservation: number | null; policy: string | null } | null;
+  } | null;
+  scope: { xmpDeclarations: { status: string } };
 }> {
   const { McpServer } = await import('@modelcontextprotocol/server');
   const { registerSummarize } = await import('../../src/tools/tier1/summarize.js');
@@ -69,7 +95,53 @@ describe('14 - summarize next hints', () => {
   it('NH-5: every suggestion names the observation it follows from', async () => {
     const summary = await summarize(FIXTURES.noTextLayer);
     for (const line of summary.next) {
-      expect(line).toMatch(/textExtractability|isTagged|pageCount|isEncrypted/);
+      expect(line).toMatch(/textExtractability|isTagged|pageCount|isEncrypted|declaredConformance/);
     }
+  });
+
+  // NH-6 (#29): XMP の PDF/UA 宣言は、MarkInfo とは別に summarize から見える
+  it('NH-6: a PDF/UA declaration in XMP is reported and points at the structure route', async () => {
+    const summary = await summarize(FIXTURES.catalogFeatures);
+    expect(summary.scope.xmpDeclarations.status).toBe('read');
+    expect(summary.declaredConformance).toEqual({
+      pdfaid: { part: 3, conformance: 'B' },
+      pdfuaid: { part: 1 },
+      tdm: { reservation: 1, policy: 'https://example.org/tdm-policy' },
+    });
+    const line = summary.next.find((l) => l.startsWith('declaredConformance.pdfuaid'));
+    expect(line).toBeDefined();
+    // この検体は MarkInfo を持たないので、宣言とカタログの食い違いとして出る。
+    expect(line).toContain('MarkInfo /Marked is not true');
+    // 文言は「宣言」で止める。検証した顔をさせない。
+    expect(line).toContain('declares PDF/UA-1');
+    expect(line).toContain('validate_conformance');
+  });
+
+  // NH-7 (#29): /Metadata が無い文書は「宣言が無い」であって「読めなかった」ではない
+  it('NH-7: no /Metadata means all-null declarations with the reading done', async () => {
+    const summary = await summarize(FIXTURES.simple);
+    expect(summary.scope.xmpDeclarations.status).toBe('read');
+    expect(summary.declaredConformance).toEqual({ pdfaid: null, pdfuaid: null, tdm: null });
+  });
+
+  // NH-8 (#29): 宣言とカタログが一致するとき、構造経路を先に勧める 1 行が出る
+  it('NH-8: PDF/UA declared and MarkInfo marked → structure route first, verification elsewhere', () => {
+    const next = suggestNext(META, 'extracted', [], {
+      pdfaid: null,
+      pdfuaid: { part: 2 },
+      tdm: null,
+    });
+    const line = next.find((l) => l.startsWith('declaredConformance.pdfuaid'));
+    expect(line).toContain('declares PDF/UA-2');
+    expect(line).toContain('take the structure route first');
+    expect(line).toContain('validate_conformance');
+    expect(line).not.toContain('disagree');
+  });
+
+  // NH-9 (#29): 宣言が無ければ、この行は出ない（isTagged の行だけ）
+  it('NH-9: no declaration → no declaredConformance line', () => {
+    const next = suggestNext(META, 'extracted', [], { pdfaid: null, pdfuaid: null, tdm: null });
+    expect(next.some((l) => l.startsWith('declaredConformance'))).toBe(false);
+    expect(next.some((l) => l.startsWith('isTagged'))).toBe(true);
   });
 });

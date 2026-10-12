@@ -203,6 +203,13 @@ export interface PdfSummary {
   /** The pages that are not `extracted`, so the caller can go straight to them. */
   unreadablePages: PageExtractability[] | null;
   /**
+   * What the XMP packet declares (#29): PDF/A, PDF/UA and TDMRep, **as written**. A
+   * `pdfuaid` block is the author's claim that the structure tree is complete — the cue
+   * to prefer the structure route — not a verdict on it. `null` when the packet could not
+   * be read; all-null blocks when the catalog has no `/Metadata` at all.
+   */
+  declaredConformance: XmpDeclarations | null;
+  /**
    * What to call next, decided from the observations above (#24).
    *
    * Suggestions, not a workflow: each line names the observation it follows

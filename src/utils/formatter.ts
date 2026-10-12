@@ -175,6 +175,25 @@ export function formatSummaryMarkdown(summary: PdfSummary): string {
   if (meta?.title) lines.push(`| Title | ${meta.title} |`);
   if (meta?.author) lines.push(`| Author | ${meta.author} |`);
 
+  // #29: what the XMP packet declares — as written. "not declared" is an observation
+  // (the packet was read and has no such block); NOT_READ means the packet was not read.
+  const d = summary.declaredConformance;
+  const declared = (label: string, text: string | null) =>
+    `| Declared ${label} (XMP) | ${d === null ? NOT_READ : (text ?? 'not declared')} |`;
+  lines.push(
+    declared(
+      'PDF/A',
+      d?.pdfaid ? `part ${d.pdfaid.part ?? '?'}${d.pdfaid.conformance ?? ''}` : null,
+    ),
+    declared('PDF/UA', d?.pdfuaid ? `part ${d.pdfuaid.part ?? '?'}` : null),
+    declared(
+      'TDM reservation',
+      d?.tdm
+        ? `reservation ${d.tdm.reservation ?? '?'}${d.tdm.policy ? `, policy ${d.tdm.policy}` : ''}`
+        : null,
+    ),
+  );
+
   // #21: `Has Text` alone cannot say why text is absent. Name the pages that
   // are not `extracted` so the caller can go straight to them instead of
   // inferring from an empty preview.

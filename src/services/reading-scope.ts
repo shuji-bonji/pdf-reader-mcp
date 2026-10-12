@@ -133,8 +133,10 @@ export function observationUnavailableReason(outcome: PartOutcome): string {
 }
 
 /**
- * `summarize` の射程。1 つの文書に 4 つの読みがあり、別々に失敗しうる。
+ * `summarize` の射程。1 つの文書に 5 つの読みがあり、別々に失敗しうる。
  * 3 つは同じ pdfjs の文書から取るので、文書が開けなければ 3 つとも同じ理由で失敗する。
+ * XMP の宣言（#29）は `@normativepdf/recover` で別に開くので、pdfjs が開けなくても読める
+ * ことがあり、逆もある。
  */
 export interface SummaryScope {
   /** 文書情報（ページ数・版・タグの有無など）。 */
@@ -145,6 +147,11 @@ export interface SummaryScope {
   imageCount: PartOutcome;
   /** §9.10.1 の観測。 */
   extractabilityObservation: PartOutcome;
+  /**
+   * カタログの `/Metadata`（XMP, §14.3.2）に書かれた宣言（pdfaid / pdfuaid / TDMRep）。
+   * `/Metadata` が無いことは読めた上での観測なので `read`。
+   */
+  xmpDeclarations: PartOutcome;
 }
 
 /**
@@ -179,5 +186,6 @@ export function formatSummaryScope(scope: SummaryScope): string[] {
     ['Text of page 1', scope.textPreview],
     ['Image count', scope.imageCount],
     ['Extractability observation (ISO 32000-2 §9.10.1)', scope.extractabilityObservation],
+    ['XMP declarations (ISO 32000-2 §14.3.2)', scope.xmpDeclarations],
   ]);
 }

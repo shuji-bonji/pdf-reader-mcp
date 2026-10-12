@@ -16,9 +16,10 @@
  * 数個の既知プロパティの値だけだからである。
  */
 
-import { decodedBytes, get, nameOf, tryGet } from '@normativepdf/recover';
+import { asDict, decodedBytes, get, nameOf, tryGet } from '@normativepdf/recover';
 import type { CosDict, PdfDocument } from 'normativepdf';
 import type { XmpDeclarations, XmpMetadataInfo } from '../types.js';
+import { lockedOut, openPdf } from './recover-service.js';
 
 /** 名前空間 URI。XMP は prefix ではなく URI で名前空間を識別する（prefix は書き手が選べる）。 */
 export const XMP_NAMESPACES = {
@@ -143,4 +144,27 @@ function asInteger(raw: string | null): number | null {
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * `summarize` 用の読み口（#29）: ファイルを開いて宣言だけを返す。
+ *
+ * - `/Metadata` が無い → すべて `null` のブロック（読めた上で「宣言が無い」）
+ * - 読めなかった → 例外。呼び出し側の `half` が `failed` として射程に残す
+ *   （`null` で返すと「宣言が無い」と区別できなくなる）
+ */
+export async function readXmpDeclarations(filePath: string): Promise<XmpDeclarations> {
+  const { doc, scope } = await openPdf(filePath);
+  if (lockedOut(scope)) {
+    throw new Error(
+      'The document is encrypted and the key could not be derived from the empty user password ' +
+        '(ISO 32000-2 §7.6.4.3.2); the catalog and its /Metadata could not be read.',
+    );
+  }
+  const catalog = asDict(await doc.getCatalog().catch(() => null));
+  if (!catalog) throw new Error('The catalog dictionary could not be read (ISO 32000-2 §7.7.2).');
+  const info = await readXmpMetadata(doc, catalog);
+  if (info === null) return { pdfaid: null, pdfuaid: null, tdm: null };
+  if (info.status === 'unreadable') throw new Error(`/Metadata could not be read: ${info.reason}`);
+  return info.declarations;
 }

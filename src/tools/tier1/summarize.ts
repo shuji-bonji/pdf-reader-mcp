@@ -21,11 +21,13 @@ import {
   foldExtractability,
   observeExtractability,
 } from '../../services/text-extractability-service.js';
+import { readXmpDeclarations } from '../../services/xmp-service.js';
 import type {
   PageExtractability,
   PdfMetadata,
   PdfSummary,
   TextExtractabilityState,
+  XmpDeclarations,
 } from '../../types.js';
 import { formatSummaryMarkdown } from '../../utils/formatter.js';
 
@@ -37,10 +39,11 @@ import { formatSummaryMarkdown } from '../../utils/formatter.js';
  * between suggestions is not implied, and nothing here is enforced — the MCP
  * layer observes; orchestration belongs to the Skill above it.
  */
-function suggestNext(
+export function suggestNext(
   metadata: PdfMetadata | null,
   textExtractability: TextExtractabilityState | null,
   unreadablePages: PageExtractability[] | null,
+  declared: XmpDeclarations | null,
 ): string[] {
   const next: string[] = [];
 
@@ -80,6 +83,27 @@ function suggestNext(
       `textExtractability is ${textExtractability} (page ${pageList}): read those pages as ` +
         'images with render_page — read_text cannot represent them.',
     );
+  }
+
+  // #29: XMP の PDF/UA 宣言は「構造ツリーを信頼してよい」という書き手の合図である。
+  // MarkInfo /Marked だけを見ていた 0.15 までは、この合図が summarize から見えなかった。
+  // 🔴 宣言は宣言であって、満たしているかは別の問い（pdf-verify-mcp）。文言は declared で揃える。
+  if (declared?.pdfuaid) {
+    const part = declared.pdfuaid.part === null ? '' : `-${declared.pdfuaid.part}`;
+    if (metadata.isTagged) {
+      next.push(
+        `declaredConformance.pdfuaid declares PDF/UA${part}: the author claims a complete structure ` +
+          'tree, so take the structure route first — extract_structured_text for the body, ' +
+          'extract_tables for tables — instead of inferring reading order from coordinates. ' +
+          'Whether the claim holds is pdf-verify-mcp validate_conformance (flavour pdfua-1/-2), not this server.',
+      );
+    } else {
+      next.push(
+        `declaredConformance.pdfuaid declares PDF/UA${part} but MarkInfo /Marked is not true: the ` +
+          'declaration and the catalog disagree. inspect_tags shows what structure tree exists; ' +
+          'pdf-verify-mcp validate_conformance says which side is wrong.',
+      );
+    }
   }
 
   if (metadata.isTagged) {
@@ -138,12 +162,14 @@ Args:
 
 \`hasText\` is decided from page 1's preview and cannot say *why* text is absent. \`textExtractability\` answers that over every page (ISO 32000-2 §9.10.1): \`extracted\`, \`no_text_layer\` (image content, no text-showing operator — the page needs OCR or a rendered image), \`not_extractable\` (a font used offers no route to Unicode), or \`not_observed\` (encrypted or unreadable content stream). \`unreadablePages\` lists the pages that are not \`extracted\`, with the reason.
 
-The summary ends with a \`next\` list: tool suggestions derived from the observations themselves (hasText false → render_page; tagged → extract_structured_text / extract_tables; large page count → search_text before read_text). Each line names the observation it follows from; nothing is enforced and no ordering is implied.
+\`declaredConformance\` is what the XMP packet (ISO 32000-2 §14.3.2) declares — PDF/A (\`pdfaid\`), PDF/UA (\`pdfuaid\`) and the W3C TDMRep rights statement (\`tdm\`) — as written. A PDF/UA declaration is the author's claim that the structure tree is complete, which is the cue to read through it rather than infer reading order; it is not a verdict (that is pdf-verify-mcp validate_conformance). All-null blocks mean the catalog has no /Metadata; \`null\` means the packet could not be read (see \`scope\`).
+
+The summary ends with a \`next\` list: tool suggestions derived from the observations themselves (hasText false → render_page; PDF/UA declared or tagged → extract_structured_text / extract_tables; large page count → search_text before read_text). Each line names the observation it follows from; nothing is enforced and no ordering is implied.
 
 Returns:
   Summary including: page count, PDF version, file size, tagged/encrypted/signature flags, text presence, per-document text extractability, the pages that are not fully extractable, image count, a text preview from page 1, and the \`next\` suggestions.
 
-  Four separate readings produce that summary — the document information, the text of page 1, the image count, and the extractability observation — and any of them can fail on its own. \`scope\` says which were done. A field whose reading did not happen is \`null\`, never \`0\`, \`false\` or \`""\`: "not read" and "read and found nothing" are different answers, and \`next\` stays silent about any premise that was not observed.
+  Five separate readings produce that summary — the document information, the text of page 1, the image count, the extractability observation, and the XMP declarations — and any of them can fail on its own. \`scope\` says which were done. A field whose reading did not happen is \`null\`, never \`0\`, \`false\` or \`""\`: "not read" and "read and found nothing" are different answers, and \`next\` stays silent about any premise that was not observed.
 
 Examples:
   - Quick overview: { file_path: "/path/to/doc.pdf" }
@@ -190,13 +216,18 @@ Examples:
       // #21: over ALL pages, not just page 1. `hasText` is decided from the
       // first page's preview, so a document whose page 1 happens to carry a
       // title would otherwise report "has text" for 400 scanned pages behind it.
-      const obs = await half(() => observeExtractability(params.file_path));
+      // #29: the XMP declarations are a 5th reading, through recover rather than pdfjs.
+      const [obs, xmp] = await Promise.all([
+        half(() => observeExtractability(params.file_path)),
+        half(() => readXmpDeclarations(params.file_path)),
+      ]);
 
       const scope: SummaryScope = {
         metadata: metadataOutcome,
         textPreview: previewOutcome,
         imageCount: imagesOutcome,
         extractabilityObservation: obs.outcome,
+        xmpDeclarations: xmp.outcome,
       };
 
       // どれ 1 つ読めなかったときだけ、エラーにする。
@@ -228,7 +259,8 @@ Examples:
         hasText: textPreview === null ? null : textPreview.trim().length > 0,
         textExtractability,
         unreadablePages,
-        next: suggestNext(metadata, textExtractability, unreadablePages),
+        declaredConformance: xmp.ok ? xmp.value : null,
+        next: suggestNext(metadata, textExtractability, unreadablePages, xmp.ok ? xmp.value : null),
       };
 
       const text =
