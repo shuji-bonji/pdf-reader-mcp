@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`inspect_catalog`** — a document-level inventory read from the catalog dictionary
+  (ISO 32000-2 §7.7.2, Table 29), for the parts of a PDF that are not page content and that
+  page-oriented readers drop (#27; the PDF Association's "FAQ: AI and PDF" lists them as
+  things an AI ingestion should not lose):
+  - `/Outlines` (§12.3.3): item count and depth by walking `/First` / `/Next` (not `/Count`),
+    the first `max_outline_items` items with title and target page — through `/Dest` or a
+    `GoTo` `/A`.
+  - `/OCProperties` (§8.11.4): every optional content group's `/Name`; the default
+    configuration's `BaseState` and `ON` / `OFF` counts; the number of alternate configurations.
+  - `/Names` → `/EmbeddedFiles` (§7.7.4, §7.11.4): file name (`/UF` before `/F`, §7.11.3),
+    MIME type (`/Subtype`), size (`/Params /Size`, else the decoded length),
+    `/AFRelationship` (Table 43), `/Desc`; plus the count of document-level `/AF` (§14.13).
+  - `/Names` → `/Dests` and `/JavaScript` counts. A document-level JavaScript entry runs when
+    the document opens (§12.6.4.17).
+  - `/Metadata` (§14.3.2): packet size, `/Subtype`, every `xmlns:` declared, and the
+    **declared** values of `pdfaid:part` / `pdfaid:conformance`, `pdfuaid:part`, and the W3C
+    TDMRep `tdm:reservation` / `tdm:policy`. `include_xmp: true` returns the packet text
+    (capped at 64 KiB). Prefixes are resolved through their namespace URI, and both the
+    attribute and the element form are read.
+  - `/OpenAction` and `/AA` (Table 200): the action's `/S`, target page / file / URI, whether
+    it carries `/JS`, and the `/S` of each action in its `/Next` chain.
+  - `/Collection` presence.
+
+  Each entry is a value, `{ status: "absent" }` (the catalog has no such key — an observed
+  fact) or `{ status: "unreadable", reason }` (the key is there but its value could not be
+  reached). An encrypted document whose key cannot be derived from the empty user password
+  reports every entry as unreadable, never as absent.
+
+  What this tool does **not** do: it does not verify a `pdfuaid:part` claim (that is
+  pdf-verify-mcp `validate_conformance`), does not decide whether a `tdm:reservation` should
+  be honoured, and does not judge an action. `get_metadata` continues to read the Info
+  dictionary (§14.3.3), which is a different object from the XMP packet.
+
+- `tests/fixtures/catalog-features.pdf`: outlines on two levels, two layers, two attachments,
+  an XMP packet declaring PDF/A-3B, PDF/UA-1 and a TDM reservation, a `GoTo` open action with
+  a `/Next` JavaScript action, and a `WC` additional action.
+
 ## [0.15.1] - 2026-09-15
 
 ### Fixed

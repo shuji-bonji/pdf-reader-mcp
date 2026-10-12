@@ -5,7 +5,9 @@
 import { CHARACTER_LIMIT } from '../constants.js';
 import { describeExtractability } from '../services/text-extractability-service.js';
 import type {
+  ActionInfo,
   AnnotationsAnalysis,
+  CatalogInventory,
   ExtractedTable,
   FontsAnalysis,
   MetadataValidation,
@@ -796,6 +798,159 @@ export function formatObjectLocationsMarkdown(result: ObjectLocationResult): str
   if (result.notes.length > 0) {
     lines.push('## Notes', '');
     for (const note of result.notes) lines.push(`- ${note}`);
+  }
+
+  return lines.join('\n');
+}
+
+// ─── inspect_catalog ─────────────────────────────────────────────────────────
+
+/** One line for an entry that is absent or unreadable; null when it holds a value. */
+function catalogStatusLine(
+  entry: { status: 'absent' } | { status: 'unreadable'; reason: string } | object,
+): string | null {
+  if (!('status' in entry)) return null;
+  if (entry.status === 'absent') return '- absent (the catalog has no such key)';
+  if (entry.status === 'unreadable') return `- **unreadable**: ${entry.reason}`;
+  return null;
+}
+
+function formatAction(action: ActionInfo): string {
+  const parts = [`type **${action.type}**`];
+  if (action.page !== null) parts.push(`page ${action.page}`);
+  if (action.named !== null) parts.push(`named destination "${action.named}"`);
+  if (action.file !== null) parts.push(`file "${action.file}"`);
+  if (action.uri !== null) parts.push(`URI ${action.uri}`);
+  if (action.hasJavaScript) parts.push('**carries /JS**');
+  if (action.next.length > 0) parts.push(`then /Next: ${action.next.join(' → ')}`);
+  return parts.join(', ');
+}
+
+export function formatCatalogMarkdown(inv: CatalogInventory): string {
+  const lines: string[] = ['# PDF Catalog Inventory', ''];
+  if (inv.note) lines.push(`> ⚠️ ${inv.note}`, '');
+  lines.push(`- **Encrypted**: ${inv.isEncrypted ? 'Yes' : 'No'}`);
+  lines.push(`- **Collection (portfolio)**: ${inv.collection ? 'Yes' : 'No'}`);
+  lines.push(
+    `- **Associated files (/AF)**: ${inv.associatedFiles === null ? 'unreadable' : inv.associatedFiles}`,
+  );
+
+  // Outlines
+  lines.push('', '## Outlines (bookmarks, §12.3.3)', '');
+  const o = catalogStatusLine(inv.outlines);
+  if (o) lines.push(o);
+  else if (!('status' in inv.outlines)) {
+    lines.push(`- **Items**: ${inv.outlines.count} (max depth ${inv.outlines.maxDepth})`);
+    for (const item of inv.outlines.items) {
+      const target =
+        item.page !== null
+          ? `→ p.${item.page}`
+          : item.named !== null
+            ? `→ named "${item.named}"`
+            : item.action !== null
+              ? `→ action ${item.action}`
+              : '';
+      lines.push(
+        `${'  '.repeat(item.depth - 1)}- ${item.title ?? '(untitled)'} ${target}`.trimEnd(),
+      );
+    }
+    if (inv.outlines.truncated) {
+      lines.push(
+        `- … ${inv.outlines.count - inv.outlines.items.length} more (raise max_outline_items)`,
+      );
+    }
+  }
+
+  // Optional content
+  lines.push('', '## Optional content (layers, §8.11.4)', '');
+  const oc = catalogStatusLine(inv.optionalContent);
+  if (oc) lines.push(oc);
+  else if (!('status' in inv.optionalContent)) {
+    const c = inv.optionalContent;
+    lines.push(`- **Groups**: ${c.groups.length}`);
+    for (const g of c.groups)
+      lines.push(`  - ${g.name ?? '(unnamed)'}${g.ref ? ` (${g.ref})` : ''}`);
+    if (c.defaultConfig) {
+      lines.push(
+        `- **Default configuration**: BaseState ${c.defaultConfig.baseState ?? 'ON (default)'}, ON ${c.defaultConfig.on}, OFF ${c.defaultConfig.off}`,
+      );
+    }
+    if (c.alternateConfigs > 0) lines.push(`- **Alternate configurations**: ${c.alternateConfigs}`);
+  }
+
+  // Embedded files
+  lines.push('', '## Embedded files (/Names → /EmbeddedFiles, §7.11.4)', '');
+  const ef = catalogStatusLine(inv.embeddedFiles);
+  if (ef) lines.push(ef);
+  else if (!('status' in inv.embeddedFiles)) {
+    const e = inv.embeddedFiles;
+    lines.push(`- **Count**: ${e.count}${e.unreadable > 0 ? ` (${e.unreadable} unreadable)` : ''}`);
+    if (e.files.length > 0) {
+      lines.push(
+        '',
+        '| Key | File name | MIME type | Size | AFRelationship | Description |',
+        '|---|---|---|---|---|---|',
+      );
+      for (const f of e.files) {
+        lines.push(
+          `| ${f.key} | ${f.fileName ?? '—'} | ${f.mimeType ?? '—'} | ${f.size === null ? '—' : formatFileSize(f.size)} | ${f.afRelationship ?? '—'} | ${f.description ?? '—'} |`,
+        );
+      }
+    }
+  }
+
+  // Name trees
+  lines.push('', '## Other name trees (/Names, §7.7.4)', '');
+  const nm = catalogStatusLine(inv.names);
+  if (nm) lines.push(nm);
+  else if (!('status' in inv.names)) {
+    lines.push(`- **Named destinations (/Dests)**: ${inv.names.dests ?? 'unreadable'}`);
+    lines.push(
+      `- **Document-level JavaScript (/JavaScript)**: ${inv.names.javaScript ?? 'unreadable'}${inv.names.javaScript ? ' — runs when the document is opened (§12.6.4.17)' : ''}`,
+    );
+  }
+
+  // XMP
+  lines.push('', '## XMP metadata (/Metadata, §14.3.2)', '');
+  const m = inv.metadata;
+  if (m.status === 'absent')
+    lines.push(
+      '- absent (the catalog has no /Metadata; get_metadata reads the Info dictionary, which is separate)',
+    );
+  else if (m.status === 'unreadable') lines.push(`- **unreadable**: ${m.reason}`);
+  else {
+    lines.push(
+      `- **Packet**: ${formatFileSize(m.bytes)}${m.subtype ? `, /Subtype ${m.subtype}` : ''}`,
+    );
+    lines.push(
+      `- **Namespaces**: ${m.namespaces.map((n) => n.prefix).join(', ') || '(none declared)'}`,
+    );
+    const d = m.declarations;
+    lines.push('- **Declared** (as written — not verified here):');
+    lines.push(
+      `  - PDF/A (pdfaid): ${d.pdfaid ? `part ${d.pdfaid.part ?? '?'}${d.pdfaid.conformance ? d.pdfaid.conformance : ''}` : 'not declared'}`,
+    );
+    lines.push(
+      `  - PDF/UA (pdfuaid): ${d.pdfuaid ? `part ${d.pdfuaid.part ?? '?'}` : 'not declared'}`,
+    );
+    lines.push(
+      `  - TDM reservation (W3C TDMRep, tdm): ${d.tdm ? `reservation ${d.tdm.reservation ?? '?'}${d.tdm.policy ? `, policy ${d.tdm.policy}` : ''}` : 'not declared'}`,
+    );
+    if (m.xml !== undefined) lines.push('', '```xml', m.xml, '```');
+  }
+
+  // Actions
+  lines.push('', '## Actions on open (/OpenAction, /AA — §7.7.2, §12.6)', '');
+  const oa = catalogStatusLine(inv.openAction);
+  if (oa) lines.push(`- **OpenAction**: ${oa.replace(/^- /, '')}`);
+  else if (!('status' in inv.openAction))
+    lines.push(`- **OpenAction**: ${formatAction(inv.openAction)}`);
+  const aa = catalogStatusLine(inv.additionalActions);
+  if (aa) lines.push(`- **Additional actions (/AA)**: ${aa.replace(/^- /, '')}`);
+  else if (!('status' in inv.additionalActions)) {
+    const entries = Object.entries(inv.additionalActions);
+    lines.push(`- **Additional actions (/AA)**: ${entries.length}`);
+    for (const [trigger, action] of entries) lines.push(`  - ${trigger}: ${formatAction(action)}`);
   }
 
   return lines.join('\n');

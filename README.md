@@ -22,7 +22,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**19 tools** organized into three tiers:
+**20 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -33,7 +33,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). Reports **text extractability** per page (§9.10.1) so an empty result is never mistaken for an empty page. For **logical** order in tagged PDFs, prefer `extract_structured_text` |
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Embedded image XObjects as **PNG or JPEG files**, returned as MCP image content blocks so a vision model can read them. `max_width` / `max_height` downscale by area average; the response has a byte budget and names anything it leaves out |
-| `read_url`       | Fetch a remote PDF and extract its **text** — nothing more. The bytes are not saved; to use the other 18 tools on a URL's PDF, download it first and pass the local path (see "read_url and the read-only boundary") |
+| `read_url`       | Fetch a remote PDF and extract its **text** — nothing more. The bytes are not saved; to use the other 19 tools on a URL's PDF, download it first and pass the local path (see "read_url and the read-only boundary") |
 | `render_page`    | Rasterise pages to **PNG/JPEG** via PDFium-WASM (optional dependency `@hyzyla/pdfium`). The next step when text extractability says `no_text_layer` / `not_extractable` — draws the whole page, vector art and forms included |
 | `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
@@ -42,6 +42,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | Tool                  | Description                                                         |
 | --------------------- | ------------------------------------------------------------------- |
 | `inspect_structure`   | Object tree and catalog dictionary analysis                         |
+| `inspect_catalog`     | Document-level inventory from the catalog (ISO 32000-2 §7.7.2): bookmarks (`/Outlines`), layers (`/OCProperties`), attachments (`/EmbeddedFiles`, with `/AFRelationship`), the **XMP packet** with its declared `pdfaid` / `pdfuaid` / W3C **TDMRep** (`tdm:reservation`) values, and what runs on open (`/OpenAction`, `/AA`, document-level JavaScript). Each entry says `absent` or `unreadable` — never one for the other. Declarations are reported as written, not verified |
 | `inspect_tags`        | Tagged PDF structure tree visualization                             |
 | `inspect_fonts`       | Font inventory (embedded/subset/type detection)                     |
 | `inspect_annotations` | Annotation listing (categorized by subtype)                         |
@@ -63,7 +64,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 `read_url` returns text, and only text. This is a decision, now stated rather than implied:
 the fetched bytes are discarded after extraction, because saving them would make a reader
 tool write to the file system, and every tool of this server is read-only
-(`readOnlyHint: true` — all 19 of them).
+(`readOnlyHint: true` — all 20 of them).
 
 To run `search_text`, `inspect_structure`, `extract_tables`, `render_page` or anything else
 against a PDF that lives at a URL, download the file first — with whatever fetch capability

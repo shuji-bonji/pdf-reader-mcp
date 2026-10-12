@@ -16,6 +16,7 @@ import { registerSummarize } from './tier1/summarize.js';
 import { registerExtractStructuredText } from './tier2/extract-structured-text.js';
 import { registerExtractTables } from './tier2/extract-tables.js';
 import { registerInspectAnnotations } from './tier2/inspect-annotations.js';
+import { registerInspectCatalog } from './tier2/inspect-catalog.js';
 import { registerInspectFonts } from './tier2/inspect-fonts.js';
 import { registerInspectSignatures } from './tier2/inspect-signatures.js';
 import { registerInspectStructure } from './tier2/inspect-structure.js';
@@ -42,6 +43,7 @@ export function registerAllTools(server: McpServer): void {
 
   // Tier 2: Structure analysis
   registerInspectStructure(server);
+  registerInspectCatalog(server);
   registerInspectTags(server);
   registerInspectFonts(server);
   registerInspectAnnotations(server);

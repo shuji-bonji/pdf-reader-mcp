@@ -17,6 +17,7 @@
  *  - broken-cid-only.pdf : a page drawn ONLY with a CID font that has no /ToUnicode (#21)
  *  - no-metadata.pdf     : PDF with no metadata set
  *  - corrupted.pdf       : Invalid file (non-PDF bytes)
+ *  - catalog-features.pdf: outlines / OCG / embedded files / XMP (pdfaid, pdfuaid, TDMRep) / OpenAction / AA (#27)
  */
 
 import { createHash } from 'node:crypto';
@@ -1656,6 +1657,172 @@ async function createBrokenCidOnlyPdf(): Promise<void> {
   console.log('Created: broken-cid-only.pdf (1 page, Identity-H without /ToUnicode)');
 }
 
+/**
+ * Document-level components for `inspect_catalog` (#27):
+ *   - /Outlines with 3 items on 2 levels (one via /Dest, one via a GoTo /A)
+ *   - /OCProperties with 2 OCGs, /D BaseState ON and one group in /OFF
+ *   - /Names → /EmbeddedFiles with 2 attachments (one with /AFRelationship Data and /Params /Size)
+ *   - /Names → /JavaScript with 1 document-level script
+ *   - /AF pointing at the first attachment
+ *   - /Metadata: XMP declaring pdfaid 3B, pdfuaid 1, and TDMRep reservation 1 + policy
+ *   - /OpenAction: GoTo page 2 with a /Next JavaScript action
+ *   - /AA with WC (will close) JavaScript
+ */
+async function createCatalogFeaturesPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const context = doc.context;
+
+  const page1 = doc.addPage([595, 842]);
+  page1.drawText('Catalog features — page 1', { x: 50, y: 780, size: 16, font });
+  const page2 = doc.addPage([595, 842]);
+  page2.drawText('Catalog features — page 2', { x: 50, y: 780, size: 16, font });
+
+  // ─── /Outlines (§12.3.3) ───
+  const outlinesRef = context.nextRef();
+  const item1Ref = context.nextRef();
+  const item1aRef = context.nextRef();
+  const item2Ref = context.nextRef();
+  context.assign(
+    item1Ref,
+    context.obj({
+      Title: PDFString.of('Chapter 1'),
+      Parent: outlinesRef,
+      Next: item2Ref,
+      First: item1aRef,
+      Last: item1aRef,
+      Count: 1,
+      Dest: [page1.ref, 'XYZ', null, null, null],
+    }),
+  );
+  context.assign(
+    item1aRef,
+    context.obj({
+      Title: PDFString.of('Section 1.1'),
+      Parent: item1Ref,
+      // Target given as a GoTo action instead of /Dest — both forms are legal.
+      A: context.obj({ S: 'GoTo', D: [page2.ref, 'Fit'] }),
+    }),
+  );
+  context.assign(
+    item2Ref,
+    context.obj({
+      Title: PDFString.of('Chapter 2'),
+      Parent: outlinesRef,
+      Prev: item1Ref,
+      Dest: [page2.ref, 'Fit'],
+    }),
+  );
+  context.assign(
+    outlinesRef,
+    context.obj({ Type: 'Outlines', First: item1Ref, Last: item2Ref, Count: 3 }),
+  );
+  doc.catalog.set(PDFName.of('Outlines'), outlinesRef);
+
+  // ─── /OCProperties (§8.11.4) ───
+  const ocg1 = context.register(context.obj({ Type: 'OCG', Name: PDFString.of('Base layer') }));
+  const ocg2 = context.register(
+    context.obj({ Type: 'OCG', Name: PDFString.of('Annotations layer') }),
+  );
+  doc.catalog.set(
+    PDFName.of('OCProperties'),
+    context.obj({
+      OCGs: [ocg1, ocg2],
+      D: context.obj({ Name: PDFString.of('Default'), BaseState: 'ON', OFF: [ocg2] }),
+    }),
+  );
+
+  // ─── Embedded files (§7.11.4) + /AF (§14.13) ───
+  const csv = new TextEncoder().encode('id,amount\n1,100\n2,250\n');
+  const csvStream = context.register(
+    context.flateStream(csv, {
+      Type: 'EmbeddedFile',
+      Subtype: 'text/csv',
+      Params: { Size: csv.length },
+    }),
+  );
+  const csvSpecRef = context.register(
+    context.obj({
+      Type: 'Filespec',
+      F: PDFString.of('data.csv'),
+      UF: PDFString.of('data.csv'),
+      Desc: PDFString.of('Source figures'),
+      AFRelationship: 'Data',
+      EF: context.obj({ F: csvStream, UF: csvStream }),
+    }),
+  );
+  const txt = new TextEncoder().encode('readme');
+  const txtStream = context.register(
+    context.flateStream(txt, { Type: 'EmbeddedFile', Subtype: 'text/plain' }),
+  );
+  const txtSpecRef = context.register(
+    context.obj({
+      Type: 'Filespec',
+      F: PDFString.of('readme.txt'),
+      EF: context.obj({ F: txtStream }),
+    }),
+  );
+  const embeddedFilesTree = context.obj({
+    Names: [PDFString.of('data.csv'), csvSpecRef, PDFString.of('readme.txt'), txtSpecRef],
+  });
+  const jsTree = context.obj({
+    Names: [
+      PDFString.of('onOpen'),
+      context.obj({ S: 'JavaScript', JS: PDFString.of('app.alert("document-level");') }),
+    ],
+  });
+  doc.catalog.set(
+    PDFName.of('Names'),
+    context.obj({ EmbeddedFiles: embeddedFilesTree, JavaScript: jsTree }),
+  );
+  doc.catalog.set(PDFName.of('AF'), context.obj([csvSpecRef]));
+
+  // ─── /Metadata (§14.3.2): pdfaid + pdfuaid + TDMRep ───
+  const xmp = `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
+    xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/"
+    xmlns:tdm="http://www.w3.org/ns/tdmrep#"
+    pdfaid:part="3" pdfaid:conformance="B">
+   <dc:title><rdf:Alt><rdf:li xml:lang="x-default">Catalog features</rdf:li></rdf:Alt></dc:title>
+   <pdfuaid:part>1</pdfuaid:part>
+   <tdm:reservation>1</tdm:reservation>
+   <tdm:policy>https://example.org/tdm-policy</tdm:policy>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>`;
+  const xmpRef = context.register(
+    context.stream(new TextEncoder().encode(xmp), { Type: 'Metadata', Subtype: 'XML' }),
+  );
+  doc.catalog.set(PDFName.of('Metadata'), xmpRef);
+
+  // ─── /OpenAction and /AA (§7.7.2, §12.6.3 Table 200) ───
+  doc.catalog.set(
+    PDFName.of('OpenAction'),
+    context.obj({
+      S: 'GoTo',
+      D: [page2.ref, 'Fit'],
+      Next: context.obj({ S: 'JavaScript', JS: PDFString.of('this.print();') }),
+    }),
+  );
+  doc.catalog.set(
+    PDFName.of('AA'),
+    context.obj({ WC: context.obj({ S: 'JavaScript', JS: PDFString.of('app.alert("bye");') }) }),
+  );
+
+  doc.setTitle('Catalog Features Test PDF');
+  doc.setProducer('pdf-reader-mcp test suite');
+  await writeFile(
+    `${FIXTURES_DIR}/catalog-features.pdf`,
+    await doc.save({ useObjectStreams: false }),
+  );
+  console.log('Created: catalog-features.pdf (outlines, OCG, embedded files, XMP, OpenAction, AA)');
+}
+
 async function main(): Promise<void> {
   // An optional argv narrows the run to one fixture, so adding a fixture does
   // not force regenerating (and re-committing) every existing one.
@@ -1676,6 +1843,7 @@ async function main(): Promise<void> {
     ['encrypted-actualtext', createEncryptedActualTextPdf],
     ['no-metadata', createNoMetadataPdf],
     ['corrupted', createCorruptedPdf],
+    ['catalog-features', createCatalogFeaturesPdf],
   ];
   const wanted = creators.filter(([name]) => !only || name === only);
   if (wanted.length === 0) {

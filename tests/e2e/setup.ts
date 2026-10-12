@@ -81,6 +81,12 @@ export const FIXTURES = {
    * substitutes garbage for the page text.
    */
   encryptedActualText: resolve(FIXTURES_DIR, 'encrypted-actualtext.pdf'),
+  /**
+   * Document-level components for `inspect_catalog` (#27): outlines, optional
+   * content, embedded files, XMP declarations (pdfaid / pdfuaid / TDMRep),
+   * /OpenAction with a /Next JavaScript action, /AA.
+   */
+  catalogFeatures: resolve(FIXTURES_DIR, 'catalog-features.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */

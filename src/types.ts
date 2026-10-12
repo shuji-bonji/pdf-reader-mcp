@@ -654,3 +654,166 @@ export interface ObjectLocationResult {
   isEncrypted: boolean;
   notes: string[];
 }
+
+// ─── XMP metadata (ISO 32000-2 §14.3.2) — shared by inspect_catalog and summarize ───
+
+/**
+ * What the document-level XMP packet declares. Every value here is **as written** —
+ * a declaration, not a verified property. `null` for a block means that block's
+ * properties were not found in the packet.
+ */
+export interface XmpDeclarations {
+  /** PDF/A identification (`pdfaid:part` / `pdfaid:conformance`). Verified by pdf-verify-mcp, not here. */
+  pdfaid: { part: number | null; conformance: string | null } | null;
+  /** PDF/UA identification (`pdfuaid:part`). A claim about the structure tree, not a verdict on it. */
+  pdfuaid: { part: number | null } | null;
+  /**
+   * W3C TDM Reservation Protocol (TDMRep), namespace `http://www.w3.org/ns/tdmrep#`.
+   * `reservation` is 1 when the rights holder reserves text-and-data-mining rights, 0 when
+   * they do not; `policy` is the URL of the licensing policy when one is given. This server
+   * reports the statement; whether to honour it is the caller's decision (#28).
+   */
+  tdm: { reservation: number | null; policy: string | null } | null;
+}
+
+/**
+ * The document-level `/Metadata` stream. `null` at the call site means the catalog has no
+ * `/Metadata` key — the packet is **absent**. `unreadable` means the key is there but the
+ * stream could not be reached or decoded; nothing can be said about what it declares.
+ */
+export type XmpMetadataInfo =
+  | {
+      status: 'read';
+      /** Decoded packet length in bytes. */
+      bytes: number;
+      /** `/Subtype` of the stream dictionary (`XML` per §14.3.2), or null when not written. */
+      subtype: string | null;
+      /** Every `xmlns:` declaration in the packet, so a caller can see which vocabularies are present. */
+      namespaces: { prefix: string; uri: string }[];
+      declarations: XmpDeclarations;
+      /** The packet text. Present from the service; dropped from the tool output unless `include_xmp` is set. */
+      xml?: string;
+    }
+  | { status: 'unreadable'; reason: string };
+
+// ─── inspect_catalog (ISO 32000-2 §7.7.2, Table 29) ───
+
+/** One outline item (§12.3.3), flattened with its depth. */
+export interface OutlineItemInfo {
+  title: string | null;
+  /** 1 for a top-level item. */
+  depth: number;
+  /**
+   * Where the item points. `page` is 1-based when the destination names a page object in
+   * this document's page tree; `named` carries a named destination that was not resolved;
+   * `action` is the `/S` of an action dictionary used instead of a destination.
+   */
+  page: number | null;
+  named: string | null;
+  action: string | null;
+}
+
+export interface OutlinesInfo {
+  /** All items in the tree, counted by walking `/First` / `/Next` (not `/Count`, which may be wrong). */
+  count: number;
+  maxDepth: number;
+  /** The first `max_outline_items` items in document order. */
+  items: OutlineItemInfo[];
+  truncated: boolean;
+}
+
+/** Optional content (layers), §8.11.4. */
+export interface OptionalContentInfo {
+  /** `/OCGs` — every optional content group, with its `/Name`. */
+  groups: { name: string | null; ref: string | null }[];
+  /** The default configuration `/D` (§8.11.4.3). */
+  defaultConfig: {
+    name: string | null;
+    baseState: 'ON' | 'OFF' | 'Unchanged' | null;
+    on: number;
+    off: number;
+  } | null;
+  /** Number of alternate configurations in `/Configs`. */
+  alternateConfigs: number;
+}
+
+/** One entry of the `/EmbeddedFiles` name tree (§7.7.4, §7.11.4). */
+export interface EmbeddedFileInfo {
+  /** The name-tree key. */
+  key: string;
+  /** `/UF` when present, else `/F`, of the file specification dictionary. */
+  fileName: string | null;
+  /** `/Subtype` of the embedded file stream — a MIME type written as a name. */
+  mimeType: string | null;
+  /** `/Params /Size` when written, else the decoded stream length when the stream was readable. */
+  size: number | null;
+  /** `/AFRelationship` of the file specification (PDF 2.0, Table 43). */
+  afRelationship: string | null;
+  description: string | null;
+}
+
+export interface EmbeddedFilesInfo {
+  count: number;
+  files: EmbeddedFileInfo[];
+  /** Leaves of the name tree whose file specification could not be read. */
+  unreadable: number;
+}
+
+/** Document-level name trees other than `/EmbeddedFiles` (§7.7.4, Table 32). Counts only. */
+export interface NameTreesInfo {
+  /** `/Dests` — named destinations. */
+  dests: number | null;
+  /** `/JavaScript` — document-level ECMAScript actions (§12.6.4.17). Runs when the document opens. */
+  javaScript: number | null;
+}
+
+/** An action dictionary (§12.6.2) or an explicit destination, as it appears at a trigger. */
+export interface ActionInfo {
+  /** `/S` of the action; `Destination` when the trigger holds a destination rather than an action. */
+  type: string;
+  /** For `GoTo`-like actions and destinations: the 1-based target page when resolved. */
+  page: number | null;
+  /** `/F` for `Launch` / `GoToR` / `GoToE` / `ImportData`, as a file name when readable. */
+  file: string | null;
+  /** `/URI` for `URI` actions. */
+  uri: string | null;
+  /** A named destination (§12.3.2.4) that was not resolved to a page. */
+  named: string | null;
+  /** Whether the dictionary carries `/JS` (ECMAScript). */
+  hasJavaScript: boolean;
+  /** `/S` of each further action in the `/Next` chain (§12.6.2), in order; empty when none. */
+  next: string[];
+}
+
+export interface CatalogInventory {
+  /**
+   * `absent` = the catalog has no such key (an observed fact). `unreadable` = the key is
+   * there but its value could not be resolved; nothing below it is known.
+   */
+  outlines: OutlinesInfo | { status: 'absent' } | { status: 'unreadable'; reason: string };
+  optionalContent:
+    | OptionalContentInfo
+    | { status: 'absent' }
+    | { status: 'unreadable'; reason: string };
+  embeddedFiles:
+    | EmbeddedFilesInfo
+    | { status: 'absent' }
+    | { status: 'unreadable'; reason: string };
+  /** Associated files at document level (`/AF`, PDF 2.0 §14.13). */
+  associatedFiles: number | null;
+  names: NameTreesInfo | { status: 'absent' } | { status: 'unreadable'; reason: string };
+  /** `/Metadata`. `absent` when the catalog has no such key. */
+  metadata: XmpMetadataInfo | { status: 'absent' };
+  /** `/OpenAction` — what happens when the document is opened (§7.7.2). */
+  openAction: ActionInfo | { status: 'absent' } | { status: 'unreadable'; reason: string };
+  /** `/AA` — document-level trigger events (§12.6.3, Table 200: WC, WS, DS, WP, DP). */
+  additionalActions:
+    | Record<string, ActionInfo>
+    | { status: 'absent' }
+    | { status: 'unreadable'; reason: string };
+  /** `/Collection` — the document is a portfolio (§12.3.5). */
+  collection: boolean;
+  isEncrypted: boolean;
+  /** Set when nothing below the catalog could be read (encrypted, key not derivable). */
+  note?: string;
+}

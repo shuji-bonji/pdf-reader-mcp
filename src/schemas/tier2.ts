@@ -38,6 +38,29 @@ export const InspectAnnotationsSchema = z
   })
   .strict();
 
+/** inspect_catalog */
+export const InspectCatalogSchema = z
+  .object({
+    file_path: FilePathSchema,
+    max_outline_items: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .default(50)
+      .describe(
+        'How many outline (bookmark) items to list. The count and depth are always computed over the whole tree.',
+      ),
+    include_xmp: z
+      .boolean()
+      .default(false)
+      .describe(
+        'Return the XMP packet text itself (capped at 64 KiB). Off by default: the declared values are extracted either way.',
+      ),
+    response_format: ResponseFormatSchema,
+  })
+  .strict();
+
 /** locate_objects */
 export const LocateObjectsSchema = z
   .object({
@@ -106,6 +129,7 @@ export type InspectStructureInput = z.infer<typeof InspectStructureSchema>;
 export type InspectTagsInput = z.infer<typeof InspectTagsSchema>;
 export type InspectFontsInput = z.infer<typeof InspectFontsSchema>;
 export type InspectAnnotationsInput = z.infer<typeof InspectAnnotationsSchema>;
+export type InspectCatalogInput = z.infer<typeof InspectCatalogSchema>;
 export type InspectSignaturesInput = z.infer<typeof InspectSignaturesSchema>;
 export type ExtractTablesInput = z.infer<typeof ExtractTablesSchema>;
 export type ExtractStructuredTextInput = z.infer<typeof ExtractStructuredTextSchema>;

@@ -22,7 +22,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ## 機能
 
-**19 ツール** を 3 層構成で提供します。
+**20 ツール** を 3 層構成で提供します。
 
 ### Tier 1: 基本機能
 
@@ -33,7 +33,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。ページごとに**テキスト抽出可能性**（§9.10.1）を併記するので、空の結果が「空のページ」と取り違えられない。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
 | `read_images`    | 埋め込み画像 XObject を **PNG / JPEG ファイル**として抽出し、MCP の image コンテンツブロックで返す（視覚モデルがそのまま読める）。`max_width` / `max_height` で面積平均による縮小。応答にはバイト予算があり、返さなかった画像は理由付きで名指しする |
-| `read_url`       | リモート PDF を取得して**テキストだけ**を返す。取得したバイト列は保存しない。URL 上の PDF に他の 18 ツールを使うには、先にローカルへダウンロードしてそのパスを渡す（「read_url と read-only の境界」参照） |
+| `read_url`       | リモート PDF を取得して**テキストだけ**を返す。取得したバイト列は保存しない。URL 上の PDF に他の 19 ツールを使うには、先にローカルへダウンロードしてそのパスを渡す（「read_url と read-only の境界」参照） |
 | `render_page`    | ページを **PNG/JPEG** にラスタライズ（PDFium の WASM 版・optionalDependencies の `@hyzyla/pdfium`）。テキスト抽出可能性が `no_text_layer` / `not_extractable` のときの次の一手。ベクタ図形・フォーム込みでページ全体を描く |
 | `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
@@ -42,6 +42,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | ツール                | 説明                                                     |
 | --------------------- | -------------------------------------------------------- |
 | `inspect_structure`   | オブジェクトツリー・カタログ辞書の解析                   |
+| `inspect_catalog`     | カタログ直下の文書レベルの目録（ISO 32000-2 §7.7.2）。ブックマーク（`/Outlines`）・レイヤー（`/OCProperties`）・添付ファイル（`/EmbeddedFiles`、`/AFRelationship` 付き）・**XMP パケット**とそこに書かれた `pdfaid` / `pdfuaid` / W3C **TDMRep**（`tdm:reservation`）の宣言値・開いたときに走るもの（`/OpenAction`・`/AA`・文書レベル JavaScript）。各項目は「無い（absent）」と「読めなかった（unreadable）」を分けて返す。宣言は書いてあるとおりに返し、検証はしない |
 | `inspect_tags`        | Tagged PDF のタグツリー可視化                            |
 | `inspect_fonts`       | フォント一覧（埋め込み/サブセット/Type判定）             |
 | `inspect_annotations` | 注釈一覧（タイプ別分類）                                 |
@@ -62,7 +63,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 `read_url` が返すのはテキストだけ。これは設計判断であり、今回それを暗黙から明文にした。
 取得したバイト列は抽出後に破棄する。保存すれば reader のツールがファイルシステムに
-書き込むことになり、本サーバの全 19 ツールが read-only（`readOnlyHint: true`）という
+書き込むことになり、本サーバの全 20 ツールが read-only（`readOnlyHint: true`）という
 不変条件が成り立たなくなるため。
 
 URL 上の PDF に `search_text` / `inspect_structure` / `extract_tables` / `render_page`
@@ -90,7 +91,7 @@ render_page({ file_path: "/path/to/scan.pdf", pages: "1-3", format: "jpeg" })
 描画エンジンは **PDFium の WebAssembly 版**（`@hyzyla/pdfium`・optionalDependencies）。
 WASM はどのプラットフォームでも同じバイト列なので、`npx` で入る公開版の挙動が環境に
 よらない — ネイティブアドオンを使わない理由がそのまま満たせる。未インストールなら
-`render_page` はインストール方法を返し、他の 18 ツールは通常どおり動く。
+`render_page` はインストール方法を返し、他の 19 ツールは通常どおり動く。
 PDFium（BSD-3-Clause）はテキスト読み取りに使っている pdf.js とは別エンジンであり、
 その旨は description に明記してある（エンジン間の描画差をファイルの性質と
 取り違えないため）。
