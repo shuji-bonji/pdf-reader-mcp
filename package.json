@@ -80,7 +80,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",
+    "@fission-ai/openspec": "1.14.1",
     "@modelcontextprotocol/client": "^2.0.0",
+    "@shuji-bonji/spec-ids": "0.5.0",
     "@types/node": "^22.10.0",
     "pdf-lib": "^1.17.1",
     "tsx": "^4.19.2",

@@ -1,0 +1,47 @@
+# OpenSpec の検査（openspec validate）、仕様 ID とテストの突き合わせ（spec-ids check）と、
+# PR の種類ごとの変更範囲の検査（spec-ids pr-scope）。openspec レイアウト（openspec/spec-ids.json）用。
+# `npx openspec` が動くように、@fission-ai/openspec を devDependencies に入れておく。
+# spec-gate: OpenSpec の節構成・Scenario の欠落、仕様の見出しの重複 / 仕様にあってテストに無い ID /
+#   テストにあって仕様に無い ID / 見出しの機能とディレクトリ名の不一致 / 承認の記録（front matter）の形、
+#   のどれかがあれば止める。
+# pr-scope: ブランチ名の接頭辞（spec/・spec-init/・それ以外）ごとに変えてよいパスの外の変更と、
+#   front matter の承認の空欄があれば止める。PR のときだけ動く。
+name: spec-gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  spec-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: npm ci
+      - run: npx openspec validate --all
+        env:
+          OPENSPEC_TELEMETRY: "0"
+      - run: npx spec-ids check
+
+  pr-scope:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 基準のブランチとの merge-base を求めるので、履歴をすべて取る
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: npm ci
+      - run: npx spec-ids pr-scope
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}

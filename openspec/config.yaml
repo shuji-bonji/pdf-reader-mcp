@@ -1,0 +1,41 @@
+schema: spec-driven
+
+# PDF family 共通の前提（pdf-agent-stack/docs/specs/31 付録 A）と、pdf-reader-mcp 固有の境界ルール。
+# すべての成果物（proposal / specs / design / tasks）のプロンプトに <context> として注入される。
+context: |
+  このリポジトリは PDF family の 1 つ（pdf-reader-mcp。「実体」担当: PDF の中身に何があるかを観測して報告する）。
+  境界ルール: ISO 規格等に照らした compliant / valid / pass-fail を返すなら pdf-verify-mcp の仕事で、
+  本サーバは観測結果を返すだけ。合否を言わない。
+  仕様は openspec/specs/<capability>/spec.md が正本で、日本語で書く。capability はツール名の _ を - にした
+  kebab-case（例: extract-structured-text）。横断の振る舞いは common-errors などの共通 capability に置く。
+  要求の見出しは「### Requirement: SPEC-READER-<機能>-<3 桁> 題」で、ID は `npx spec-ids next <capability>` で採る
+  （一度使った番号は再利用しない）。文末に（SHALL）を付ける。
+  実装仕様を決める前に、必ず pdf-spec-mcp で ISO 32000 / 14289 / 19005 の原文を確認し、
+  ライブラリ（pdfjs / pdfium）の制約と仕様の制約を分けて書く。
+  宣言（ファイルが自分で書いたラベル）・適合（規格どおりであること）・検証（検証器が自分の検査項目で見た結果）を
+  混ぜない。判定はコードが下し、LLM は理由を説明する側に置く。
+  テストは tests/**/*.test.ts（vitest）。受入テストの it / describe の名前に仕様 ID を書く。
+  `npx spec-ids check` が仕様 ID とテスト名を突き合わせ、CI（spec-gate）で止める。
+
+rules:
+  proposal:
+    - 先頭に front matter を置く（approved: と pr: は空のキー、implementation: required か none、targets: [capability, ...]）。approved と pr は人がマージの前に書く
+    - Capabilities には openspec/specs/ にある既存の capability 名をそのまま使う。無いツールの capability を新しく作るときは、そのツールの既存のテストを読んで、起こす範囲（このツールのどの振る舞いか）を書く
+    - 本文に「変わる振る舞い / 変わらない振る舞い / 対象外 / 人が判断すること」を書く
+  specs:
+    - 各 Requirement の見出しは「### Requirement: SPEC-READER-<機能>-<3 桁> 題」。ID は `npx spec-ids next <capability>` で採り、再利用しない
+    - 各 Requirement に「#### Scenario:」を 1 つ以上書く。Scenario 名はそのままテスト名の後半になるので、WHEN / THEN が読める名前にする
+    - 文末に（SHALL）を付ける。Purpose は 50 文字以上
+    - 例や根拠の条文は、ISO 32000-2 の節番号（例: §14.9.4）で書く。ライブラリ名（pdfjs / pdfium / pdf-lib）は Requirement に書かない
+  design:
+    - ライブラリの制約と仕様の制約を分けて書く
+  tasks:
+    - テストの describe / it の名前に仕様 ID と Scenario 名を書くタスクを含める
+    - 期待値を仕様 ID のために変えない
+    - 最後に「npx openspec validate --all && npx spec-ids check が通る」を確かめるタスクを置く
+
+operations:
+  archive:
+    guidance:
+      - archive の前に proposal.md の front matter の approved と pr が埋まっていることを確かめ、空なら止まって人に求める
+      - archive の後に npx spec-ids check を実行し、OK を確かめる
