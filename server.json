@@ -8,13 +8,15 @@
     "url": "https://github.com/shuji-bonji/pdf-reader-mcp",
     "source": "github"
   },
-  "version": "0.16.0",
+  "version": "0.16.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@shuji-bonji/pdf-reader-mcp",
-      "version": "0.16.0",
-      "transport": { "type": "stdio" }
+      "version": "0.16.1",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }
