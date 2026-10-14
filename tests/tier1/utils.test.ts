@@ -6,9 +6,11 @@ import { describe, expect, it } from 'vitest';
 import { handleError, PdfReaderError, validatePdfPath } from '../../src/utils/error-handler.js';
 import {
   formatPageList,
+  formatStructureMarkdown,
   formatStructuredTextMarkdown,
   truncateIfNeeded,
 } from '../../src/utils/formatter.js';
+import type { StructureAnalysis } from '../../src/types.js';
 import { parsePageRange } from '../../src/utils/pdf-helpers.js';
 
 describe('parsePageRange', () => {
@@ -175,5 +177,37 @@ describe('formatStructuredTextMarkdown table cells', () => {
     });
     expect(md).toContain('(pages 3–6)');
     expect(md).not.toContain('3–4–5–6');
+  });
+});
+
+// ── inspect_structure の Markdown: Unreadable の行は 0 のときも出す ──
+describe('formatStructureMarkdown', () => {
+  const analysis = (unreadable: number): StructureAnalysis => ({
+    catalog: [{ key: 'Pages', type: 'ref', value: 'ref(2)' }],
+    pageTree: { totalPages: 1, mediaBoxSamples: [] },
+    objectStats: {
+      totalObjects: 7,
+      streamCount: 2,
+      unreadable,
+      byType: { dict: 5, stream: 2 },
+      byDocType: { Catalog: 1, Pages: 1, Page: 1 },
+    },
+    isEncrypted: false,
+    pdfVersion: '1.7',
+  });
+
+  it('SPEC-READER-INSPECT-STRUCTURE-009 unreadable が 0 でも行がある', () => {
+    const lines = formatStructureMarkdown(analysis(0)).split('\n');
+    const streams = lines.indexOf('- **Streams**: 2');
+    expect(streams).toBeGreaterThan(-1);
+    // JSON は常に欄を持つ。Markdown だけ「欠けたときだけ現れる行」にしない。
+    expect(lines[streams + 1]).toBe('- **Unreadable**: 0');
+    expect(lines[streams + 2]).toBe('- **By COS type** (ISO 32000-2 §7.3):');
+  });
+
+  it('SPEC-READER-INSPECT-STRUCTURE-009 unreadable が 1 以上なら数を出す', () => {
+    const lines = formatStructureMarkdown(analysis(3)).split('\n');
+    const streams = lines.indexOf('- **Streams**: 2');
+    expect(lines[streams + 1]).toBe('- **Unreadable**: 3');
   });
 });
