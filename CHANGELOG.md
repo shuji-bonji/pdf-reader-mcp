@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `inspect_structure` (markdown output) — the `Unreadable` line under *Object Statistics* is
+  now printed when the count is 0, as `- **Unreadable**: 0`. The JSON output always carried
+  `objectStats.unreadable`; the markdown only printed the line when it was non-zero, so a
+  reader could not tell "nothing was unreadable" from "unreadability was not observed"
+  (SPEC-READER-INSPECT-STRUCTURE-009).
+
 ### Changed
 
 - `scripts/sync-plugin-version.mjs` (run by the `npm version` hook) now also keeps
@@ -14,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appears (`version` and `packages[].version`), and `--check` reports either file when it
   drifts. Without this, `mcp-publisher publish` fails with "cannot publish duplicate
   version" after a release, as happened to pdf-spec-mcp 0.6.2 on 2026-10-13. No change to
+  the server's behaviour.
+- Development: specifications now live in `openspec/specs/` (OpenSpec 1.14.1) with
+  `SPEC-READER-*` ids checked against test names by `spec-ids` 0.5.0 in CI (`spec-gate`).
+  See `AGENTS.md`. The first capability written down is `inspect-structure`. No change to
   the server's behaviour.
 
 ## [0.16.0] - 2026-10-12

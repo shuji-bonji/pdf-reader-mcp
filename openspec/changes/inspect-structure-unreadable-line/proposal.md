@@ -1,9 +1,10 @@
 ---
-approved:
-pr:
+approved: 2026-10-15
+pr: 32
 implementation: required
 targets: [inspect-structure]
 ---
+
 # Proposal
 
 ## Why
@@ -41,7 +42,7 @@ PDF family への OpenSpec + spec-ids 導入（pdf-agent-stack `docs/specs/31` �
 
 ### New Capabilities
 
-- `inspect-structure`: `inspect_structure` ツールの応答（目録・ページ木・オブジェクトの数え上げ・版・暗号化の有無）と Markdown 表示。初版はこの変更で、既存テスト（`tests/e2e/04-tier2-structure.test.ts` の IS-*、`tests/tier1/structure-service.test.ts`）が固定している振る舞いを 001〜008 として起こす（期待値は変えない）。
+- `inspect-structure`: `inspect_structure` ツールの応答（目録・ページ木・オブジェクトの数え上げ・版・暗号化の有無）と Markdown 表示。初版はこの変更で、既存テスト（`tests/e2e/04-tier2-structure.test.ts` の IS-\*、`tests/tier1/structure-service.test.ts`）が固定している振る舞いを 001〜008 として起こす（期待値は変えない）。
 
 ### Modified Capabilities
 
