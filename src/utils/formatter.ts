@@ -249,11 +249,11 @@ export function formatStructureMarkdown(analysis: StructureAnalysis): string {
   lines.push('', '## Object Statistics', '');
   lines.push(`- **Total Objects**: ${analysis.objectStats.totalObjects}`);
   lines.push(`- **Streams**: ${analysis.objectStats.streamCount}`);
-  if (analysis.objectStats.unreadable > 0) {
-    // 読めなかった分は総数に混ぜない。混ぜると「何個あるか」の答えが
-    // 「何個読めたか」と区別できなくなる。
-    lines.push(`- **Unreadable**: ${analysis.objectStats.unreadable}`);
-  }
+  // 読めなかった分は総数に混ぜない。混ぜると「何個あるか」の答えが
+  // 「何個読めたか」と区別できなくなる。0 のときも行を出す —— JSON は常に
+  // 欄を持つし、「欠けたときだけ現れる行」は読み飛ばされる
+  // (SPEC-READER-INSPECT-STRUCTURE-009)。
+  lines.push(`- **Unreadable**: ${analysis.objectStats.unreadable}`);
   lines.push('- **By COS type** (ISO 32000-2 §7.3):');
   for (const [type, count] of Object.entries(analysis.objectStats.byType)) {
     lines.push(`  - ${type}: ${count}`);
