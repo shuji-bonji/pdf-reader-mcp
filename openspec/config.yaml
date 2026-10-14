@@ -19,20 +19,20 @@ context: |
 
 rules:
   proposal:
-    - 先頭に front matter を置く（approved: と pr: は空のキー、implementation: required か none、targets: [capability, ...]）。approved と pr は人がマージの前に書く
-    - Capabilities には openspec/specs/ にある既存の capability 名をそのまま使う。無いツールの capability を新しく作るときは、そのツールの既存のテストを読んで、起こす範囲（このツールのどの振る舞いか）を書く
-    - 本文に「変わる振る舞い / 変わらない振る舞い / 対象外 / 人が判断すること」を書く
+    - "先頭に front matter を置く（approved: と pr: は空のキー、implementation: required か none、targets: [capability, ...]）。approved と pr は人がマージの前に書く"
+    - "Capabilities には openspec/specs/ にある既存の capability 名をそのまま使う。無いツールの capability を新しく作るときは、そのツールの既存のテストを読んで、起こす範囲（このツールのどの振る舞いか）を書く"
+    - "本文に「変わる振る舞い / 変わらない振る舞い / 対象外 / 人が判断すること」を書く"
   specs:
-    - 各 Requirement の見出しは「### Requirement: SPEC-READER-<機能>-<3 桁> 題」。ID は `npx spec-ids next <capability>` で採り、再利用しない
-    - 各 Requirement に「#### Scenario:」を 1 つ以上書く。Scenario 名はそのままテスト名の後半になるので、WHEN / THEN が読める名前にする
-    - 文末に（SHALL）を付ける。Purpose は 50 文字以上
-    - 例や根拠の条文は、ISO 32000-2 の節番号（例: §14.9.4）で書く。ライブラリ名（pdfjs / pdfium / pdf-lib）は Requirement に書かない
+    - "各 Requirement の見出しは「### Requirement: SPEC-READER-<機能>-<3 桁> 題」。ID は `npx spec-ids next <capability>` で採り、再利用しない"
+    - "各 Requirement に「#### Scenario:」を 1 つ以上書く。Scenario 名はそのままテスト名の後半になるので、WHEN / THEN が読める名前にする"
+    - "文末に（SHALL）を付ける。Purpose は 50 文字以上"
+    - "例や根拠の条文は、ISO 32000-2 の節番号（例: §14.9.4）で書く。ライブラリ名（pdfjs / pdfium / pdf-lib）は Requirement に書かない"
   design:
-    - ライブラリの制約と仕様の制約を分けて書く
+    - "ライブラリの制約と仕様の制約を分けて書く"
   tasks:
-    - テストの describe / it の名前に仕様 ID と Scenario 名を書くタスクを含める
-    - 期待値を仕様 ID のために変えない
-    - 最後に「npx openspec validate --all && npx spec-ids check が通る」を確かめるタスクを置く
+    - "テストの describe / it の名前に仕様 ID と Scenario 名を書くタスクを含める"
+    - "期待値を仕様 ID のために変えない"
+    - "最後に「npx openspec validate --all && npx spec-ids check が通る」を確かめるタスクを置く"
 
 operations:
   archive:
