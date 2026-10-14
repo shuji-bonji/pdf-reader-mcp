@@ -17,11 +17,11 @@
 
 ## 4. 版と記録
 
-- [ ] 4.1 `CHANGELOG.md`（英語）に書く（済み）。版は人がマージ後に `npm version patch`（フックが plugin.json と server.json も揃える）で 0.16.1 にする
+- [x] 4.1 `CHANGELOG.md`（英語）に書く。版は人が `npm version patch` で 0.16.1 にした（016f148）
 - [x] 4.2 `openspec/changes/inspect-structure-unreadable-line/record.md` を計画 §8 の書式で書く（版・かかった時間・人が判断した箇所・仕様と実装のずれ・読み返した回数）
 
 ## 5. 承認と取り込み（人が判断する）
 
-- [ ] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
-- [ ] 5.2 `npx openspec archive inspect-structure-unreadable-line --yes` で `openspec/specs/inspect-structure/spec.md` に 009 を取り込む
-- [ ] 5.3 `npx openspec validate --all && npx spec-ids check` が通る
+- [x] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
+- [x] 5.2 `npx openspec archive inspect-structure-unreadable-line --yes` で `openspec/specs/inspect-structure/spec.md` に 009 を取り込む
+- [x] 5.3 `npx openspec validate --all && npx spec-ids check` が通る
