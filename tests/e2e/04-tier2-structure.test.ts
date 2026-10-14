@@ -21,14 +21,14 @@ import { ALL_FIXTURES, FIXTURES } from './setup.js';
 
 describe('04 - inspect_structure', () => {
   // IS-1: simple.pdf の基本構造
-  it('IS-1: simple.pdf catalog and page tree', async () => {
+  it('IS-1: simple.pdf catalog and page tree (SPEC-READER-INSPECT-STRUCTURE-001, SPEC-READER-INSPECT-STRUCTURE-002)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     expect(result.catalog.length).toBeGreaterThan(0);
     expect(result.pageTree.totalPages).toBe(EXPECTED_METADATA.simple.pageCount);
   });
 
   // IS-2: objectStats
-  it('IS-2: objectStats are populated', async () => {
+  it('IS-2: objectStats are populated (SPEC-READER-INSPECT-STRUCTURE-003)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     expect(result.objectStats.totalObjects).toBeGreaterThan(0);
     expect(result.objectStats.streamCount).toBeGreaterThanOrEqual(0);
@@ -54,7 +54,7 @@ describe('04 - inspect_structure', () => {
     'null',
   ]);
 
-  it('IS-2b: byType keys are the COS types of §7.3, not library class names', async () => {
+  it('IS-2b: byType keys are the COS types of §7.3, not library class names (SPEC-READER-INSPECT-STRUCTURE-003)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     const kinds = Object.keys(result.objectStats.byType);
     expect(kinds.length).toBeGreaterThan(0);
@@ -64,7 +64,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-2c: /Type は別の欄に出る（pdf-lib の PDFCatalog などが運んでいた情報）
-  it('IS-2c: byDocType counts the /Type of dictionaries', async () => {
+  it('IS-2c: byDocType counts the /Type of dictionaries (SPEC-READER-INSPECT-STRUCTURE-004)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     // 目録は必ずある。§7.7.2 Table 29: /Type は Catalog。
     expect(result.objectStats.byDocType.Catalog).toBe(1);
@@ -73,7 +73,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-2d: 読めなかったオブジェクトは総数に混ぜない
-  it('IS-2d: unreadable is counted separately from totalObjects', async () => {
+  it('IS-2d: unreadable is counted separately from totalObjects (SPEC-READER-INSPECT-STRUCTURE-005)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     // 健全な検体なので 0。🔴 これは「観測して 0 だった」であって
     // 「観測していない」ではない —— 欄そのものが在ることを固定する。
@@ -82,7 +82,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-2e: catalog[].type も §7.3 の型である
-  it('IS-2e: catalog entry types are COS types', async () => {
+  it('IS-2e: catalog entry types are COS types (SPEC-READER-INSPECT-STRUCTURE-001)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     expect(result.catalog.length).toBeGreaterThan(0);
     for (const entry of result.catalog) expect(COS_KINDS.has(entry.type)).toBe(true);
@@ -93,7 +93,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-3: pdfVersion 検出
-  it('IS-3: pdfVersion is detected', async () => {
+  it('IS-3: pdfVersion is detected (SPEC-READER-INSPECT-STRUCTURE-006)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     expect(result.pdfVersion).not.toBeNull();
     // pdf-lib は 1.7 で生成
@@ -101,7 +101,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-4: mediaBoxSamples (A4サイズ)
-  it('IS-4: mediaBoxSamples match A4 dimensions', async () => {
+  it('IS-4: mediaBoxSamples match A4 dimensions (SPEC-READER-INSPECT-STRUCTURE-002)', async () => {
     const result = await analyzeStructure(FIXTURES.simple);
     expect(result.pageTree.mediaBoxSamples.length).toBeGreaterThan(0);
     const sample = result.pageTree.mediaBoxSamples[0];
@@ -111,7 +111,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-5: 暗号化フラグ
-  it('IS-5: all fixtures are not encrypted', async () => {
+  it('IS-5: all fixtures are not encrypted (SPEC-READER-INSPECT-STRUCTURE-007)', async () => {
     for (const fixture of ALL_FIXTURES) {
       const result = await analyzeStructure(fixture.path);
       expect(result.isEncrypted).toBe(false);
@@ -119,7 +119,7 @@ describe('04 - inspect_structure', () => {
   });
 
   // IS-extra: 全フィクスチャのページ数一致
-  describe('IS-extra: pageTree.totalPages for all fixtures', () => {
+  describe('IS-extra: pageTree.totalPages for all fixtures (SPEC-READER-INSPECT-STRUCTURE-002)', () => {
     for (const fixture of ALL_FIXTURES) {
       it(`${fixture.name}: totalPages=${fixture.pageCount}`, async () => {
         const result = await analyzeStructure(fixture.path);
@@ -412,7 +412,7 @@ describe('04 - extract_tables', () => {
 });
 
 describeIfLinearized('04 - Linearized PDF (Issue #1 regression)', () => {
-  it('analyzeStructure does not throw on a linearized PDF', async () => {
+  it('analyzeStructure does not throw on a linearized PDF (SPEC-READER-INSPECT-STRUCTURE-008)', async () => {
     const result = await analyzeStructure(FIXTURES.linearized);
     // pageTree.totalPages must be present (resolved either by pdf-lib
     // or the pdfjs-dist fallback path).

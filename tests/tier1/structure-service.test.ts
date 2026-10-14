@@ -12,7 +12,7 @@ import { resolvePdfVersion } from '../../src/services/structure-service.js';
 // version the document conforms to "if later than the version specified in the
 // file's header. If the header specifies a later version, or if this entry is
 // absent, the document shall conform to the version specified in the header."
-describe('resolvePdfVersion', () => {
+describe('resolvePdfVersion (SPEC-READER-INSPECT-STRUCTURE-006)', () => {
   it('takes the catalog version when it is later than the header', () => {
     // Table 29 の主目的: 増分更新で版を上げる (§7.5.6)
     expect(resolvePdfVersion('1.4', '1.7')).toBe('1.7');
