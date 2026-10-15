@@ -10,7 +10,6 @@ import type {
   CatalogInventory,
   ExtractedTable,
   FontsAnalysis,
-  MetadataValidation,
   ObjectLocationResult,
   PageExtractability,
   PageText,
@@ -22,7 +21,6 @@ import type {
   StructureComparison,
   StructuredTextResult,
   TablesExtractionResult,
-  TaggedValidation,
   TagNode,
   TagsAnalysis,
 } from '../types.js';
@@ -568,97 +566,7 @@ function renderTagTree(node: TagNode, lines: string[], depth: number, maxDepth: 
   }
 }
 
-// ─── Tier 3: Validation & analysis formatters ─────────────
-
-const SEVERITY_ICONS = {
-  error: '\u274c',
-  warning: '\u26a0\ufe0f',
-  info: '\u2705',
-} as const;
-
-/**
- * Format tagged validation results as Markdown.
- */
-export function formatTaggedValidationMarkdown(result: TaggedValidation): string {
-  const lines: string[] = ['# PDF/UA Tag Validation', ''];
-
-  lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
-  lines.push(`- **Checks**: ${result.totalChecks}`);
-  lines.push(`- **Passed**: ${result.passed}`);
-  lines.push(`- **Failed**: ${result.failed}`);
-  lines.push(`- **Warnings**: ${result.warnings}`);
-  // 🔴 回らなかった検査を数字の外に置かない。合格の数だけを見せると、
-  // 「検査していない」が「問題なし」に見える。
-  if (result.notChecked && result.notChecked.length > 0) {
-    lines.push(`- **Not checked**: ${result.notChecked.length}`);
-    for (const n of result.notChecked) {
-      lines.push(`  - [${n.code}] ${n.reason}`);
-    }
-  }
-
-  lines.push('', '## Results', '');
-
-  for (const issue of result.issues) {
-    const icon = SEVERITY_ICONS[issue.severity];
-    lines.push(`${icon} **[${issue.code}]** ${issue.message}`);
-    if (issue.details) {
-      lines.push(`  > ${issue.details}`);
-    }
-    lines.push('');
-  }
-
-  lines.push('---', '', `**Summary**: ${result.summary}`);
-
-  return lines.join('\n');
-}
-
-/**
- * Format metadata validation results as Markdown.
- */
-export function formatMetadataValidationMarkdown(result: MetadataValidation): string {
-  const lines: string[] = ['# Metadata Validation', ''];
-
-  lines.push(`- **Checks**: ${result.totalChecks}`);
-  lines.push(`- **Passed**: ${result.passed}`);
-  lines.push(`- **Failed**: ${result.failed}`);
-  lines.push(`- **Warnings**: ${result.warnings}`);
-
-  // Metadata field presence table
-  lines.push('', '## Field Presence', '');
-  lines.push('| Field | Present |', '|---|---|');
-  const fields = [
-    ['Title', result.metadata.hasTitle],
-    ['Author', result.metadata.hasAuthor],
-    ['Subject', result.metadata.hasSubject],
-    ['Keywords', result.metadata.hasKeywords],
-    ['Creator', result.metadata.hasCreator],
-    ['Producer', result.metadata.hasProducer],
-    ['Creation Date', result.metadata.hasCreationDate],
-    ['Modification Date', result.metadata.hasModificationDate],
-  ] as const;
-  for (const [name, present] of fields) {
-    lines.push(`| ${name} | ${present ? 'Yes' : 'No'} |`);
-  }
-  if (result.metadata.pdfVersion) {
-    lines.push(`| PDF Version | ${result.metadata.pdfVersion} |`);
-  }
-  lines.push(`| Tagged | ${result.metadata.isTagged ? 'Yes' : 'No'} |`);
-
-  // Detailed results
-  lines.push('', '## Results', '');
-  for (const issue of result.issues) {
-    const icon = SEVERITY_ICONS[issue.severity];
-    lines.push(`${icon} **[${issue.code}]** ${issue.message}`);
-    if (issue.details) {
-      lines.push(`  > ${issue.details}`);
-    }
-    lines.push('');
-  }
-
-  lines.push('---', '', `**Summary**: ${result.summary}`);
-
-  return lines.join('\n');
-}
+// ─── Tier 3: Comparison formatter ───────────────────────
 
 /**
  * Format structure comparison results as Markdown.

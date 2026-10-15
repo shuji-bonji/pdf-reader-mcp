@@ -27,8 +27,6 @@ import type {
   PageText,
   PdfMetadata,
   SearchMatch,
-  TagNode,
-  TagsAnalysis,
 } from '../types.js';
 import { getFileSize, readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
 import {
@@ -934,83 +932,9 @@ function asStringOrNull(value: unknown): string | null {
 
 // ─── Tier 2: Structure analysis functions ────────────────
 
-/**
- * Analyze Tagged PDF structure tree from a pre-loaded document.
- * Does NOT destroy the document — caller is responsible for lifecycle.
- */
-export async function analyzeTagsFromDoc(doc: PDFDocumentProxy): Promise<TagsAnalysis> {
-  // Check if tagged
-  const markInfo = await getMarkInfo(doc);
-  const isTagged = markInfo?.Marked === true;
-
-  if (!isTagged) {
-    return {
-      isTagged: false,
-      rootTag: null,
-      maxDepth: 0,
-      totalElements: 0,
-      roleCounts: {},
-    };
-  }
-
-  // 全ページの構造ツリーを並列取得
-  const pageNumbers = Array.from({ length: doc.numPages }, (_, i) => i + 1);
-  const pageResults = await Promise.all(
-    pageNumbers.map(async (pageNum) => {
-      const page = await doc.getPage(pageNum);
-      try {
-        const tree = await page.getStructTree();
-        if (tree) {
-          const localRoleCounts: Record<string, number> = {};
-          const node = buildTagNode(tree, localRoleCounts, 1);
-          return { node, roleCounts: localRoleCounts };
-        }
-      } catch {
-        // Some pages may not have structure tree
-      }
-      return null;
-    }),
-  );
-
-  // 各ページの結果を集約
-  const roleCounts: Record<string, number> = {};
-  let totalElements = 0;
-  let maxDepth = 0;
-  const rootChildren: TagNode[] = [];
-
-  for (const result of pageResults) {
-    if (!result) continue;
-    rootChildren.push(result.node);
-    totalElements += countTagElements(result.node);
-    maxDepth = Math.max(maxDepth, getTagDepth(result.node));
-    // ページごとの roleCounts をマージ
-    for (const [role, count] of Object.entries(result.roleCounts)) {
-      roleCounts[role] = (roleCounts[role] ?? 0) + count;
-    }
-  }
-
-  const rootTag: TagNode | null =
-    rootChildren.length > 0
-      ? { role: 'StructTreeRoot', children: rootChildren, contentCount: 0 }
-      : null;
-
-  if (rootTag) {
-    maxDepth += 1; // Account for the root level
-  }
-
-  return {
-    isTagged,
-    rootTag,
-    maxDepth,
-    totalElements,
-    roleCounts,
-  };
-}
-
 // Note: inspect_tags no longer uses a pdfjs per-page walk. It builds its tree
 // from the document's StructTreeRoot (`analyzeTags` in struct-tree-service.ts)
 // so that page-spanning elements stay whole — see that file's C-1 note.
-// `analyzeTagsFromDoc` below is retained only for the deprecated validate_tagged.
 
 // Note: extract_tables no longer lives here. Like inspect_tags (C-1) it walks
 // the document's StructTreeRoot so that a page-spanning Table stays ONE table —
@@ -1541,57 +1465,4 @@ export async function analyzeAnnotations(
   } finally {
     await doc.destroy();
   }
-}
-
-// ─── Tag tree helpers ────────────────────────────────────
-
-interface StructTreeNodeLike {
-  role?: string;
-  children?: Array<StructTreeNodeLike | StructTreeContentLike>;
-}
-
-interface StructTreeContentLike {
-  type: string;
-  id?: string;
-}
-
-function buildTagNode(
-  node: StructTreeNodeLike,
-  roleCounts: Record<string, number>,
-  depth: number,
-): TagNode {
-  const role = node.role ?? 'Unknown';
-  roleCounts[role] = (roleCounts[role] ?? 0) + 1;
-
-  const children: TagNode[] = [];
-  let contentCount = 0;
-
-  if (node.children) {
-    for (const child of node.children) {
-      if ('role' in child) {
-        children.push(buildTagNode(child as StructTreeNodeLike, roleCounts, depth + 1));
-      } else {
-        contentCount++;
-      }
-    }
-  }
-
-  return { role, children, contentCount };
-}
-
-function countTagElements(node: TagNode): number {
-  let count = 1;
-  for (const child of node.children) {
-    count += countTagElements(child);
-  }
-  return count;
-}
-
-function getTagDepth(node: TagNode): number {
-  if (node.children.length === 0) return 1;
-  let max = 0;
-  for (const child of node.children) {
-    max = Math.max(max, getTagDepth(child));
-  }
-  return max + 1;
 }

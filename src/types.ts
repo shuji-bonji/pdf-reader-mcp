@@ -532,57 +532,6 @@ export interface SignaturesAnalysis {
 
 // ─── Tier 3: Validation & Analysis ──────────────────────
 
-/** Severity level for validation issues */
-export type ValidationSeverity = 'error' | 'warning' | 'info';
-
-/** A single validation issue */
-export interface ValidationIssue {
-  severity: ValidationSeverity;
-  code: string;
-  message: string;
-  details?: string;
-}
-
-/** validate_tagged output */
-export interface TaggedValidation {
-  isTagged: boolean;
-  /**
-   * 実際に判定できた検査の数。
-   * 🔴 前提を観測できずに回らなかった検査はここに入らない。`notChecked` にある。
-   * 回らなかった検査を「通った」に数えると、観測していないことが合格の顔をする。
-   */
-  totalChecks: number;
-  passed: number;
-  failed: number;
-  warnings: number;
-  issues: ValidationIssue[];
-  /** 前提を観測できなかったので回らなかった検査。コードと、なぜ回らなかったか。 */
-  notChecked?: { code: string; reason: string }[];
-  summary: string;
-}
-
-/** validate_metadata output */
-export interface MetadataValidation {
-  totalChecks: number;
-  passed: number;
-  failed: number;
-  warnings: number;
-  issues: ValidationIssue[];
-  metadata: {
-    hasTitle: boolean;
-    hasAuthor: boolean;
-    hasSubject: boolean;
-    hasKeywords: boolean;
-    hasCreator: boolean;
-    hasProducer: boolean;
-    hasCreationDate: boolean;
-    hasModificationDate: boolean;
-    pdfVersion: string | null;
-    isTagged: boolean;
-  };
-  summary: string;
-}
-
 /** Diff entry for structure comparison */
 export interface StructureDiffEntry {
   property: string;

@@ -12,7 +12,7 @@ import {
   searchText,
 } from '../../src/services/pdfjs-service.js';
 import { analyzeStructure } from '../../src/services/structure-service.js';
-import { validateMetadata } from '../../src/services/validation-service.js';
+import { compareStructure } from '../../src/services/validation-service.js';
 import { validatePdfPath } from '../../src/utils/error-handler.js';
 import { parsePageRange } from '../../src/utils/pdf-helpers.js';
 import { EXPECTED_METADATA, PAGE_RANGE_CASES, SEARCH_QUERIES } from './constants.js';
@@ -148,7 +148,7 @@ describe('08 - cross-service integration', () => {
     await analyzeFonts(FIXTURES.simple);
 
     // Tier 3
-    await validateMetadata(FIXTURES.simple);
+    await compareStructure(FIXTURES.simple, FIXTURES.simple);
 
     expect(true).toBe(true);
   });

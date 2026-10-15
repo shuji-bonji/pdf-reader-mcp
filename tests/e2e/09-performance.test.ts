@@ -13,11 +13,7 @@ import {
 } from '../../src/services/pdfjs-service.js';
 import { analyzeSignatures } from '../../src/services/signature-service.js';
 import { analyzeStructure } from '../../src/services/structure-service.js';
-import {
-  compareStructure,
-  validateMetadata,
-  validateTagged,
-} from '../../src/services/validation-service.js';
+import { compareStructure } from '../../src/services/validation-service.js';
 import { PERF_THRESHOLDS, SEARCH_QUERIES } from './constants.js';
 import { measureAndCheck, saveBaseline } from './helpers.js';
 import { FIXTURES } from './setup.js';
@@ -69,24 +65,6 @@ describe('09 - Performance Baseline', () => {
       'analyzeFonts',
       () => analyzeFonts(FIXTURES.multiFont),
       PERF_THRESHOLDS.analyzeFonts,
-    );
-  });
-
-  // PF-6: validateTagged
-  it('PF-6: validateTagged completes within threshold', async () => {
-    await measureAndCheck(
-      'validateTagged',
-      () => validateTagged(FIXTURES.tagged),
-      PERF_THRESHOLDS.validateTagged,
-    );
-  });
-
-  // PF-7: validateMetadata
-  it('PF-7: validateMetadata completes within threshold', async () => {
-    await measureAndCheck(
-      'validateMetadata',
-      () => validateMetadata(FIXTURES.simple),
-      PERF_THRESHOLDS.validateMetadata,
     );
   });
 

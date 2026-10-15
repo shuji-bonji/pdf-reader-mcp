@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * Tier 3 verification via raw stdio JSON-RPC.
+ * Tier 3 is compare_structure only (validate_tagged / validate_metadata were removed).
  */
 
 import { spawn } from 'node:child_process';
@@ -69,140 +70,6 @@ async function main() {
   server.stdin.write(
     `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
   );
-
-  // ─── validate_tagged (simple.pdf - untagged) ──────
-  console.log('\n━━━ validate_tagged (simple.pdf) ━━━');
-  {
-    const text = getText(
-      await callTool('validate_tagged', { file_path: SIMPLE_PDF, response_format: 'json' }),
-    );
-    if (text.startsWith('Error')) {
-      record('validate_tagged', 'JSON parse', false, text.substring(0, 80));
-    } else {
-      const v = JSON.parse(text);
-      record('validate_tagged', 'isTagged=false', v.isTagged === false, `isTagged: ${v.isTagged}`);
-      record('validate_tagged', 'has issues', v.issues.length > 0, `${v.issues.length} issue(s)`);
-      record('validate_tagged', 'failed > 0', v.failed > 0, `${v.failed} failed`);
-      record(
-        'validate_tagged',
-        'TAG-001 error',
-        v.issues.some((i) => i.code === 'TAG-001' && i.severity === 'error'),
-        'TAG-001 is error for untagged',
-      );
-    }
-  }
-  {
-    const text = getText(
-      await callTool('validate_tagged', { file_path: SIMPLE_PDF, response_format: 'markdown' }),
-    );
-    record(
-      'validate_tagged',
-      'markdown header',
-      text.includes('# PDF/UA Tag Validation'),
-      'has header',
-    );
-    record('validate_tagged', 'markdown summary', text.includes('Summary'), 'has summary');
-  }
-
-  // ─── validate_tagged (annotated.pdf) ──────────────
-  console.log('\n━━━ validate_tagged (annotated.pdf) ━━━');
-  {
-    const text = getText(
-      await callTool('validate_tagged', { file_path: ANNOTATED_PDF, response_format: 'json' }),
-    );
-    if (text.startsWith('Error')) {
-      record('validate_tagged:annotated', 'JSON parse', false, text.substring(0, 80));
-    } else {
-      const v = JSON.parse(text);
-      record(
-        'validate_tagged:annotated',
-        'totalChecks > 0',
-        v.totalChecks > 0,
-        `${v.totalChecks} checks`,
-      );
-      record(
-        'validate_tagged:annotated',
-        'has summary',
-        v.summary.length > 0,
-        v.summary.substring(0, 60),
-      );
-    }
-  }
-
-  // ─── validate_metadata (simple.pdf) ────────────────
-  console.log('\n━━━ validate_metadata (simple.pdf) ━━━');
-  {
-    const text = getText(
-      await callTool('validate_metadata', { file_path: SIMPLE_PDF, response_format: 'json' }),
-    );
-    if (text.startsWith('Error')) {
-      record('validate_metadata', 'JSON parse', false, text.substring(0, 80));
-    } else {
-      const m = JSON.parse(text);
-      record(
-        'validate_metadata',
-        'totalChecks=10',
-        m.totalChecks === 10,
-        `${m.totalChecks} checks`,
-      );
-      record('validate_metadata', 'has metadata obj', m.metadata !== undefined, 'metadata present');
-      record(
-        'validate_metadata',
-        'pdfVersion detected',
-        m.metadata.pdfVersion !== null,
-        `version: ${m.metadata.pdfVersion}`,
-      );
-      record('validate_metadata', 'has issues', m.issues.length > 0, `${m.issues.length} issue(s)`);
-      record(
-        'validate_metadata',
-        'META-001 exists',
-        m.issues.some((i) => i.code === 'META-001'),
-        'META-001 checked',
-      );
-    }
-  }
-  {
-    const text = getText(
-      await callTool('validate_metadata', { file_path: SIMPLE_PDF, response_format: 'markdown' }),
-    );
-    record(
-      'validate_metadata',
-      'markdown header',
-      text.includes('# Metadata Validation'),
-      'has header',
-    );
-    record(
-      'validate_metadata',
-      'markdown field table',
-      text.includes('Field Presence'),
-      'has field table',
-    );
-  }
-
-  // ─── validate_metadata (annotated.pdf) ─────────────
-  console.log('\n━━━ validate_metadata (annotated.pdf) ━━━');
-  {
-    const text = getText(
-      await callTool('validate_metadata', { file_path: ANNOTATED_PDF, response_format: 'json' }),
-    );
-    if (text.startsWith('Error')) {
-      record('validate_metadata:annotated', 'JSON parse', false, text.substring(0, 80));
-    } else {
-      const m = JSON.parse(text);
-      record(
-        'validate_metadata:annotated',
-        'totalChecks=10',
-        m.totalChecks === 10,
-        `${m.totalChecks} checks`,
-      );
-      record(
-        'validate_metadata:annotated',
-        'has summary',
-        m.summary.length > 0,
-        m.summary.substring(0, 60),
-      );
-    }
-  }
 
   // ─── compare_structure (simple vs annotated) ───────
   console.log('\n━━━ compare_structure (simple vs annotated) ━━━');
@@ -295,19 +162,6 @@ async function main() {
 
   // ─── Error cases ───────────────────────────────────
   console.log('\n━━━ Error cases ━━━');
-  {
-    const text = getText(await callTool('validate_tagged', { file_path: '/nonexistent.pdf' }));
-    record('error', 'nonexistent (validate_tagged)', text.includes('Error'), text.substring(0, 60));
-  }
-  {
-    const text = getText(await callTool('validate_metadata', { file_path: '/nonexistent.pdf' }));
-    record(
-      'error',
-      'nonexistent (validate_metadata)',
-      text.includes('Error'),
-      text.substring(0, 60),
-    );
-  }
   {
     const text = getText(
       await callTool('compare_structure', {

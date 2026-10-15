@@ -14,8 +14,6 @@ export const PERF_THRESHOLDS = {
   searchText: 2_000,
   analyzeStructure: 2_000,
   analyzeFonts: 3_000,
-  validateTagged: 5_000,
-  validateMetadata: 3_000,
   compareStructure: 5_000,
   allFixturesMetadata: 15_000,
   countImages: 2_000,
@@ -127,22 +125,6 @@ export const VALID_COLOR_SPACES = ['RGB', 'RGBA', 'Grayscale'] as const;
  * read_images extracted nothing and the assertion never ran (D-9).
  */
 export const VALID_BITS_PER_COMPONENT = [1, 8] as const;
-
-// ========================================
-// Validation constants
-// ========================================
-
-export const VALIDATION = {
-  taggedTotalChecks: 8,
-  metadataTotalChecks: 10,
-  /** META-001 through META-010 */
-  metadataCheckCodes: Array.from(
-    { length: 10 },
-    (_, i) => `META-${String(i + 1).padStart(3, '0')}`,
-  ),
-  tagCheckPattern: /^TAG-\d{3}$/,
-  validSeverities: ['error', 'warning', 'info'] as readonly string[],
-} as const;
 
 // ========================================
 // Structure comparison
