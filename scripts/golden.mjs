@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 19 ツールの出力のゴールデンを採り、2 つを突き合わせる
+ * 登録された全ツール（18）の出力のゴールデンを採り、2 つを突き合わせる
  * （family 第 3 弾 = pdf-reader-mcp の pdf-lib 撤去の L0）。
  *
  * **なぜ撤去前にしか採れないか**: 撤去後に採り直すと、同じ読み口同士の比較になる。
@@ -130,6 +130,9 @@ const CALLS = [
   },
   { key: 'summarize', tool: 'summarize', body: 'json' },
   { key: 'inspect_structure', tool: 'inspect_structure', body: 'json' },
+  // 0.16.0 で足したツール。計器への追加が漏れていて、0.16.0 から take が「登録されていて
+  // CALLS に無い」で止まっていた（remove-validate-tools の A/B で気づいた）
+  { key: 'inspect_catalog', tool: 'inspect_catalog', body: 'json' },
   { key: 'inspect_tags', tool: 'inspect_tags', body: 'json' },
   { key: 'inspect_fonts', tool: 'inspect_fonts', body: 'json' },
   { key: 'inspect_annotations', tool: 'inspect_annotations', body: 'json' },
@@ -148,8 +151,8 @@ const CALLS = [
     body: 'json',
     args: () => ({ object_numbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] }),
   },
-  { key: 'validate_tagged', tool: 'validate_tagged', body: 'json' },
-  { key: 'validate_metadata', tool: 'validate_metadata', body: 'json' },
+  // validate_tagged / validate_metadata は変更 remove-validate-tools で削除した（SPEC-READER-TOOLS-LIST-001）。
+  // それより前に採ったゴールデンとは呼び出しの一覧が違うので、diff は比べずに止まる（X3）。
   {
     key: 'compare_structure#self',
     tool: 'compare_structure',
@@ -345,6 +348,21 @@ function keptOf(key, raw) {
         isEncrypted: raw.isEncrypted ?? null,
         pdfVersion: raw.pdfVersion ?? null,
       };
+    case 'inspect_catalog': {
+      // 項目ごとに「無い（absent）」「読めない（unreadable）」「在る」を分けて持つ。
+      // 在るときの中身は sha が見る
+      const st = (v) => (v == null ? null : typeof v === 'object' && 'status' in v ? v.status : 'present');
+      return {
+        sections: Object.fromEntries(
+          ['outlines', 'optionalContent', 'embeddedFiles', 'names', 'metadata', 'openAction', 'additionalActions']
+            .map((k) => [k, st(raw[k])]),
+        ),
+        associatedFiles: raw.associatedFiles ?? null,
+        collection: raw.collection ?? null,
+        isEncrypted: raw.isEncrypted ?? null,
+        hasNote: raw.note != null,
+      };
+    }
     case 'inspect_tags':
       return {
         isTagged: raw.isTagged ?? null,
@@ -416,19 +434,6 @@ function keptOf(key, raw) {
         isEncrypted: raw.isEncrypted ?? null,
         notes: N(raw.notes),
       };
-    case 'validate_tagged':
-    case 'validate_metadata':
-      return {
-        isTagged: raw.isTagged ?? null,
-        totalChecks: raw.totalChecks ?? null,
-        passed: raw.passed ?? null,
-        failed: raw.failed ?? null,
-        warnings: raw.warnings ?? null,
-        issues: (raw.issues ?? []).map((i) => [i.severity ?? null, i.code ?? null]),
-        metadata: raw.metadata ?? null,
-        // 🔴 前提を観測できずに回らなかった検査。0.14.0 で足した項目
-        notChecked: (raw.notChecked ?? []).map((n) => n.code).sort(),
-      };
     case 'compare_structure':
       return {
         diffs: (raw.diffs ?? []).map((d) => [d.property ?? null, d.status ?? null]),
@@ -478,8 +483,6 @@ function subjectsOf(key, kept) {
     case 'extract_tables': return kept.totalTables ?? null;
     case 'extract_structured_text': return kept.elements ?? null;
     case 'locate_objects': return kept.foundCount ?? null;
-    case 'validate_tagged':
-    case 'validate_metadata': return kept.totalChecks ?? null;
     case 'compare_structure': return kept.diffs?.length ?? null;
     default: return null;
   }
@@ -1112,15 +1115,9 @@ function classify(key, before, after) {
 
   const tool = CALL_BY_KEY.get(key)?.tool ?? key;
 
-  if (tool === 'validate_tagged' || tool === 'validate_metadata') {
-    if ((a.failed ?? 0) < (b.failed ?? 0)) s.add(B_C);
-    if ((a.failed ?? 0) > (b.failed ?? 0)) s.add(B_D);
-    if ((a.passed ?? 0) > (b.passed ?? 0)) s.add(B_C);
-    if ((a.totalChecks ?? 0) > (b.totalChecks ?? 0)) s.add(B_D);
-    const ia = new Set((a.issues ?? []).map((x) => x.join(' ')));
-    const ib = new Set((b.issues ?? []).map((x) => x.join(' ')));
-    for (const x of ia) if (!ib.has(x)) s.add(B_D);
-  }
+  // 合否（passed / failed / totalChecks）を返していた validate_tagged / validate_metadata は
+  // 削除した（remove-validate-tools）。D を出すのはその 2 ツールの規則だけだったので、
+  // いまの呼び出しの一覧で D が出ることは無い。B_D は古いゴールデンの分類名として残す。
 
   // ページごとのテキスト抽出の申告が「読めた」から降りたら、判定が変わったのと同じ重み
   if (Array.isArray(a.states) && Array.isArray(b.states)) {
@@ -1458,14 +1455,12 @@ function t3(goldenPath) {
   }
 
   // ---- json のゴールデン ----
-  const failKey = find((f) => !f.calls.validate_metadata.isError && (f.calls.validate_metadata.kept?.failed ?? 0) > 0);
-  const passKey = find((f) => !f.calls.validate_metadata.isError && (f.calls.validate_metadata.kept?.passed ?? 0) > 0);
   // 🔴 2 つ以上でないと「並びだけ入れ替える」が何も動かさず、検査が空振りする
   const fontKey = find((f) => !f.calls.inspect_fonts.isError && (f.calls.inspect_fonts.kept?.fonts?.length ?? 0) > 1);
   const textKey = find((f) => !f.calls.read_text.isError && (f.calls.read_text.kept?.totalChars ?? 0) > 10);
   const locKey = find((f) => !f.calls['locate_objects#1-10'].isError && (f.calls['locate_objects#1-10'].kept?.foundCount ?? 0) > 0);
   const imgKey = find((f) => (f.calls.render_page?.blocks ?? []).some((b) => b.type === 'image'));
-  for (const [n, v] of Object.entries({ failKey, passKey, fontKey, textKey, locKey, imgKey })) {
+  for (const [n, v] of Object.entries({ fontKey, textKey, locKey, imgKey })) {
     if (!v) missing.push(n);
   }
 
@@ -1487,28 +1482,9 @@ function t3(goldenPath) {
     return g;
   }, (t) => /^B 読めない -> 読めた: 1$/m.test(t));
 
-  add('3 検査が 1 つ落ちるようになった（passed -> failed）', (g) => {
-    const e = g.files[passKey].calls.validate_metadata;
-    e.raw.passed -= 1;
-    e.raw.failed = (e.raw.failed ?? 0) + 1;
-    refresh(e, 'validate_metadata');
-    return g;
-  }, (t) => /^C 判定が変わった/m.test(t));
-
-  add('4 🔴 落ちていた検査が通るようになった（failed -> passed）', (g) => {
-    const e = g.files[failKey].calls.validate_metadata;
-    e.raw.failed -= 1;
-    e.raw.passed = (e.raw.passed ?? 0) + 1;
-    refresh(e, 'validate_metadata');
-    return g;
-  }, (t) => /^D 🔴 反証できなくなった/m.test(t));
-
-  add('5 🔴 検査の数を 1 減らす', (g) => {
-    const e = g.files[passKey].calls.validate_metadata;
-    e.raw.totalChecks -= 1;
-    refresh(e, 'validate_metadata');
-    return g;
-  }, (t) => /^D 🔴 反証できなくなった/m.test(t));
+  // 3・4・5 は validate_metadata の passed / failed / totalChecks を書き換えて C と D を出していた。
+  // 2 ツールの削除（remove-validate-tools）で壊す先が無くなったので外した。
+  // C は 10（ページの抽出の申告が extracted から降りる）でも出る。D を出すツールはもう無い。
 
   add('6 観測できたフォントを 1 つ落とす', (g) => {
     const e = g.files[fontKey].calls.inspect_fonts;
