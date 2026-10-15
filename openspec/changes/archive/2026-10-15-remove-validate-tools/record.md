@@ -6,7 +6,7 @@ PDF family の OpenSpec + spec-ids 導入（pdf-agent-stack `docs/specs/31`）�
 | --- | --- |
 | 版 | OpenSpec 1.14.1 / spec-ids 0.5.0 / pdf-reader-mcp 0.16.1 → 次の版（人が決める）/ Claude（claude.ai の Cowork、モデル claude-opus-5-5）/ 2026-10-15 |
 | 仕様を書いた時間 | 約 4 分（09:04 に着手し、影響範囲の調査を含めて 09:08 に proposal / 差分 spec / design / tasks を commit。`openspec validate --all` と `spec-ids check` は緑）。初版起こしは無し（消す 2 ツールは正本を持っておらず、残す一覧を新しい共通 capability `tools-list` に ADDED で書いた） |
-| 人が判断した箇所 | (1) パイロットの対象として候補 A（2 ツールの削除）を選んだ。(2) 版の上げ方（0.17.0 か 1.0.0 か）は未決で、proposal の「人が判断すること」に書いた。(3) `approved` と `pr` はこの記録の時点で未記入 |
+| 人が判断した箇所 | (1) パイロットの対象として候補 A（2 ツールの削除）を選んだ。(2) 版の上げ方（0.17.0 か 1.0.0 か）は未決で、proposal の「人が判断すること」に書いた。(3) `approved`・`pr: 33` は本人が PR #33 で記入。`approved` が `202610-15` と書かれていて spec-gate の `spec-ids check` が「実在する YYYY-MM-DD ではありません」で止めたので、archive の commit で `2026-10-15` に直した。archive はマージの前に同じ PR の中で入れた（1 件目の反省のとおり） |
 | 仕様と実装のずれ | 0 件。受入テスト 3 件は削除の前に 3 件とも落ち、削除の後に 3 件とも通った |
 | エージェントが仕様に無い振る舞いを実装した件数 | 0 件。仕様の外の修正が 1 件ある。計器 `scripts/golden.mjs` の呼び出し一覧に `inspect_catalog`（0.16.0 で追加）が無く、0.16.0 から `take` が「登録されていて CALLS に無い」で止まっていた。A/B に要るので足した |
 | 実装後に仕様を読み返した回数 | 1 回。tasks.md に、archive の後に正本へ front matter を書き足す手順（5.3）を足した（下の「分かったこと」の 1） |

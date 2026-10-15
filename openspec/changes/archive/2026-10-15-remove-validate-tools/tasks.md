@@ -26,7 +26,7 @@
 
 ## 5. 承認と取り込み（人が判断する）
 
-- [ ] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
-- [ ] 5.2 `npx openspec archive remove-validate-tools --yes` で `openspec/specs/tools-list/spec.md` を作る（**マージの前に**。実装 PR は `openspec/changes/<slug>/` の追加を通さないため）
-- [ ] 5.3 archive が作った正本の先頭に front matter（`spec_id: READER`・`kind: common`・`introduced_by: remove-validate-tools`）を書き足す。OpenSpec 1.14.1 は新しい capability の正本を作るとき差分の front matter を写さず、そのままだと `spec-ids check` が「front matter がありません」で落ちる（2026-10-15 に使い捨てのブランチで確認）
-- [ ] 5.4 `npx openspec validate --all && npx spec-ids check` と `pr-scope` が通る
+- [x] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
+- [x] 5.2 `npx openspec archive remove-validate-tools --yes` で `openspec/specs/tools-list/spec.md` を作る（**マージの前に**。実装 PR は `openspec/changes/<slug>/` の追加を通さないため）
+- [x] 5.3 archive が作った正本の先頭に front matter（`spec_id: READER`・`kind: common`・`introduced_by: remove-validate-tools`）を書き足す。OpenSpec 1.14.1 は新しい capability の正本を作るとき差分の front matter を写さず、そのままだと `spec-ids check` が「front matter がありません」で落ちる（2026-10-15 に使い捨てのブランチで確認）
+- [x] 5.4 `npx openspec validate --all && npx spec-ids check` と `pr-scope` が通る

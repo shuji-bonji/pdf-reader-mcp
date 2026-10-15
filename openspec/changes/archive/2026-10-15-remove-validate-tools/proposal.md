@@ -1,5 +1,5 @@
 ---
-approved: 202610-15
+approved: 2026-10-15
 pr: 33
 implementation: required
 targets: [tools-list]
