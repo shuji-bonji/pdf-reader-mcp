@@ -151,7 +151,7 @@ handshake `0.9.1`・17 ツール・`search_text("Difficult")` が **1 件**（0.
 
 **残っているもの**:
 
-- 次メジャーでの `validate_tagged` / `validate_metadata` 削除（B-1 のステップ 3）
+- ~~次メジャーでの `validate_tagged` / `validate_metadata` 削除（B-1 のステップ 3）~~ → 削除済み（変更 `remove-validate-tools`、2026-10-15）
 
 > **family の進行順**: 2026-07-19 時点で spec / reader / verify / writer の再監査は一巡した。
 > reader は「学習データ工場のラベル源」（`specs/00` §0）なので、**誤答が見つかったときは
@@ -354,7 +354,7 @@ npx は 0.4.0 を使い続け、新機能（`tagged`）がツール一覧に現�
 
 ## B. family 連携（`mcps/pdf-family-role-architecture.md` 由来）
 
-### B-1（M-2）. `validate_tagged` / `validate_metadata` の deprecation — ✅ ステップ 1・2 完了
+### B-1（M-2）. `validate_tagged` / `validate_metadata` の deprecation — ✅ ステップ 1〜3 完了（2026-10-15 に削除）
 
 > **決定（2026-07-18）: 「畳む」**。D-6 / D-7 は**直さない**。判定は verify に委ねる。
 > 波及: D-3 は呼び出し元が `validateMetadata` だけと判明したが、**「直す」を選択して修正済み**
@@ -362,7 +362,8 @@ npx は 0.4.0 を使い続け、新機能（`tagged`）がツール一覧に現�
 > D-7 の `/Version` だけは deprecate で消えないので **D-8 として分離**した。
 >
 > 実施済み: ① description に予告＋verify への誘導を追記（**動作は不変**）／
-> ② CHANGELOG に経緯を記録。**③ 次メジャーでの削除は未実施**。
+> ② CHANGELOG に経緯を記録。③ 削除は 2026-10-15 に実施（変更 `remove-validate-tools`。
+> 仕様は `openspec/specs/tools-list` の SPEC-READER-TOOLS-LIST-001・002）。
 > あわせて `validate_metadata` の description から**誤った規格上の主張を除去**した
 > （「Title presence (required for PDF/UA, PDF/A)」→ Info 辞書は PDF/UA の根拠にならない）。
 
@@ -386,7 +387,8 @@ reader**」。Tier 3 の `validate_*` は verify が存在しなかった時代�
 1. ✅ `validate_tagged` / `validate_metadata` の description に **deprecation 予告**と
    verify への誘導を追記する（削除はしない）— 2026-07-18 実施
 2. ✅ `CHANGELOG.md` に移管の経緯を記録 — 2026-07-18 実施
-3. ⬜ 次のメジャーで削除 — **未実施**
+3. ✅ 削除 — 2026-10-15 実施（変更 `remove-validate-tools`）。2 ツールだけが使っていた部品
+   （`analyzeTagsFromDoc`・`isValidPdfDate` など）も消した。`countImagesFromDoc` は `summarize` が使うので残した
 
 **保持すべきもの**: `inspect_tags` は**残す**。構造ツリーの報告は「事実」であり reader の責務。
 verify は pdfjs を持たないため、構造ツリーそのものの調査は本サーバでしかできない。

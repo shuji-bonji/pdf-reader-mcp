@@ -22,7 +22,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 
 ## 機能
 
-**20 ツール** を 3 層構成で提供します。
+**18 ツール** を 3 層構成で提供します。
 
 ### Tier 1: 基本機能
 
@@ -33,7 +33,7 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `read_text`      | テキスト抽出（Y座標ベースの読み順保持。`split_columns: 2 \| 3` で **タグなし** 多カラム PDF、`compact_whitespace` で 帳票 の U+3000 連続空白を畳み込み）。`/ActualText` 置換（§14.9.4。構造要素・`Span` マーク付きコンテンツの両経路）を解決。ページごとに**テキスト抽出可能性**（§9.10.1）を併記するので、空の結果が「空のページ」と取り違えられない。**論理順**が要るタグ付き PDF の本文は `extract_structured_text` を推奨 |
 | `search_text`    | 全文検索（前後コンテキスト付き）。`read_text` と同じテキスト（`/ActualText` 解決済み）を検索するため、ヒット＝読み手に見えている語（位置合わせできなかったページがあれば `note` で名指し） |
 | `read_images`    | 埋め込み画像 XObject を **PNG / JPEG ファイル**として抽出し、MCP の image コンテンツブロックで返す（視覚モデルがそのまま読める）。`max_width` / `max_height` で面積平均による縮小。応答にはバイト予算があり、返さなかった画像は理由付きで名指しする |
-| `read_url`       | リモート PDF を取得して**テキストだけ**を返す。取得したバイト列は保存しない。URL 上の PDF に他の 19 ツールを使うには、先にローカルへダウンロードしてそのパスを渡す（「read_url と read-only の境界」参照） |
+| `read_url`       | リモート PDF を取得して**テキストだけ**を返す。取得したバイト列は保存しない。URL 上の PDF に他の 17 ツールを使うには、先にローカルへダウンロードしてそのパスを渡す（「read_url と read-only の境界」参照） |
 | `render_page`    | ページを **PNG/JPEG** にラスタライズ（PDFium の WASM 版・optionalDependencies の `@hyzyla/pdfium`）。テキスト抽出可能性が `no_text_layer` / `not_extractable` のときの次の一手。ベクタ図形・フォーム込みでページ全体を描く |
 | `summarize`      | 全体概要レポート（メタデータ + テキスト + 画像数 + 文書全体のテキスト抽出可能性） |
 
@@ -51,19 +51,23 @@ PDF 内部構造解析に特化した MCP (Model Context Protocol) サーバー�
 | `extract_tables`      | Tagged PDF の `<Table>` を Markdown テーブルとして抽出。ページを跨ぐ表は 1 つの表（`pages` 配列）として返す |
 | `locate_objects`      | オブジェクト番号 → ページ + 矩形。座標は [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) の `add_annotation` がそのまま受け取る形（PDF 座標系・左下原点・pt・正規化済み）。[pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `verify_integrity` が返す「どのオブジェクトが変わったか」を「どこにあるか」に繋ぐ。各位置は根拠（`basis`）を明示する — 注釈自身の `/Rect` は正確、コンテンツストリームは「ページ全体」までしか言えない |
 
-### Tier 3: 検証・分析
+### Tier 3: 比較
 
 | ツール              | 説明                                           |
 | ------------------- | ---------------------------------------------- |
-| `validate_tagged`   | **非推奨** — ISO 規格への合否判定は [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`（`flavour: "pdfua-1"`）へ移管。次のメジャーまで残置 |
-| `validate_metadata` | **非推奨** — 移管先は上と同じ。次のメジャーまで残置 |
 | `compare_structure` | 2つのPDFの構造差分比較（プロパティ＋フォント） |
+
+`validate_tagged` と `validate_metadata` は削除しました（0.7.0 から非推奨）。本サーバは PDF に
+何があるかを報告し、規格に照らした合否は返しません。PDF/UA や PDF/A への適合は
+[pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) の `validate_conformance`
+（`flavour: "pdfua-1"`・`"pdfa-*"` など）で確かめてください。2 ツールが見ていた事実は、
+本サーバの `inspect_tags`（構造ツリー）と `get_metadata`（メタデータの項目）で取り出せます。
 
 ### read_url と read-only の境界（#25）
 
 `read_url` が返すのはテキストだけ。これは設計判断であり、今回それを暗黙から明文にした。
 取得したバイト列は抽出後に破棄する。保存すれば reader のツールがファイルシステムに
-書き込むことになり、本サーバの全 20 ツールが read-only（`readOnlyHint: true`）という
+書き込むことになり、本サーバの全 18 ツールが read-only（`readOnlyHint: true`）という
 不変条件が成り立たなくなるため。
 
 URL 上の PDF に `search_text` / `inspect_structure` / `extract_tables` / `render_page`
@@ -91,7 +95,7 @@ render_page({ file_path: "/path/to/scan.pdf", pages: "1-3", format: "jpeg" })
 描画エンジンは **PDFium の WebAssembly 版**（`@hyzyla/pdfium`・optionalDependencies）。
 WASM はどのプラットフォームでも同じバイト列なので、`npx` で入る公開版の挙動が環境に
 よらない — ネイティブアドオンを使わない理由がそのまま満たせる。未インストールなら
-`render_page` はインストール方法を返し、他の 19 ツールは通常どおり動く。
+`render_page` はインストール方法を返し、他の 17 ツールは通常どおり動く。
 PDFium（BSD-3-Clause）はテキスト読み取りに使っている pdf.js とは別エンジンであり、
 その旨は description に明記してある（エンジン間の描画差をファイルの性質と
 取り違えないため）。
@@ -216,25 +220,6 @@ summarize({ file_path: "/path/to/document.pdf" })
   | Tagged | Yes |
   | Signatures | No |
   | Images | 15 |
-```
-
-### PDF/UA タグ検証
-
-```
-validate_tagged({ file_path: "/path/to/document.pdf" })
-→ ✅ [TAG-001] Document is marked as tagged
-  ✅ [TAG-002] Structure tree root exists
-  ⚠️ [TAG-004] Heading hierarchy has gaps: H1, H3
-  ❌ [TAG-005] Document has 3 image(s) but no Figure tags
-```
-
-### メタデータ検証
-
-```
-validate_metadata({ file_path: "/path/to/document.pdf" })
-→ ✅ [META-001] Title: "Annual Report 2025"
-  ⚠️ [META-002] Author is missing
-  ✅ [META-006] PDF version: 2.0
 ```
 
 ### 構造比較
@@ -465,7 +450,7 @@ pdf-reader-mcp/
 1. `summarize` で PDF の概要を把握
 2. `inspect_tags` でタグ構造を確認
 3. pdf-spec-mcp の `get_requirements` で PDF/UA 要件を取得
-4. `validate_tagged` で適合性を検証
+4. pdf-verify-mcp の `validate_conformance`（`flavour: "pdfua-1"`）で適合性を検証
 5. `compare_structure` で修正前後の構造差分を確認
 
 ## ライセンス

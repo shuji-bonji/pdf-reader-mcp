@@ -6,23 +6,23 @@
 
 ## 2. 受入テスト（先に落ちることを確かめる）
 
-- [ ] 2.1 `tests/tier1/tools-list.test.ts` に、`it('SPEC-READER-TOOLS-LIST-001 tools/list の名前の集合が 18 ツールと一致する')`・`it('SPEC-READER-TOOLS-LIST-001 削除した 2 ツールは tools/list に無い')`・`it('SPEC-READER-TOOLS-LIST-002 validate_ で始まるツールが無い')` を書く
-- [ ] 2.2 削除の前に、3 件とも落ちることを確かめる
+- [x] 2.1 `tests/tier1/tools-list.test.ts` に、`it('SPEC-READER-TOOLS-LIST-001 tools/list の名前の集合が 18 ツールと一致する')`・`it('SPEC-READER-TOOLS-LIST-001 削除した 2 ツールは tools/list に無い')`・`it('SPEC-READER-TOOLS-LIST-002 validate_ で始まるツールが無い')` を書く
+- [x] 2.2 削除の前に、3 件とも落ちることを確かめる
 
 ## 3. 削除
 
-- [ ] 3.1 登録とツールのファイルを消す（`src/tools/index.ts`・`src/tools/tier3/validate-*.ts`）
-- [ ] 3.2 2 ツールだけが使っていた部品を消す（design.md の表）。消す前に呼び出し元を grep で確かめる
-- [ ] 3.3 テストを整理する（`06` を消す、`08`・`09`・`constants.ts`・`validation-service.test.ts`・`verify-tier3.mjs` から 2 ツールの分を除く）
-- [ ] 3.4 `scripts/golden.mjs` の呼び出しの一覧と自己検査（t3）を直し、`t3` が通ることを確かめる
-- [ ] 3.5 `npm run test:fixtures` → `npm test` → `npm run lint` → `npm run format` → `npm run typecheck` → `npm run build` → `npm run check:public-types` がすべて終了コード 0
+- [x] 3.1 登録とツールのファイルを消す（`src/tools/index.ts`・`src/tools/tier3/validate-*.ts`）
+- [x] 3.2 2 ツールだけが使っていた部品を消す（design.md の表）。消す前に呼び出し元を grep で確かめる
+- [x] 3.3 テストを整理する（`06` を消す、`08`・`09`・`constants.ts`・`validation-service.test.ts`・`verify-tier3.mjs` から 2 ツールの分を除く）
+- [x] 3.4 `scripts/golden.mjs` の呼び出しの一覧と自己検査（t3）を直し、`t3` が通ることを確かめる
+- [x] 3.5 `npm run test:fixtures` → `npm test` → `npm run lint` → `npm run format` → `npm run typecheck` → `npm run build` → `npm run check:public-types` がすべて終了コード 0
 - [ ] 3.6 残る 18 ツールの出力が変わらないことを、`scripts/golden.mjs` で変更の前後を採って `diff` で確かめる（json と markdown の両方）
 
 ## 4. 文書と記録
 
-- [ ] 4.1 README / README.ja のツール一覧、CLAUDE.md、`docs/TASKS.md` B-1、`src/index.ts` の説明を直す
-- [ ] 4.2 `CHANGELOG.md`（英語）の Unreleased に Removed と移行先を書く。版は人が決める
-- [ ] 4.3 `record.md` を計画 §8 の書式で書く
+- [x] 4.1 README / README.ja のツール一覧、CLAUDE.md、`docs/TASKS.md` B-1、`src/index.ts` の説明を直す
+- [x] 4.2 `CHANGELOG.md`（英語）の Unreleased に Removed と移行先を書く。版は人が決める
+- [x] 4.3 `record.md` を計画 §8 の書式で書く
 
 ## 5. 承認と取り込み（人が判断する）
 

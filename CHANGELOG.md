@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING — `validate_tagged` and `validate_metadata` are removed.** `tools/list` now
+  returns 18 tools. Both returned pass/fail against PDF/UA, which is pdf-verify-mcp's job
+  in the PDF family ("pass/fail against a standard belongs to pdf-verify-mcp; reporting
+  observations belongs to pdf-reader-mcp"). They were deprecated in 0.7.0 with a removal
+  notice in their descriptions, and they carried known errors that were not going to be
+  fixed: `validate_metadata` read only the document information dictionary (PDF/UA-1 §7.1
+  requires `dc:title` in XMP), and `validate_tagged` counted Figure tags without reading
+  `/Alt`.
+  - **Migration:** for PDF/UA or PDF/A conformance, use pdf-verify-mcp's
+    `validate_conformance` (`flavour: "pdfua-1"`, `"pdfua-2"`, `"pdfa-*"`). For the facts
+    the two tools looked at, use `inspect_tags` (structure tree) and `get_metadata`
+    (metadata fields) here.
+  - Calling either name now fails at the protocol level: the MCP SDK returns a JSON-RPC
+    error `-32602` ("Tool validate_tagged not found"), not a tool result with
+    `isError: true`.
+  - Also removed with them, because nothing else used them: `isValidPdfDate` (the
+    ISO 32000-2 §7.9.4 date-form check), the per-page structure-tree walk that
+    `validate_tagged` used, and their input schemas, Markdown formatters and output types.
+    `countImagesFromDoc` stays (`summarize` uses it).
+- Development: the tool set is now specified in `openspec/specs/tools-list`
+  (SPEC-READER-TOOLS-LIST-001: the 18 tools; -002: no tool that returns pass/fail, and no
+  tool named `validate_*`), checked against `tools/list` by `tests/tier1/tools-list.test.ts`.
+- Development: `scripts/golden.mjs` now covers `inspect_catalog`. It had been missing since
+  0.16.0, so `take` stopped with "registered but not in CALLS" until this change.
+
 ## [0.16.1] - 2026-10-15
 
 ### Fixed

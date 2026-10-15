@@ -39,8 +39,9 @@ What it does NOT do:
   - No cryptographic verification. inspect_signatures reads signature fields structurally and
     says so explicitly; whether a signature is mathematically valid is pdf-verify-mcp's answer
     (verify_signatures / verify_integrity).
-  - No conformance judgement. validate_tagged / validate_metadata are deprecated in favour of
-    pdf-verify-mcp's validate_conformance, which delegates to veraPDF.
+  - No conformance judgement. Pass/fail against PDF/UA or PDF/A is pdf-verify-mcp's
+    validate_conformance, which delegates to veraPDF (validate_tagged / validate_metadata
+    were removed from this server).
   - No incremental-update history (that is pdf-verify-mcp verify_integrity), and no OCR. It
     does DETECT that OCR is needed and say so: every text-returning tool reports, per page,
     whether the characters could be converted to Unicode at all (ISO 32000-2 §9.10.1) —

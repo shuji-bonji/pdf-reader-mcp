@@ -17,13 +17,13 @@ PDF の中身を**読み取り・報告**する MCP サーバ。PDF family に�
 - 責務分担の提案: `mcps/pdf-family-role-architecture.md`
 - 上位仕様: `pdf-agent-stack/docs/foundation/pdf-reader-mcp.md`
 
-## ツール一覧（20・3 tier）
+## ツール一覧（18・3 tier）
 
 | Tier | ツール |
 |------|--------|
 | 1 基本 | `read_text` / `read_url` / `read_images` / `render_page` / `search_text` / `get_metadata` / `get_page_count` / `summarize` |
 | 2 構造検査 | `inspect_structure` / `inspect_catalog` / `inspect_fonts` / `inspect_annotations` / `inspect_signatures` / `inspect_tags` / `extract_tables` / `extract_structured_text` / `locate_objects` |
-| 3 検証・分析 | `compare_structure` / `validate_metadata` / `validate_tagged` |
+| 3 比較 | `compare_structure` |
 
 ## 境界ルール（ツール追加時の判断基準）
 
@@ -35,9 +35,10 @@ PDF の中身を**読み取り・報告**する MCP サーバ。PDF family に�
 - `inspect_signatures` は署名フィールドの**存在**を報告する（暗号検証は verify の `verify_signatures`）
 - `inspect_tags` は構造ツリーを**報告**する（PDF/UA 準拠の判定は verify の `validate_conformance`）
 
-⚠️ **Tier 3 の `validate_tagged` / `validate_metadata` はこの規則の例外**（verify が存在しなかった
-時代の実装）。pdf-verify-mcp v0.6.0 が PDF/UA 判定を実装したため、**責務としては移管済み**。
-詳細は `docs/TASKS.md` の M-2。新しい `validate_*` をここに足さないこと。
+この規則の例外だった Tier 3 の `validate_tagged` / `validate_metadata` は削除した
+（変更 `remove-validate-tools`。経緯は `docs/TASKS.md` の B-1）。新しい `validate_*` を
+ここに足さないこと —— `openspec/specs/tools-list` の SPEC-READER-TOOLS-LIST-002 と
+受入テスト `tests/tier1/tools-list.test.ts` が止める。
 
 ## アーキテクチャの要点
 
@@ -55,25 +56,12 @@ index.ts → tools/{tier1,tier2,tier3}/*.ts（zod スキーマ + ハンドラ）
 
 ### 1. pdfjs 依存はこのサーバの固有資産
 
-`analyzeTagsFromDoc`（構造ツリー）や `countImagesFromDoc`（`getOperatorList` +
-`OPS.paintImageXObject`）は pdfjs に依存する。verify は意図的に pdfjs を持たない
+`countImagesFromDoc`（`getOperatorList` + `OPS.paintImageXObject`。`summarize` が使う）は
+pdfjs に依存する。verify は意図的に pdfjs を持たない
 （pdf-lib + pkijs のみ）ため、**pdfjs が要る検査はここでしかできない**。
 これは弱点ではなく役割分担。
 
-### 2. `validate_tagged` の構造ツリーは合成物
-
-ページごとに `page.getStructTree()` を呼んで `roleCounts` をマージしている。
-StructTreeRoot を直接読んでいないため、`rootTag` は疑似ノード。
-「StructTreeRoot はあるがページに紐づかない」ケースは検出できない
-（verify は catalog を直接見るのでこちらは検出できる）。
-
-### 3. `validate_tagged` は alt text の**存在**を見ていない
-
-Figure タグの**個数**しか数えておらず、`/Alt` 属性そのものは検証していない
-（コード上も "potential alt text" 止まり）。verify の `ua-figure-alt` は実在を検証する。
-この差は M-2 の移管理由のひとつ。
-
-### 4. biome の版はキャレット指定のまま（要対応）
+### 2. biome の版はキャレット指定のまま（要対応）
 
 `package.json` は `^2.3.14` だが実体は 2.5.3、`biome.json` の `$schema` は 2.3.14。
 **biome は minor 更新で整形結果が変わる**ため、手元の `npm install` が CI より先に進むと

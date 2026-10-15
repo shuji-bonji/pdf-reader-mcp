@@ -22,7 +22,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 
 ## Features
 
-**20 tools** organized into three tiers:
+**18 tools** organized into three tiers:
 
 ### Tier 1: Basic Operations
 
@@ -33,7 +33,7 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `read_text`      | Text extraction with Y-coordinate reading order (opt-in `split_columns: 2 \| 3` for untagged multi-column PDFs, `compact_whitespace` for Japanese forms). Resolves `/ActualText` replacements (§14.9.4, both the structure-element and the `Span` marked-content path). Reports **text extractability** per page (§9.10.1) so an empty result is never mistaken for an empty page. For **logical** order in tagged PDFs, prefer `extract_structured_text` |
 | `search_text`    | Full-text search with surrounding context. Searches the same text `read_text` returns, `/ActualText` included, so a hit means what a reader sees (a `note` names any page whose marked content could not be aligned) |
 | `read_images`    | Embedded image XObjects as **PNG or JPEG files**, returned as MCP image content blocks so a vision model can read them. `max_width` / `max_height` downscale by area average; the response has a byte budget and names anything it leaves out |
-| `read_url`       | Fetch a remote PDF and extract its **text** — nothing more. The bytes are not saved; to use the other 19 tools on a URL's PDF, download it first and pass the local path (see "read_url and the read-only boundary") |
+| `read_url`       | Fetch a remote PDF and extract its **text** — nothing more. The bytes are not saved; to use the other 17 tools on a URL's PDF, download it first and pass the local path (see "read_url and the read-only boundary") |
 | `render_page`    | Rasterise pages to **PNG/JPEG** via PDFium-WASM (optional dependency `@hyzyla/pdfium`). The next step when text extractability says `no_text_layer` / `not_extractable` — draws the whole page, vector art and forms included |
 | `summarize`      | Quick overview report (metadata + text + image count + per-document text extractability) |
 
@@ -51,20 +51,24 @@ While typical PDF MCP servers are thin wrappers for text extraction, this projec
 | `extract_tables`      | Tagged PDF `<Table>` subtree → Markdown table (preserves columns). A table continuing across a page break is ONE table (`pages` array) |
 | `locate_objects`      | Object number → page and rectangle, in the coordinate form [pdf-writer-mcp](https://github.com/shuji-bonji/pdf-writer-mcp) `add_annotation` takes. Bridges [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `verify_integrity`'s "which objects changed" to "where they are". Each location names its `basis`: an annotation's own `/Rect` is exact, a content stream can only say "the whole page" |
 
-### Tier 3: Validation & Analysis
+### Tier 3: Comparison
 
 | Tool                | Description                                          |
 | ------------------- | ---------------------------------------------------- |
-| `validate_tagged`   | **Deprecated** — PDF/UA pass/fail belongs to [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp) `validate_conformance` (`flavour: "pdfua-1"`). Kept until the next major |
-| `validate_metadata` | **Deprecated** — same migration path as above. Kept until the next major |
 | `compare_structure` | Structural diff between two PDFs (properties + fonts)|
+
+`validate_tagged` and `validate_metadata` were removed (deprecated since 0.7.0). This server
+reports what a PDF contains and does not return pass/fail against a standard. For PDF/UA or
+PDF/A conformance, use [pdf-verify-mcp](https://github.com/shuji-bonji/pdf-verify-mcp)
+`validate_conformance` (`flavour: "pdfua-1"`, `"pdfa-*"`, …). For the facts those tools used
+to look at, use `inspect_tags` (structure tree) and `get_metadata` (metadata fields) here.
 
 ### read_url and the read-only boundary (#25)
 
 `read_url` returns text, and only text. This is a decision, now stated rather than implied:
 the fetched bytes are discarded after extraction, because saving them would make a reader
 tool write to the file system, and every tool of this server is read-only
-(`readOnlyHint: true` — all 20 of them).
+(`readOnlyHint: true` — all 18 of them).
 
 To run `search_text`, `inspect_structure`, `extract_tables`, `render_page` or anything else
 against a PDF that lives at a URL, download the file first — with whatever fetch capability
@@ -218,25 +222,6 @@ summarize({ file_path: "/path/to/document.pdf" })
   | Tagged | Yes |
   | Signatures | No |
   | Images | 15 |
-```
-
-### Validate Tagged Structure (PDF/UA)
-
-```
-validate_tagged({ file_path: "/path/to/document.pdf" })
-→ ✅ [TAG-001] Document is marked as tagged
-  ✅ [TAG-002] Structure tree root exists
-  ⚠️ [TAG-004] Heading hierarchy has gaps: H1, H3
-  ❌ [TAG-005] Document has 3 image(s) but no Figure tags
-```
-
-### Validate Metadata
-
-```
-validate_metadata({ file_path: "/path/to/document.pdf" })
-→ ✅ [META-001] Title: "Annual Report 2025"
-  ⚠️ [META-002] Author is missing
-  ✅ [META-006] PDF version: 2.0
 ```
 
 ### Compare Structure
@@ -473,7 +458,7 @@ On error, every tool returns `isError: true` and the JSON-stringified `LawServic
 1. `summarize` — get a PDF overview
 2. `inspect_tags` — examine the tag structure
 3. pdf-spec-mcp `get_requirements` — fetch PDF/UA requirements
-4. `validate_tagged` — check conformance
+4. pdf-verify-mcp `validate_conformance` — check conformance (`flavour: "pdfua-1"`)
 5. `compare_structure` — diff before/after fixes
 
 ## License
