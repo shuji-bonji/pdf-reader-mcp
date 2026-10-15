@@ -3,14 +3,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { StructureAnalysis } from '../../src/types.js';
 import { handleError, PdfReaderError, validatePdfPath } from '../../src/utils/error-handler.js';
 import {
   formatPageList,
-  formatStructureMarkdown,
   formatStructuredTextMarkdown,
+  formatStructureMarkdown,
   truncateIfNeeded,
 } from '../../src/utils/formatter.js';
-import type { StructureAnalysis } from '../../src/types.js';
 import { parsePageRange } from '../../src/utils/pdf-helpers.js';
 
 describe('parsePageRange', () => {
