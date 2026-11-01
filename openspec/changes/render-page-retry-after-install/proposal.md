@@ -1,6 +1,6 @@
 ---
-approved:
-pr:
+approved: 2026-11-01
+pr: 35
 implementation: required
 targets: [render-page]
 ---
