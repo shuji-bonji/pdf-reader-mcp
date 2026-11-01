@@ -22,7 +22,7 @@
 
 ## 5. 承認と取り込み（人が判断する）
 
-- [ ] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
-- [ ] 5.2 `npx openspec archive render-page-retry-after-install --yes` で `openspec/specs/render-page/spec.md` を作る（マージの前に）
-- [ ] 5.3 archive が作った正本の先頭に front matter（`spec_id: READER`・`kind: tool`・`introduced_by: render-page-retry-after-install`）を書き足す
-- [ ] 5.4 `npx openspec validate --all && npx spec-ids check` と `pr-scope` が通る
+- [x] 5.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
+- [x] 5.2 `npx openspec archive render-page-retry-after-install --yes` で `openspec/specs/render-page/spec.md` を作る（マージの前に）
+- [x] 5.3 archive が作った正本の先頭に front matter（`spec_id: READER`・`kind: tool`・`introduced_by: render-page-retry-after-install`）を書き足す
+- [x] 5.4 `npx openspec validate --all && npx spec-ids check` と `pr-scope` が通る
