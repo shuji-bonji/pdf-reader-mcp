@@ -96,8 +96,39 @@ export const DEFAULT_RENDER_DPI = 150;
  */
 export const DEFAULT_PAGE_TIMEOUT_MS = 20_000;
 
-/** The pdfium module, loaded once. `null` after a failed attempt. */
-let pdfiumLibrary: unknown | null | undefined;
+/** What `import('@hyzyla/pdfium')` returns — the one entry point this file uses. */
+export interface PdfiumModule {
+  PDFiumLibrary: { init(): Promise<unknown> };
+}
+
+/**
+ * A loader for the pdfium module that remembers only success (#34).
+ *
+ * A failed load used to be remembered as `null` for the life of the process, so
+ * `RENDERER_MISSING_MESSAGE` ("install it … and call again") could not come
+ * true without a restart — MCP hosts keep one server process for the whole
+ * conversation. A failed import or init is now forgotten and tried again on the
+ * next call. A successful one is kept as a promise, so concurrent first calls
+ * still initialise once.
+ *
+ * `importModule` is injectable so the tests can fail the import, then succeed.
+ */
+export function createPdfiumLoader(
+  importModule: () => Promise<PdfiumModule>,
+): () => Promise<unknown | null> {
+  let pending: Promise<unknown> | undefined;
+  return async () => {
+    pending ??= importModule().then((module) => module.PDFiumLibrary.init());
+    const current = pending;
+    try {
+      return await current;
+    } catch {
+      // Forget the failure — unless a later call already started a new attempt.
+      if (pending === current) pending = undefined;
+      return null;
+    }
+  };
+}
 
 /**
  * Load `@hyzyla/pdfium` if it is installed.
@@ -106,19 +137,10 @@ let pdfiumLibrary: unknown | null | undefined;
  * bundler resolves it at build time: the package is optional, and the server
  * must start (and every other tool must work) without it.
  */
-async function loadPdfium(): Promise<unknown | null> {
-  if (pdfiumLibrary !== undefined) return pdfiumLibrary;
-  try {
-    const specifier = '@hyzyla/pdfium';
-    const module = (await import(specifier)) as {
-      PDFiumLibrary: { init(): Promise<unknown> };
-    };
-    pdfiumLibrary = await module.PDFiumLibrary.init();
-  } catch {
-    pdfiumLibrary = null;
-  }
-  return pdfiumLibrary;
-}
+const loadPdfium = createPdfiumLoader(async () => {
+  const specifier = '@hyzyla/pdfium';
+  return (await import(specifier)) as PdfiumModule;
+});
 
 /** True when the renderer is available in this installation. */
 export async function rendererAvailable(): Promise<boolean> {

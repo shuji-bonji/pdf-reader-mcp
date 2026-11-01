@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`render_page` now renders after `@hyzyla/pdfium` is installed into a running server** (#34).
+  When the optional renderer was missing, the failed load was remembered as `null` for the life
+  of the process, so the tool kept answering "install it next to this server … and call again"
+  even after it had been installed — until the server was restarted. MCP hosts keep one server
+  process for the whole conversation, so following the message did nothing. A failed import or
+  initialisation is now forgotten and retried on the next call; a successful one is still loaded
+  once and reused (concurrent first calls share one initialisation).
+  - Measured on 0.17.0 (npm): missing → install while running → call again returned the same
+    message; after a restart it rendered. With this change the second call renders.
+  - While the renderer is missing, each `render_page` call now tries one `import()` that fails.
+    The other 17 tools never load the renderer.
+
 ## [0.17.0] - 2026-10-15
 
 ### Removed
