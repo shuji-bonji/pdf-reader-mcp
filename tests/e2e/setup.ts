@@ -207,7 +207,8 @@ export const ALL_FIXTURES: FixtureExpectation[] = [
  * that read them check for the file themselves and skip.
  */
 const OPTIONAL_FIXTURES: ReadonlySet<string> = new Set([
-  // made by `qpdf --linearize`; skipped when qpdf is not installed (04-tier2-structure)
+  // made by `qpdf --linearize`; skipped when qpdf is not installed (04-tier2-structure).
+  // Under CI the generator stops instead, so this can only be absent on a developer machine.
   FIXTURES.linearized,
 ]);
 

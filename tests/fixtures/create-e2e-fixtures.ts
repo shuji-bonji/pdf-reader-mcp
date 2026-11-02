@@ -1853,4 +1853,10 @@ async function main(): Promise<void> {
   console.log(only ? `Fixture created: ${only}` : 'All E2E test fixtures created.');
 }
 
-main().catch(console.error);
+// A failed fixture must fail the step: CI runs this before the tests, and a
+// zero exit here let a missing fixture surface later as an unrelated failure
+// (or, for an optional fixture, as skipped tests).
+main().catch((e: unknown) => {
+  console.error(e);
+  process.exitCode = 1;
+});
