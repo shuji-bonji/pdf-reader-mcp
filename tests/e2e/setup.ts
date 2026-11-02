@@ -202,9 +202,38 @@ export const ALL_FIXTURES: FixtureExpectation[] = [
   },
 ];
 
-/** Check that all fixture files exist */
-export function checkFixtures(): boolean {
-  return ALL_FIXTURES.every((f) => existsSync(f.path));
+/**
+ * Fixtures that `npm run test:fixtures` may legitimately not produce. The tests
+ * that read them check for the file themselves and skip.
+ */
+const OPTIONAL_FIXTURES: ReadonlySet<string> = new Set([
+  // made by `qpdf --linearize`; skipped when qpdf is not installed (04-tier2-structure)
+  FIXTURES.linearized,
+]);
+
+/** Paths in FIXTURES that are required but not on disk. */
+export function missingFixtures(): string[] {
+  return Object.values(FIXTURES).filter((p) => !OPTIONAL_FIXTURES.has(p) && !existsSync(p));
+}
+
+/**
+ * Stop with the fixture names when a required one is missing.
+ *
+ * The fixtures are generated (`npm run test:fixtures`) and git-ignored, so a
+ * checkout that pulled a commit adding a new fixture keeps passing nothing new
+ * until the generator is run again. Without this, the first test to read the
+ * missing file failed somewhere else — `summarize` answered with an error body
+ * and the test read `undefined` off it (`summary.scope.xmpDeclarations`), which
+ * says nothing about a missing file. Run on import so every file that uses
+ * FIXTURES stops with the same message.
+ */
+const missing = missingFixtures();
+if (missing.length > 0) {
+  const names = missing.map((p) => p.slice(FIXTURES_DIR.length + 1)).join(', ');
+  throw new Error(
+    `Missing test fixtures in tests/fixtures: ${names}. ` +
+      'They are generated and git-ignored — run `npm run test:fixtures` (it rebuilds all of them) and test again.',
+  );
 }
 
 /** Invalid/non-existent paths for error testing */
