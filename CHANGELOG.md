@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-11-03
+
+### Changed
+
+- **Dependencies: normativepdf 0.9.0 → 0.9.1 and @normativepdf/recover 0.1.2 → 0.1.3.** No tool
+  changes its inputs or its output. normativepdf 0.9.1 decodes a UTF-16 surrogate that is not
+  part of a pair as U+FFFD when it reads a text string (§7.9.2.2); recover 0.1.3 carries the same
+  normativepdf, so `npm ls normativepdf` shows a single, deduped 0.9.1. With only normativepdf
+  raised, recover 0.1.2 would have kept 0.9.0 next to it.
+
+  Acceptance (golden A/B, `scripts/golden.mjs`, 2,943 specimens × 22 calls = 64,746 calls, same
+  `dist/`, only the two dependencies swapped): **0 differences** in `--format json` and **0** in
+  `--format markdown`. Of the 31,429 strings in the corpus none contains an unpaired surrogate,
+  so the corpus does not exercise the normativepdf change itself.
+
 ## [0.18.0] - 2026-11-02
 
 ### Fixed
