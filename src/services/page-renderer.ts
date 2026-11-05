@@ -66,6 +66,11 @@ export interface OmittedRender {
 }
 
 export interface RenderResult {
+  /**
+   * 頼まれたページ（`pages` を文書のページ数で解決したもの）。射程の申告に使う
+   * （SPEC-READER-RENDER-PAGE-002）。ページ数を読む前に止まったときは空。
+   */
+  requested: number[];
   pages: RenderedPage[];
   omitted: OmittedRender[];
   totalEncodedBytes: number;
@@ -354,5 +359,5 @@ export async function renderPages(
     worker.on('exit', () => finish());
   });
 
-  return { pages: rendered, omitted, totalEncodedBytes };
+  return { requested: planned ?? [], pages: rendered, omitted, totalEncodedBytes };
 }

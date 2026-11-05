@@ -11,6 +11,7 @@ import {
   renderPages,
 } from '../../services/page-renderer.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
+import { formatPageList } from '../../utils/formatter.js';
 
 export function registerRenderPage(server: McpServer): void {
   server.registerTool(
@@ -34,7 +35,7 @@ Args:
   - quality (1-100, optional): JPEG quality.
 
 Returns:
-  A text block with per-page metadata (point size, pixel size, effective dpi, bytes) and any omissions, then one image content block per rendered page.
+  A text block that starts with "## Scope of this reading" (the pages requested, the pages rendered, and each page not rendered with the reason — present even when every page was rendered), then per-page metadata (point size, pixel size, effective dpi, bytes) and any omissions, then one image content block per rendered page.
 
 Rasterising a page can take unbounded time — a tiling pattern (ISO 32000-2 §8.7.3.1) whose \`/XStep\` or \`/YStep\` is a near-zero magnitude asks for an astronomical number of tiles, and the clause forbids only zero. Each page therefore gets 20 seconds (\`PDF_READER_RENDER_TIMEOUT_MS\` overrides it); the rendering runs off the main thread, so a page that does not finish is stopped and named in the omissions rather than taking the server down with it. The pages rendered before it are still returned, and the pages after it are reported separately as not attempted — "could not be rendered" and "never started" are different answers.
 
@@ -67,7 +68,19 @@ Examples:
           quality: params.quality,
         });
 
-        const lines: string[] = [];
+        // 射程は表より前に、全ページを描画できたときも出す（SPEC-READER-RENDER-PAGE-002）。
+        // 見出しは family でそろえてある（formatScopeLines と同じ）。
+        const rendered = result.pages.map((p) => p.page);
+        const lines: string[] = [
+          '## Scope of this reading',
+          '',
+          `- Pages requested: ${result.requested.length > 0 ? formatPageList(result.requested) : 'none'}`,
+          `- Pages rendered: ${rendered.length > 0 ? formatPageList(rendered) : 'none'}`,
+          ...(result.omitted.length > 0
+            ? result.omitted.map((o) => `- Page ${o.page}: NOT DONE — ${o.reason}`)
+            : ['- Pages not rendered: none']),
+          '',
+        ];
         if (result.pages.length === 0) {
           lines.push('No pages were rendered.');
         } else {

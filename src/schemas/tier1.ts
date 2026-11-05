@@ -10,6 +10,7 @@ import { FilePathSchema, PagesSchema, ResponseFormatSchema, UrlSchema } from './
 export const GetPageCountSchema = z
   .object({
     file_path: FilePathSchema,
+    response_format: ResponseFormatSchema,
   })
   .strict();
 
