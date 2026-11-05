@@ -9,6 +9,7 @@
 | 例外の名前が `TimeoutError`（`AbortSignal.timeout` が中断した） | `SOURCE_TIMEOUT` | `true` | `retry_later` |
 | `cause.code` が `UND_ERR_CONNECT_TIMEOUT`・`UND_ERR_HEADERS_TIMEOUT`・`UND_ERR_BODY_TIMEOUT`・`ETIMEDOUT` | `SOURCE_TIMEOUT` | `true` | `retry_later` |
 | `cause.code` が TLS の失敗（`CERT_`・`ERR_TLS_`・`ERR_SSL_` で始まる、または `DEPTH_ZERO_SELF_SIGNED_CERT`・`SELF_SIGNED_CERT_IN_CHAIN`・`UNABLE_TO_VERIFY_LEAF_SIGNATURE`・`UNABLE_TO_GET_ISSUER_CERT`・`UNABLE_TO_GET_ISSUER_CERT_LOCALLY`） | `SOURCE_API_ERROR` | `false` | `verify_url` |
+| `cause.message` が `bad port`（Fetch Standard の port blocking。fetch が接続を試みずに断る） | `INVALID_ARGUMENT` | `true` | `verify_url` |
 | 上のどれでもない `TypeError`（`fetch failed`）。`ECONNREFUSED`・`ENOTFOUND`・`EAI_AGAIN`・`ECONNRESET`・`UND_ERR_SOCKET` など | `SOURCE_UNAVAILABLE` | `true` | `verify_url`・`retry_later` |
 | それ以外 | 分類しない（`handleStructuredError` に任せる） | | |
 
@@ -24,3 +25,23 @@ TLS の失敗に入る状況は、証明書の期限切れ（`CERT_HAS_EXPIRED`�
 ## `error-handler.ts` の文の照合は残す
 
 `inferFamilyCodeFromMessage` のネットワークの語の照合は残します。`url-fetcher.ts` を通らない経路で同じ文の例外が来たときの補助で、`url-fetcher.ts` で分類したものはそこへ届きません。
+
+## Issue の再現手順のポート 9 について（2026-11-05 実測）
+
+#46 は「接続を拒まれる」例に `http://127.0.0.1:9/x.pdf` を使っていましたが、ポート 9 は Fetch Standard の bad port で、`fetch` は接続を試みずに断ります。`cause.message` は `bad port` で、`cause.code` はありません。接続を拒まれたとき（`cause.code` が `ECONNREFUSED`）とは別の失敗なので、別に分けました。受入テストの「接続を拒まれる」は、一度開いて閉じた空きポートで確かめます。
+
+実測した `cause.code`（Node 22）:
+
+| 状況 | 例外 | `cause.code` |
+| --- | --- | --- |
+| 空きポート | `TypeError: fetch failed` | `ECONNREFUSED` |
+| ポート 9 | `TypeError: fetch failed` | （無し。`cause.message` が `bad port`） |
+| `.invalid` | `TypeError: fetch failed` | `ENOTFOUND` |
+| 応答を返さないサーバー | `TimeoutError` | （無し） |
+| 自己署名 | `TypeError: fetch failed` | `DEPTH_ZERO_SELF_SIGNED_CERT` |
+| 期限切れ（CA を信頼していなくても） | `TypeError: fetch failed` | `CERT_HAS_EXPIRED` |
+| 名前違い（CA を信頼していない） | `TypeError: fetch failed` | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` |
+| 名前違い（`NODE_EXTRA_CA_CERTS` で CA を信頼） | `TypeError: fetch failed` | `ERR_TLS_CERT_ALTNAME_INVALID` |
+| HTTP のポートへ https | `TypeError: fetch failed` | `ERR_SSL_WRONG_VERSION_NUMBER` |
+
+名前違いの Scenario は、CA を信頼させないと名前の検査まで進まないので、`NODE_EXTRA_CA_CERTS` を付けた子プロセスで確かめます（`NODE_EXTRA_CA_CERTS` はプロセスの起動時にしか読まれない）。
