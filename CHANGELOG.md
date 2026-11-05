@@ -49,7 +49,7 @@ Target version: 0.20.1. OpenSpec change `metadata-dates-prefer-info`
 ## [0.20.0] - 2026-11-05
 
 Target version: 0.20.0 (`get_page_count` gains an argument, and `get_metadata`, `inspect_tags`
-and `extract_tables` gain or widen response fields). Four OpenSpec changes, one PR:
+and `extract_tables` gain or widen response fields). Four OpenSpec changes, one pr: 51
 `read-url-network-errors` (SPEC-READER-COMMON-ERRORS-007), `tags-unreadable-when-key-not-derived`
 (SPEC-READER-INSPECT-TAGS-001, -EXTRACT-TABLES-001, -EXTRACT-STRUCTURED-TEXT-001),
 `get-metadata-reads-xmp` (SPEC-READER-GET-METADATA-001..003) and `page-count-and-render-scope`
