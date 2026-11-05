@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Proposed version: 0.21.0 (the maintainer decides; a `code` changes). OpenSpec changes
+`filesystem-errors-are-arguments` (SPEC-READER-COMMON-ERRORS-008) and
+`catalog-unreadable-is-not-absent` (SPEC-READER-INSPECT-TAGS-002, -EXTRACT-TABLES-002,
+-EXTRACT-STRUCTURED-TEXT-002; SPEC-READER-INSPECT-SIGNATURES-001, new capability).
+
+### Changed
+
+- **A file this server may not read is `INVALID_ARGUMENT`, not `INTERNAL_ERROR`** (#49). The
+  body names the input path — `Cannot read the input file "<path>": permission denied (EACCES)`
+  — with `retryable: true` and `detail: { reason, path, cause }`. `reason` is
+  `PERMISSION_DENIED`, `NOT_A_DIRECTORY`, `IS_A_DIRECTORY`, `READ_ONLY_FILESYSTEM`, `NO_SPACE`
+  or `FILESYSTEM_ERROR`, the same values as pdf-writer-mcp's output side. Node errors are
+  classified by their `code`, not by their wording. A missing file is still `DOC_NOT_FOUND`.
+
+### Fixed
+
+- **A document whose catalog cannot be read is no longer reported as untagged or as having
+  no AcroForm** (#50). When the trailer's `/Root` points to a missing object or to something
+  that is not a dictionary (ISO 32000-2 §7.7.2), `inspect_tags` and `extract_tables` return
+  `isTagged: null` with a note (as for a document whose key cannot be derived, #39),
+  `extract_structured_text` reports the structure reading as failed (`INVALID_PDF`), and
+  `inspect_signatures` says the fields could not be looked for instead of "No AcroForm found".
+
 ## [0.20.1] - 2026-11-05
 
 Target version: 0.20.1. OpenSpec change `metadata-dates-prefer-info`

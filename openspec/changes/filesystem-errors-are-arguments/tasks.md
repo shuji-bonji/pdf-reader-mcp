@@ -6,18 +6,18 @@
 
 ## 1. 受入テスト（先に落ちることを確かめる）
 
-- [ ] 1.1 `tests/e2e/24-unreadable-inputs.test.ts` に実物（`chmod 000`）のテストを、`tests/tier1/common-errors.test.ts` に単体のテストを足す。名前を「SPEC-READER-COMMON-ERRORS-008 <Scenario 名>」で始める
-- [ ] 1.2 変更前の `src/` で落ちることを確かめる
+- [x] 1.1 `tests/e2e/24-unreadable-inputs.test.ts` に実物（`chmod 000`）のテストを、`tests/tier1/common-errors.test.ts` に単体のテストを足す。名前を「SPEC-READER-COMMON-ERRORS-008 <Scenario 名>」で始める
+- [x] 1.2 変更前の `src/` で落ちることを確かめる
 
 ## 2. 実装
 
-- [ ] 2.1 `src/utils/error-handler.ts`: Node の例外の `code` で、ファイルシステムのエラーを `INVALID_ARGUMENT` にする
-- [ ] 2.2 `src/errors.ts`: `detail` に `reason`・`path` を足す
-- [ ] 2.3 CI の一覧（check:engines・lint・format・typecheck・build・check:public-types・test:fixtures・test・test:e2e、Node 22 と 20）が終了コード 0
+- [x] 2.1 `src/utils/error-handler.ts`: Node の例外の `code` で、ファイルシステムのエラーを `INVALID_ARGUMENT` にする
+- [x] 2.2 `src/errors.ts`: `detail` に `reason`・`path` を足す
+- [x] 2.3 CI の一覧（check:engines・lint・format・typecheck・build・check:public-types・test:fixtures・test・test:e2e、Node 22 と 20）が終了コード 0
 
 ## 3. 確認
 
-- [ ] 3.1 `tools/list` の差が無いことを確かめる
+- [x] 3.1 `tools/list` の差が無いことを確かめる
 
 ## 4. 承認と取り込み（人が判断する）
 

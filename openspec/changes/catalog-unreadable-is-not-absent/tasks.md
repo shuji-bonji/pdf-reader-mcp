@@ -7,18 +7,18 @@
 
 ## 1. 受入テスト（先に落ちることを確かめる）
 
-- [ ] 1.1 `tests/e2e/24-unreadable-inputs.test.ts` に足す。検体は手で組む（`/Root` が無いオブジェクトを指す・整数を指す）。名前を「SPEC-READER-<機能>-<3 桁> <Scenario 名>」で始める
-- [ ] 1.2 変更前の `src/` で落ちることを確かめる
+- [x] 1.1 `tests/e2e/24-unreadable-inputs.test.ts` に足す。検体は手で組む（`/Root` が無いオブジェクトを指す・整数を指す）。名前を「SPEC-READER-<機能>-<3 桁> <Scenario 名>」で始める
+- [x] 1.2 変更前の `src/` で落ちることを確かめる
 
 ## 2. 実装
 
-- [ ] 2.1 catalog を読めたかを返す関数（`readCatalog`）を置き、4 ツールの入口で使う
-- [ ] 2.2 note の文（`CATALOG_UNREADABLE_NOTE`）を置く。markdown で「Tagged: No」と書かない
-- [ ] 2.3 CI の一覧が終了コード 0
+- [x] 2.1 catalog を読めたかを返す関数（`readCatalog`）を置き、4 ツールの入口で使う
+- [x] 2.2 note の文（`CATALOG_UNREADABLE_NOTE`）を置く。markdown で「Tagged: No」と書かない
+- [x] 2.3 CI の一覧が終了コード 0
 
 ## 3. 確認
 
-- [ ] 3.1 `tools/list` の差が無いことを確かめる
+- [x] 3.1 `tools/list` の差が無いことを確かめる
 
 ## 4. 承認と取り込み（人が判断する）
 
