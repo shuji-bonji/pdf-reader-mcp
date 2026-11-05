@@ -20,10 +20,12 @@ let client: Client;
 let locked = '';
 
 // biome-ignore lint/suspicious/noExplicitAny: 応答の形そのものを検査する
+type Body = any;
+
 async function call(
   name: string,
   args: Record<string, unknown>,
-): Promise<{ isError: boolean; text: string; body: any }> {
+): Promise<{ isError: boolean; text: string; body: Body }> {
   const result = (await client.callTool({ name, arguments: args })) as {
     isError?: boolean;
     content: Array<{ type: string; text?: string }>;

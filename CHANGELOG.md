@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Target version: 0.20.0 (`get_page_count` gains an argument, and `get_metadata`, `inspect_tags`
+and `extract_tables` gain or widen response fields). Four OpenSpec changes, one PR:
+`read-url-network-errors` (SPEC-READER-COMMON-ERRORS-007), `tags-unreadable-when-key-not-derived`
+(SPEC-READER-INSPECT-TAGS-001, -EXTRACT-TABLES-001, -EXTRACT-STRUCTURED-TEXT-001),
+`get-metadata-reads-xmp` (SPEC-READER-GET-METADATA-001..003) and `page-count-and-render-scope`
+(SPEC-READER-GET-PAGE-COUNT-001..002, SPEC-READER-RENDER-PAGE-002).
+
+### Added
+
+- **`get_metadata` reads the XMP metadata stream as well as the document information
+  dictionary** (#42, F-26). The eight document-level fields map to the properties ISO 32000-2
+  Table 349 names (`dc:title`, `dc:creator`, `dc:description`, `pdf:Keywords`,
+  `xmp:CreatorTool`, `pdf:Producer`, `xmp:CreateDate`, `xmp:ModifyDate`), read in both the
+  attribute and the element form. A language alternative (`rdf:Alt`) gives its `x-default`
+  item, a sequence (`rdf:Seq`) its items joined with `; `. When both sources hold a value,
+  PDF 2.0 and later use XMP (§14.3.3 deprecates the dictionary for document-level metadata in
+  PDF 2.0) and earlier versions use the dictionary. New fields: `metadataSources` (`info`,
+  `xmp` or `null` per field), `metadataConflicts` (fields whose two values differ; dates are
+  compared as instants) and `xmpMetadata` (`read`, `absent`, or `unreadable` with the reason).
+  `summarize` returns the same metadata object, so it gains these fields too.
+- **`get_page_count` takes `response_format`** (#41, F-25). The default stays the bare number.
+  With `json` it returns `{ pageCount, scope }`, where `scope` holds the `/Count` the page tree
+  declares (§7.7.3.2), the number of pages reached by walking the tree, and whether that walk
+  could be done.
+- **`render_page` opens its text with `## Scope of this reading`** (#41): the pages requested,
+  the pages rendered, and each page not rendered with the reason — also when every page was
+  rendered.
+
+### Fixed
+
+- **`read_url` reported network failures as `INTERNAL_ERROR`** — a failure of this server
+  (#46). Node's `fetch` throws `TypeError: fetch failed` whatever went wrong, with the reason
+  only in `error.cause.code`, and a timeout is a `TimeoutError` whose message names no code; the
+  classifier only read the message. Failures are now classified by the exception's name and
+  `cause.code`: a timeout is `SOURCE_TIMEOUT`; a refused or reset connection or an unresolvable
+  name is `SOURCE_UNAVAILABLE`; a TLS failure (expired certificate, name mismatch, missing
+  intermediate, untrusted or self-signed CA, no TLS version or cipher in common) is
+  `SOURCE_API_ERROR` with `retryable: false`, since trying the same URL again does not help; a
+  port the Fetch Standard blocks (the issue's reproduction used port 9) is `INVALID_ARGUMENT`.
+  The original message and code are kept in `detail.cause`. The acceptance tests use real
+  failures against 127.0.0.1 (a closed port, a server that never answers, HTTPS servers with
+  self-signed, expired and wrong-name certificates in `tests/e2e/tls-specimens/`).
+- **`inspect_tags`, `extract_tables` and `extract_structured_text` said "not tagged" for an
+  encrypted PDF whose key cannot be derived** (#39, F-01). The catalog could not be read, and
+  that was taken as `/MarkInfo /Marked` being false. `inspect_tags` and `extract_tables` now
+  return `isTagged: null` with the counts (`maxDepth`, `totalElements`, `roleCounts`, `tables`,
+  `totalTables`) as `null` and a note saying the structure tree could not be read;
+  `extract_structured_text` reports the structure reading as failed (`ENCRYPTED_PDF`), which —
+  since the extractability observation fails on the same file — makes it the same
+  `ENCRYPTED_PDF` error `read_text` returns. The `TagsAnalysis` and `TablesExtractionResult`
+  types widen accordingly, and `TagsAnalysis` gains `note`.
+
 ## [0.19.0] - 2026-11-05
 
 Target version: 0.19.0 (the `code` of some errors changes, and a reader-specific code is added).

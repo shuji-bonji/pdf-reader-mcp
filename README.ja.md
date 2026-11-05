@@ -197,7 +197,17 @@ npm run build
 ```
 get_page_count({ file_path: "/path/to/document.pdf" })
 → 42
+
+get_page_count({ file_path: "/path/to/document.pdf", response_format: "json" })
+→ { "pageCount": 42,
+    "scope": { "declaredCount": 42, "pagesReached": 42, "pageTree": { "status": "read" } } }
 ```
+
+`declaredCount` はページ木が宣言している `/Count`（ISO 32000-2 §7.7.3.2）、`pagesReached` はページ木を実際にたどって届いたページの数です。2 つが違うのは書き手が `/Count` を誤ったときだけで、どちらも返し、どちらが正しいかは判定しません。
+
+### 2 つの出どころからのメタデータ
+
+`get_metadata` は文書レベルの 8 項目（題名・作成者・主題・キーワード・作成ツール・変換ツール・作成日・更新日）を、文書情報辞書（§14.3.3）と XMP のメタデータストリーム（§14.3.2）の**両方**から読みます。両方に値があるときは、PDF 2.0 以降は XMP の値を（§14.3.3 は PDF 2.0 でこの用途の文書情報辞書を非推奨にしている）、それより前は文書情報辞書の値を使います。`metadataSources` に項目ごとの出どころを、`metadataConflicts` に 2 つの値が違う項目を返します（日付は表す時刻で比べます）。値は書かれた形のまま返します。文書情報辞書の日付は `D:20260915100000+09'00'`、XMP の日付は `2026-09-15T10:00:00+09:00` の形です。
 
 ### テキスト検索
 
@@ -431,15 +441,15 @@ pdf-reader-mcp/
 
 | code | 用途 | `retryable` |
 |---|---|---|
-| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 | `true` |
+| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正（Fetch Standard が接続を断るポート、たとえば 9 を指す URL を含む） | `true` |
 | `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) | `false` |
 | `INVALID_PDF` | ISO 32000 の構造の条文に反していて読めない（0 バイト・PDF でない・途中で切れた）。文書についての所見で、サーバーの故障ではない | `false` |
 | `ENCRYPTED_PDF` | 空の利用者パスワードから暗号鍵を導けない。本サーバーはパスワードを受け取らないので、復号したファイルを渡す | `false` |
 | `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 | `false` |
 | `FILE_TOO_LARGE` | 50MB 上限超過 | `false` |
-| `SOURCE_API_ERROR` | `read_url` の HTTP エラー (4xx/5xx) | `false` |
+| `SOURCE_API_ERROR` | `read_url` の HTTP エラー (4xx/5xx)、または TLS の失敗（証明書の期限切れ・名前の不一致・中間証明書の欠落・信頼されていない CA や自己署名・TLS の版や暗号スイートの不一致・この端末の日時のずれ） | `false` |
 | `SOURCE_TIMEOUT` | `read_url` のタイムアウト | `true` |
-| `SOURCE_UNAVAILABLE` | `read_url` の DNS / 接続失敗 | `true` |
+| `SOURCE_UNAVAILABLE` | `read_url` で接続を拒まれた・切られた、またはホスト名を引けない | `true` |
 | `RENDERER_NOT_AVAILABLE` | `render_page` の任意の部品 `@hyzyla/pdfium` が無い。入れてから再度呼べばよく、再起動は要らない | `true` |
 | `INTERNAL_ERROR` | サーバー内部の故障 | `false` |
 

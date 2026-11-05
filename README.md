@@ -199,7 +199,25 @@ npm run build
 ```
 get_page_count({ file_path: "/path/to/document.pdf" })
 → 42
+
+get_page_count({ file_path: "/path/to/document.pdf", response_format: "json" })
+→ { "pageCount": 42,
+    "scope": { "declaredCount": 42, "pagesReached": 42, "pageTree": { "status": "read" } } }
 ```
+
+`declaredCount` is the `/Count` the page tree declares (ISO 32000-2 §7.7.3.2) and `pagesReached`
+is how many pages walking the tree actually reached. They differ only when the writer got
+`/Count` wrong; both are reported and neither is judged.
+
+### Metadata from both sources
+
+`get_metadata` reads the eight document-level fields (title, author, subject, keywords, creator,
+producer, creation and modification dates) from the document information dictionary (§14.3.3)
+**and** the XMP metadata stream (§14.3.2). When both hold a value, PDF 2.0 and later use XMP
+(§14.3.3 deprecates the dictionary for this in PDF 2.0) and earlier versions use the dictionary.
+`metadataSources` names the source of each field, and `metadataConflicts` lists the fields whose
+two values differ (dates compared as instants). Values are returned as written — a dictionary
+date looks like `D:20260915100000+09'00'`, an XMP date like `2026-09-15T10:00:00+09:00`.
 
 ### Search Text
 
@@ -439,15 +457,15 @@ Every error carries `error` (an English sentence), `code` and `retryable`; `hint
 
 | code | When | `retryable` |
 |---|---|---|
-| `INVALID_ARGUMENT` | A path, URL or page range the caller passed is wrong | `true` |
+| `INVALID_ARGUMENT` | A path, URL or page range the caller passed is wrong (including a URL on a port the Fetch Standard blocks, such as 9) | `true` |
 | `DOC_NOT_FOUND` | No file at the path (ENOENT) | `false` |
 | `INVALID_PDF` | The file breaks a structural rule of ISO 32000 — empty, not a PDF, or cut short. A finding about the file, not a failure of this server | `false` |
 | `ENCRYPTED_PDF` | The file encryption key cannot be derived from the empty user password. This server takes no password; pass a decrypted copy | `false` |
 | `UNSUPPORTED_PDF_FEATURE` | A PDF feature this server does not handle | `false` |
 | `FILE_TOO_LARGE` | Over the 50 MB limit | `false` |
-| `SOURCE_API_ERROR` | `read_url`: the HTTP response was not a success (4xx/5xx) | `false` |
+| `SOURCE_API_ERROR` | `read_url`: the HTTP response was not a success (4xx/5xx), or the TLS connection failed (certificate expired, name mismatch, missing intermediate, untrusted or self-signed CA, no TLS version or cipher in common, or a wrong clock on this machine) | `false` |
 | `SOURCE_TIMEOUT` | `read_url`: the request timed out | `true` |
-| `SOURCE_UNAVAILABLE` | `read_url`: DNS or connection failure | `true` |
+| `SOURCE_UNAVAILABLE` | `read_url`: the host refused or closed the connection, or its name could not be resolved | `true` |
 | `RENDERER_NOT_AVAILABLE` | `render_page`: the optional `@hyzyla/pdfium` is not installed. Install it and call again; no restart is needed | `true` |
 | `INTERNAL_ERROR` | A failure inside this server | `false` |
 
