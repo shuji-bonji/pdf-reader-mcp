@@ -1,3 +1,8 @@
+---
+spec_id: READER
+kind: tool
+introduced_by: tags-unreadable-when-key-not-derived
+---
 # inspect-tags Specification
 
 ## Purpose

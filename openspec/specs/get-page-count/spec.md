@@ -1,3 +1,8 @@
+---
+spec_id: READER
+kind: tool
+introduced_by: page-count-and-render-scope
+---
 # get-page-count Specification
 
 ## Purpose
