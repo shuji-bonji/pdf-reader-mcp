@@ -25,5 +25,5 @@
 
 ## 4. 承認と取り込み（人が判断する）
 
-- [ ] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
-- [ ] 4.2 マージの前に `npx openspec archive tags-unreadable-when-key-not-derived --yes` を実行し、正本 3 つの front matter と Purpose を確かめる
+- [x] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
+- [x] 4.2 マージの前に `npx openspec archive tags-unreadable-when-key-not-derived --yes` を実行し、正本 3 つの front matter と Purpose を確かめる

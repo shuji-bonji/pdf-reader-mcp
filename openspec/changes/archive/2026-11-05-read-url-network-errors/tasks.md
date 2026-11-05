@@ -22,5 +22,5 @@
 
 ## 4. 承認と取り込み（人が判断する）
 
-- [ ] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
-- [ ] 4.2 マージの前に `npx openspec archive read-url-network-errors --yes` を実行する
+- [x] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
+- [x] 4.2 マージの前に `npx openspec archive read-url-network-errors --yes` を実行する

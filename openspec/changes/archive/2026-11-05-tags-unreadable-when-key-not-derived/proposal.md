@@ -1,6 +1,6 @@
 ---
-approved:
-pr:
+approved: 2026-11-05
+pr: 47
 implementation: required
 targets: [inspect-tags, extract-tables, extract-structured-text]
 ---
