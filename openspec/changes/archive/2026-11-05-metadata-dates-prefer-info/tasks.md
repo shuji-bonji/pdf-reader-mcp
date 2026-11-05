@@ -21,5 +21,5 @@
 
 ## 4. 承認と取り込み（人が判断する）
 
-- [ ] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
-- [ ] 4.2 マージの前に `npx openspec archive metadata-dates-prefer-info --yes` を実行する（既存の capability の MODIFIED なので、正本の front matter は残るはず。`npx spec-ids check` で確かめる）
+- [x] 4.1 人が `proposal.md` の front matter に `approved` と `pr` を書く
+- [x] 4.2 マージの前に `npx openspec archive metadata-dates-prefer-info --yes` を実行する（既存の capability の MODIFIED なので、正本の front matter は残るはず。`npx spec-ids check` で確かめる）

@@ -127,6 +127,37 @@ describe('22 - get_metadata reads XMP', () => {
     ]);
   });
 
+  it('SPEC-READER-GET-METADATA-002 PDF 2.0 でも日付は文書情報辞書の値を使う', async () => {
+    const xmp =
+      '><xmp:CreateDate>2026-09-15T10:00:00+09:00</xmp:CreateDate>' +
+      '<xmp:ModifyDate>2026-09-16T00:00:00Z</xmp:ModifyDate>';
+    const m = await metadata(
+      specimen('dates-20', {
+        version: '2.0',
+        info: { CreationDate: "D:20260915100000+09'00'", ModDate: "D:20260916000000+09'00'" },
+        xmp,
+      }),
+    );
+    expect(m.creationDate).toBe("D:20260915100000+09'00'");
+    expect(m.modificationDate).toBe("D:20260916000000+09'00'");
+    expect(m.metadataSources.creationDate).toBe('info');
+    expect(m.metadataSources.modificationDate).toBe('info');
+    expect(m.metadataConflicts).toEqual([
+      {
+        field: 'modificationDate',
+        info: "D:20260916000000+09'00'",
+        xmp: '2026-09-16T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('SPEC-READER-GET-METADATA-002 PDF 2.0 で日付が XMP にだけあれば XMP から読む', async () => {
+    const xmp = '><xmp:CreateDate>2026-09-15T10:00:00+09:00</xmp:CreateDate>';
+    const m = await metadata(specimen('dates-20-xmp-only', { version: '2.0', xmp }));
+    expect(m.creationDate).toBe('2026-09-15T10:00:00+09:00');
+    expect(m.metadataSources.creationDate).toBe('xmp');
+  });
+
   it('SPEC-READER-GET-METADATA-003 /Metadata の無い文書は absent', async () => {
     const m = await metadata(specimen('no-xmp', { version: '1.7', info: { Title: 'A' } }));
     expect(m.xmpMetadata).toEqual({ status: 'absent' });

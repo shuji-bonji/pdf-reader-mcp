@@ -1,6 +1,6 @@
 ---
-approved:
-pr:
+approved: 2026-11-05
+pr: 48
 implementation: required
 targets: [get-metadata]
 ---

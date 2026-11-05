@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-11-05
+
+Target version: 0.20.1. OpenSpec change `metadata-dates-prefer-info`
+(SPEC-READER-GET-METADATA-002, modified).
+
+### Changed
+
+- **`get_metadata`: the two dates use the document information dictionary in every PDF
+  version.** 0.20.0 used the XMP value for all eight fields in PDF 2.0 and later when both
+  sources held one. ISO 32000-2 §14.3.3 deprecates the dictionary for document-level metadata
+  in PDF 2.0 *except* `CreationDate` and `ModDate`, and §14.5 compares the `LastModified` of
+  `PieceInfo` data dictionaries with the dictionary's `ModDate`. So for a PDF 2.0 file that has
+  a date in both, `creationDate` / `modificationDate` now carry the dictionary's value (in its
+  `D:` form) and `metadataSources` says `info`. A file whose dates are only in XMP still reads
+  them from XMP; the other six fields and `metadataConflicts` are unchanged.
+
 ## [0.20.0] - 2026-11-05
 
 Target version: 0.20.0 (`get_page_count` gains an argument, and `get_metadata`, `inspect_tags`

@@ -215,6 +215,9 @@ is how many pages walking the tree actually reached. They differ only when the w
 producer, creation and modification dates) from the document information dictionary (§14.3.3)
 **and** the XMP metadata stream (§14.3.2). When both hold a value, PDF 2.0 and later use XMP
 (§14.3.3 deprecates the dictionary for this in PDF 2.0) and earlier versions use the dictionary.
+The two dates are the exception: they use the dictionary in every version, because §14.3.3 does
+not deprecate `CreationDate` and `ModDate`, and §14.5 compares `PieceInfo`'s `LastModified` with
+the dictionary's `ModDate`.
 `metadataSources` names the source of each field, and `metadataConflicts` lists the fields whose
 two values differ (dates compared as instants). Values are returned as written — a dictionary
 date looks like `D:20260915100000+09'00'`, an XMP date like `2026-09-15T10:00:00+09:00`.

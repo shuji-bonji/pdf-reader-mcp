@@ -147,12 +147,20 @@ export async function getMetadataFromDoc(
  * 文書情報辞書（§14.3.3）とメタデータストリーム（§14.3.2）の 8 項目を 1 つにする（#42）。
  *
  * - 両方にあれば、PDF 2.0 以降は XMP を、それより前は文書情報辞書を使う
- *   （§14.3.3: PDF 2.0 では文書情報辞書を文書レベルのメタデータに使うことは非推奨。
- *   2026-11-05 本人の判断で、CreationDate・ModDate も同じ扱いにした）
+ *   （§14.3.3: PDF 2.0 では文書情報辞書を文書レベルのメタデータに使うことは非推奨）
+ * - 🔴 ただし 2 つの日付は、版にかかわらず文書情報辞書を先にする（0.20.1）。§14.3.3 が
+ *   非推奨にしたのは CreationDate・ModDate **以外**で、§14.5 は PieceInfo の
+ *   LastModified を文書情報辞書の ModDate と比べると定めている
  * - 片方にしか無ければその値
  * - 値は書かれた形のまま返す（日付の書き方をそろえない）
  * - 両方の値が違えば `conflicts` に並べる。日付は表す時刻で比べる
  */
+/** PDF 2.0 でも文書情報辞書を先にする項目（§14.3.3 が非推奨にしていないキー）。 */
+const INFO_FIRST_FIELDS: ReadonlySet<DocumentMetadataField> = new Set([
+  'creationDate',
+  'modificationDate',
+]);
+
 export function mergeDocumentMetadata(
   fromInfo: Record<DocumentMetadataField, string | null>,
   fromXmp: Record<DocumentMetadataField, string | null> | null,
@@ -171,7 +179,7 @@ export function mergeDocumentMetadata(
     const x = fromXmp?.[field] ?? null;
     const source: 'info' | 'xmp' | null =
       i !== null && x !== null
-        ? xmpFirst
+        ? xmpFirst && !INFO_FIRST_FIELDS.has(field)
           ? 'xmp'
           : 'info'
         : i !== null
