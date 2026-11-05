@@ -1,3 +1,8 @@
+---
+spec_id: READER
+kind: tool
+introduced_by: get-metadata-reads-xmp
+---
 # get-metadata Specification
 
 ## Purpose
