@@ -93,3 +93,22 @@ describe('common-errors（実ファイルでは作れない状況）', () => {
     expect(got).toEqual(ALL_CODES);
   });
 });
+
+describe('SPEC-READER-COMMON-ERRORS-008 入力を読めないファイルシステムのエラーは INVALID_ARGUMENT にする', () => {
+  const errno = (code: string, path: string) =>
+    Object.assign(new Error(`${code}: something happened, open '${path}'`), { code, path });
+
+  it('SPEC-READER-COMMON-ERRORS-008 EACCES の例外の分類', () => {
+    const original = errno('EACCES', '/tmp/locked.pdf');
+    const err = handleStructuredError(original);
+    expect(err.code).toBe('INVALID_ARGUMENT');
+    expect(err.retryable).toBe(true);
+    expect(err.detail?.reason).toBe('PERMISSION_DENIED');
+    expect(err.detail?.path).toBe('/tmp/locked.pdf');
+    expect(err.detail?.cause).toBe(original.message);
+  });
+
+  it('SPEC-READER-COMMON-ERRORS-008 存在しないパスは今までどおり DOC_NOT_FOUND', () => {
+    expect(handleStructuredError(errno('ENOENT', '/tmp/none.pdf')).code).toBe('DOC_NOT_FOUND');
+  });
+});
