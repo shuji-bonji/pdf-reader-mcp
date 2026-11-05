@@ -51,7 +51,7 @@ import type {
   TagNode,
   TagsAnalysis,
 } from '../types.js';
-import { ENCRYPTED_PDF_HINT, PdfReaderError } from '../utils/error-handler.js';
+import { ENCRYPTED_PDF_HINT, INVALID_PDF_HINT, PdfReaderError } from '../utils/error-handler.js';
 import { resolvePageNumbers } from '../utils/pdf-helpers.js';
 import {
   buildDocumentIdToBoxMap,
@@ -63,7 +63,13 @@ import {
   type RunBox,
   resolveLineBreaks,
 } from './pdfjs-service.js';
-import { lockedOut, openPdf, pageBox } from './recover-service.js';
+import {
+  CATALOG_UNREADABLE_NOTE,
+  lockedOut,
+  openPdf,
+  pageBox,
+  readCatalog,
+} from './recover-service.js';
 import {
   type ContentRef,
   collectContentRefs,
@@ -596,6 +602,18 @@ function structTreeLockedError(): PdfReaderError {
   );
 }
 
+/** `extract_structured_text` が投げる、catalog を読めなかった失敗（#50）。 */
+function catalogUnreadableError(): PdfReaderError {
+  return new PdfReaderError(
+    'The document catalog could not be read, so its structure tree could not be read.',
+    'INVALID_PDF',
+    INVALID_PDF_HINT,
+    'INVALID_PDF',
+    undefined,
+    { cause: CATALOG_UNREADABLE_NOTE },
+  );
+}
+
 export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
   const { doc, scope } = await openPdf(filePath);
   // 🔴 鍵を導けないと catalog を読めず、`/MarkInfo` は「無い」と同じ顔で返る。
@@ -610,7 +628,18 @@ export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
       note: STRUCT_TREE_LOCKED_NOTE,
     };
   }
-  const catalog = asDict(await doc.getCatalog().catch(() => null));
+  // 🔴 catalog を読めないときも同じ。`/MarkInfo` が無いのと同じ顔で返る（#50）
+  const { catalog, unreadable } = await readCatalog(doc);
+  if (unreadable) {
+    return {
+      isTagged: null,
+      rootTag: null,
+      maxDepth: null,
+      totalElements: null,
+      roleCounts: null,
+      note: CATALOG_UNREADABLE_NOTE,
+    };
+  }
   const isTagged = await isMarked(doc, catalog);
   return analyzeTagsFromStructTree(await walkStructTree(doc, lockedOut(scope)), isTagged);
 }
@@ -639,7 +668,9 @@ export async function extractStructuredText(
   // `bothHalves` が `scope.textExtraction` に `failed` を書き、`isTagged` を null にする（#39）。
   if (lockedOut(scope)) throw structTreeLockedError();
 
-  const catalog = asDict(await libDoc.getCatalog().catch(() => null));
+  // 🔴 catalog を読めないときも、構造木の読み取りの失敗として申告する（#50）
+  const { catalog, unreadable } = await readCatalog(libDoc);
+  if (unreadable) throw catalogUnreadableError();
   const isTagged = await isMarked(libDoc, catalog);
 
   const roots = await walkStructTree(libDoc, lockedOut(scope));
@@ -803,7 +834,17 @@ export async function extractTables(
     };
   }
 
-  const catalog = asDict(await libDoc.getCatalog().catch(() => null));
+  // 🔴 catalog を読めないときも「表が 0 個」と言わない（#50）
+  const { catalog, unreadable } = await readCatalog(libDoc);
+  if (unreadable) {
+    return {
+      isTagged: null,
+      tables: null,
+      totalTables: null,
+      pagesScanned: 0,
+      note: CATALOG_UNREADABLE_NOTE,
+    };
+  }
   const isTagged = await isMarked(libDoc, catalog);
 
   const roots = await walkStructTree(libDoc, lockedOut(scope));

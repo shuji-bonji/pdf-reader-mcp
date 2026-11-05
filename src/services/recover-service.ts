@@ -17,13 +17,20 @@
 
 import {
   asArray,
+  asDict,
   type DocumentScope,
   numberOf,
   type OpenedDocument,
   openDocument,
   resolved,
 } from '@normativepdf/recover';
-import { type CosObject, inheritedAttribute, type PageEntry, type PdfDocument } from 'normativepdf';
+import {
+  type CosDict,
+  type CosObject,
+  inheritedAttribute,
+  type PageEntry,
+  type PdfDocument,
+} from 'normativepdf';
 import type { ObjectRect } from '../types.js';
 import { readPdfFile } from '../utils/pdf-helpers.js';
 
@@ -54,6 +61,36 @@ export async function openPdfFromData(data: Uint8Array): Promise<OpenedDocument>
 export function lockedOut(scope: DocumentScope): boolean {
   return scope.encrypted && !scope.authenticated;
 }
+
+/**
+ * catalog（trailer の `/Root` が指す辞書。ISO 32000-2 §7.7.2）を読む。
+ *
+ * 🔴 **読めなかったことと、項目が無いことを分けて返す**（#50）。0.20.x までは 10 か所が
+ * `getCatalog().catch(() => null)` で失敗を `null` に畳み、`/MarkInfo` が無いのと同じに
+ * 扱って「タグが無い」「AcroForm が無い」と答えていた。#39（鍵を導けない文書）と同じ形。
+ * 取り出すと例外になる・辞書でないものを指す、のどちらも `unreadable: true` にする。
+ */
+export async function readCatalog(
+  doc: PdfDocument,
+): Promise<{ catalog: CosDict | null; unreadable: boolean }> {
+  let raw: unknown;
+  try {
+    raw = await doc.getCatalog();
+  } catch {
+    return { catalog: null, unreadable: true };
+  }
+  const catalog = asDict(raw as CosObject);
+  return { catalog, unreadable: catalog === null };
+}
+
+/**
+ * catalog を読めなかったときの note（#50）。鍵の件（#39）と同じ趣旨で、**読めなかった**
+ * ことと、それが項目の無い文書という意味ではないことを書く。
+ */
+export const CATALOG_UNREADABLE_NOTE =
+  "The document catalog (the dictionary the trailer's /Root points to, ISO 32000-2 §7.7.2) " +
+  'could not be read, so the structure tree could not be looked for. This is not a document ' +
+  'without tags: whether it is tagged is unknown.';
 
 /**
  * trailer に `/Encrypt` があるか（ISO 32000-2 §7.6）。

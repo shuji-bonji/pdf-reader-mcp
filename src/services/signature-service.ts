@@ -24,7 +24,7 @@
 import { asArray, asDict, get, nameOf, refKey, resolved, textOf } from '@normativepdf/recover';
 import type { CosDict, PdfDocument } from 'normativepdf';
 import type { SignatureFieldInfo, SignaturesAnalysis } from '../types.js';
-import { lockedOut, openPdf } from './recover-service.js';
+import { lockedOut, openPdf, readCatalog } from './recover-service.js';
 
 /**
  * 名前を持たない枝を降りる深さの上限。
@@ -65,7 +65,20 @@ export async function analyzeSignatures(filePath: string): Promise<SignaturesAna
     };
   }
 
-  const catalog = asDict(await doc.getCatalog().catch(() => null));
+  // 🔴 catalog を読めないときも「AcroForm が無い」と言わない（#50）。数は鍵の件と同じ形
+  const { catalog, unreadable } = await readCatalog(doc);
+  if (unreadable) {
+    return {
+      totalFields: 0,
+      signedCount: 0,
+      unsignedCount: 0,
+      fields: [],
+      note:
+        "The document catalog (the dictionary the trailer's /Root points to, ISO 32000-2 §7.7.2) " +
+        'could not be read, so no signature field could be looked for. ' +
+        'This is not a document without signatures.',
+    };
+  }
   const acroForm = asDict(await resolved(doc, get(catalog, 'AcroForm')));
 
   if (!acroForm) {
