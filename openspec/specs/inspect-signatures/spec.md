@@ -1,7 +1,12 @@
+---
+spec_id: READER
+kind: tool
+introduced_by: catalog-unreadable-is-not-absent
+---
 # inspect-signatures Specification
 
 ## Purpose
-TBD - created by archiving change catalog-unreadable-is-not-absent. Update Purpose after archive.
+`inspect_signatures` ツールが、文書の署名フィールド（ISO 32000-2 §12.7.5.5）を観測して報告するときの規則を定めます。この初版には、catalog を読めなかったことを「AcroForm が無い」「署名の無い文書」と答えない振る舞いだけを書きます。署名を検証して合否を言うのは pdf-verify-mcp の仕事で、このツールは観測だけを返します。
 
 ## Requirements
 

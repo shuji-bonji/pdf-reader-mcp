@@ -114,31 +114,44 @@ describe('SPEC-READER-COMMON-ERRORS-008 入力を読めないファイルシス�
   });
 });
 
-for (const tool of ['inspect_tags', 'extract_tables'] as const) {
-  const id =
-    tool === 'inspect_tags' ? 'SPEC-READER-INSPECT-TAGS-002' : 'SPEC-READER-EXTRACT-TABLES-002';
-  describe(`${id} catalog を読めない文書ではタグの有無を答えない`, () => {
-    it(`${id} Root が指すオブジェクトが無い`, async () => {
-      const { isError, body } = await call(tool, {
-        file_path: files.rootMissing,
-        response_format: 'json',
-      });
-      expect(isError).toBe(false);
-      expect(body.isTagged).toBeNull();
-      expect(body.note).toMatch(/catalog/);
+/**
+ * inspect_tags と extract_tables で同じことを確かめる。
+ * 🔴 describe / it の名前は文字列のまま書く。spec-ids はテスト名から仕様 ID を読むので、
+ * テンプレートで組み立てた名前の ID は数えられない（2026-11-06、archive の後の check で発覚）。
+ */
+const catalogCases = (tool: 'inspect_tags' | 'extract_tables') => ({
+  rootMissing: async () => {
+    const { isError, body } = await call(tool, {
+      file_path: files.rootMissing,
+      response_format: 'json',
     });
+    expect(isError).toBe(false);
+    expect(body.isTagged).toBeNull();
+    expect(body.note).toMatch(/catalog/);
+  },
+  rootNotDict: async () => {
+    const { body } = await call(tool, { file_path: files.rootNotDict, response_format: 'json' });
+    expect(body.isTagged).toBeNull();
+  },
+  rootOk: async () => {
+    const { body } = await call(tool, { file_path: files.rootOk, response_format: 'json' });
+    expect(body.isTagged).toBe(false);
+  },
+});
 
-    it(`${id} Root が辞書でないものを指す`, async () => {
-      const { body } = await call(tool, { file_path: files.rootNotDict, response_format: 'json' });
-      expect(body.isTagged).toBeNull();
-    });
+describe('SPEC-READER-INSPECT-TAGS-002 catalog を読めない文書ではタグの有無を答えない', () => {
+  const c = catalogCases('inspect_tags');
+  it('SPEC-READER-INSPECT-TAGS-002 Root が指すオブジェクトが無い', c.rootMissing);
+  it('SPEC-READER-INSPECT-TAGS-002 Root が辞書でないものを指す', c.rootNotDict);
+  it('SPEC-READER-INSPECT-TAGS-002 読めた catalog に MarkInfo が無い', c.rootOk);
+});
 
-    it(`${id} 読めた catalog に MarkInfo が無い`, async () => {
-      const { body } = await call(tool, { file_path: files.rootOk, response_format: 'json' });
-      expect(body.isTagged).toBe(false);
-    });
-  });
-}
+describe('SPEC-READER-EXTRACT-TABLES-002 catalog を読めない文書ではタグの有無を答えない', () => {
+  const c = catalogCases('extract_tables');
+  it('SPEC-READER-EXTRACT-TABLES-002 Root が指すオブジェクトが無い', c.rootMissing);
+  it('SPEC-READER-EXTRACT-TABLES-002 Root が辞書でないものを指す', c.rootNotDict);
+  it('SPEC-READER-EXTRACT-TABLES-002 読めた catalog に MarkInfo が無い', c.rootOk);
+});
 
 describe('SPEC-READER-EXTRACT-STRUCTURED-TEXT-002 catalog を読めない文書では構造木の読み取りを失敗として申告する', () => {
   it('SPEC-READER-EXTRACT-STRUCTURED-TEXT-002 Root が指すオブジェクトが無い', async () => {
