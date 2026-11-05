@@ -23,6 +23,38 @@ export interface PdfMetadata {
   isTagged: boolean;
   hasSignatures: boolean;
   fileSize: number;
+  /**
+   * Where each of the eight document-level fields came from (#42): the document
+   * information dictionary (`info`, ISO 32000-2 §14.3.3), the metadata stream
+   * (`xmp`, §14.3.2), or neither (`null`).
+   */
+  metadataSources: Record<DocumentMetadataField, 'info' | 'xmp' | null>;
+  /**
+   * Fields where both sources hold a value and the values differ. Dates are
+   * compared as instants, so the same time written two ways is not listed.
+   * Which value is right is not judged here.
+   */
+  metadataConflicts: MetadataConflict[];
+  /** Whether the metadata stream was read, is absent, or is there but could not be read. */
+  xmpMetadata: { status: 'read' } | { status: 'absent' } | { status: 'unreadable'; reason: string };
+}
+
+/** The eight document-level fields of `get_metadata`, in Table 349 order. */
+export type DocumentMetadataField =
+  | 'title'
+  | 'author'
+  | 'subject'
+  | 'keywords'
+  | 'creator'
+  | 'producer'
+  | 'creationDate'
+  | 'modificationDate';
+
+/** One field whose two sources disagree (#42). */
+export interface MetadataConflict {
+  field: DocumentMetadataField;
+  info: string;
+  xmp: string;
 }
 
 /**

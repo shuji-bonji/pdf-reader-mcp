@@ -21,8 +21,10 @@ import {
 import type {
   AnnotationInfo,
   AnnotationsAnalysis,
+  DocumentMetadataField,
   ExtractedImage,
   ImageExtractionResult,
+  MetadataConflict,
   OmittedImage,
   PageText,
   PdfMetadata,
@@ -43,6 +45,7 @@ import {
   type Samples,
 } from './image-resampler.js';
 import { detectEncryption, lockedOut, openPdf } from './recover-service.js';
+import { DOCUMENT_METADATA_FIELDS, readDocumentXmp } from './xmp-service.js';
 
 /**
  * pdfjs-dist verbosity level: ERRORS only (suppress warnings from stdout).
@@ -107,7 +110,8 @@ export async function getMetadataFromDoc(
   // Check signatures (heuristic check via first few pages)
   const hasSignatures = await checkSignatures(doc);
 
-  return {
+  const pdfVersion = asStringOrNull(info.PDFFormatVersion);
+  const fromInfo: Record<DocumentMetadataField, string | null> = {
     title: asStringOrNull(info.Title),
     author: asStringOrNull(info.Author),
     subject: asStringOrNull(info.Subject),
@@ -116,14 +120,99 @@ export async function getMetadataFromDoc(
     producer: asStringOrNull(info.Producer),
     creationDate: asStringOrNull(info.CreationDate),
     modificationDate: asStringOrNull(info.ModDate),
+  };
+  const xmp = await readDocumentXmp(filePath);
+  const merged = mergeDocumentMetadata(
+    fromInfo,
+    xmp.status === 'read' ? xmp.fields : null,
+    pdfVersion,
+  );
+
+  return {
+    ...merged.values,
     pageCount: doc.numPages,
-    pdfVersion: asStringOrNull(info.PDFFormatVersion),
+    pdfVersion,
     isLinearized: info.IsLinearized === true,
     isEncrypted: await detectEncryption(filePath),
     isTagged,
     hasSignatures,
     fileSize,
+    metadataSources: merged.sources,
+    metadataConflicts: merged.conflicts,
+    xmpMetadata: xmp.status === 'read' ? { status: 'read' } : xmp,
   };
+}
+
+/**
+ * 文書情報辞書（§14.3.3）とメタデータストリーム（§14.3.2）の 8 項目を 1 つにする（#42）。
+ *
+ * - 両方にあれば、PDF 2.0 以降は XMP を、それより前は文書情報辞書を使う
+ *   （§14.3.3: PDF 2.0 では文書情報辞書を文書レベルのメタデータに使うことは非推奨。
+ *   2026-11-05 本人の判断で、CreationDate・ModDate も同じ扱いにした）
+ * - 片方にしか無ければその値
+ * - 値は書かれた形のまま返す（日付の書き方をそろえない）
+ * - 両方の値が違えば `conflicts` に並べる。日付は表す時刻で比べる
+ */
+export function mergeDocumentMetadata(
+  fromInfo: Record<DocumentMetadataField, string | null>,
+  fromXmp: Record<DocumentMetadataField, string | null> | null,
+  pdfVersion: string | null,
+): {
+  values: Record<DocumentMetadataField, string | null>;
+  sources: Record<DocumentMetadataField, 'info' | 'xmp' | null>;
+  conflicts: MetadataConflict[];
+} {
+  const xmpFirst = pdfVersion !== null && Number.parseFloat(pdfVersion) >= 2;
+  const values = {} as Record<DocumentMetadataField, string | null>;
+  const sources = {} as Record<DocumentMetadataField, 'info' | 'xmp' | null>;
+  const conflicts: MetadataConflict[] = [];
+  for (const field of DOCUMENT_METADATA_FIELDS) {
+    const i = fromInfo[field];
+    const x = fromXmp?.[field] ?? null;
+    const source: 'info' | 'xmp' | null =
+      i !== null && x !== null
+        ? xmpFirst
+          ? 'xmp'
+          : 'info'
+        : i !== null
+          ? 'info'
+          : x !== null
+            ? 'xmp'
+            : null;
+    sources[field] = source;
+    values[field] = source === 'info' ? i : source === 'xmp' ? x : null;
+    if (i !== null && x !== null && !sameValue(field, i, x)) {
+      conflicts.push({ field, info: i, xmp: x });
+    }
+  }
+  return { values, sources, conflicts };
+}
+
+function sameValue(field: DocumentMetadataField, info: string, xmp: string): boolean {
+  if (field === 'creationDate' || field === 'modificationDate') {
+    const a = pdfDateToMillis(info);
+    const b = Date.parse(xmp);
+    if (a !== null && Number.isFinite(b)) return a === b;
+  }
+  return info.trim() === xmp.trim();
+}
+
+/**
+ * PDF の日付（§7.9.4: `D:YYYYMMDDHHmmSSOHH'mm`）を UTC のミリ秒に直す。直せなければ `null`。
+ * 省いた月・日は 01、時・分・秒は 00、時差を省いたものは UTC として読む（§7.9.4 は
+ * 時差を省いたときの扱いを決めていない。比べるためだけの仮定である）。
+ */
+export function pdfDateToMillis(s: string): number | null {
+  const m =
+    /^(?:D:)?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?(?:([Zz+-])(?:(\d{2})'?(\d{2})?'?)?)?$/.exec(
+      s.trim(),
+    );
+  if (!m) return null;
+  const [, y, mo = '01', d = '01', h = '00', mi = '00', se = '00', sign, oh = '00', om = '00'] = m;
+  const base = Date.UTC(+y, +mo - 1, +d, +h, +mi, +se);
+  if (!Number.isFinite(base)) return null;
+  const offset = (+oh * 60 + +om) * 60_000;
+  return sign === '+' ? base - offset : sign === '-' ? base + offset : base;
 }
 
 /**

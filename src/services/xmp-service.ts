@@ -18,7 +18,7 @@
 
 import { asDict, decodedBytes, get, nameOf, tryGet } from '@normativepdf/recover';
 import type { CosDict, PdfDocument } from 'normativepdf';
-import type { XmpDeclarations, XmpMetadataInfo } from '../types.js';
+import type { DocumentMetadataField, XmpDeclarations, XmpMetadataInfo } from '../types.js';
 import { lockedOut, openPdf } from './recover-service.js';
 
 /**
@@ -172,4 +172,144 @@ export async function readXmpDeclarations(filePath: string): Promise<XmpDeclarat
   if (info === null) return { pdfaid: null, pdfuaid: null, tdm: null };
   if (info.status === 'unreadable') throw new Error(`/Metadata could not be read: ${info.reason}`);
   return info.declarations;
+}
+
+// ─── get_metadata（#42）: 文書情報辞書の 8 項目に対応する XMP のプロパティ ───
+
+/** `get_metadata` の 8 項目。文書情報辞書（§14.3.3）のキーと同じ並び。 */
+export const DOCUMENT_METADATA_FIELDS: readonly DocumentMetadataField[] = [
+  'title',
+  'author',
+  'subject',
+  'keywords',
+  'creator',
+  'producer',
+  'creationDate',
+  'modificationDate',
+];
+
+/**
+ * ISO 32000-2 Table 349 の注が、文書情報辞書の各キーに対応させている XMP のプロパティ。
+ * 名前空間は URI で引く（prefix は書き手が選べる）。
+ */
+const XMP_PROPERTY_OF: Record<
+  DocumentMetadataField,
+  { ns: string; fallback: string; local: string }
+> = {
+  title: { ns: 'http://purl.org/dc/elements/1.1/', fallback: 'dc', local: 'title' },
+  author: { ns: 'http://purl.org/dc/elements/1.1/', fallback: 'dc', local: 'creator' },
+  subject: { ns: 'http://purl.org/dc/elements/1.1/', fallback: 'dc', local: 'description' },
+  keywords: { ns: 'http://ns.adobe.com/pdf/1.3/', fallback: 'pdf', local: 'Keywords' },
+  creator: { ns: 'http://ns.adobe.com/xap/1.0/', fallback: 'xmp', local: 'CreatorTool' },
+  producer: { ns: 'http://ns.adobe.com/pdf/1.3/', fallback: 'pdf', local: 'Producer' },
+  creationDate: { ns: 'http://ns.adobe.com/xap/1.0/', fallback: 'xmp', local: 'CreateDate' },
+  modificationDate: { ns: 'http://ns.adobe.com/xap/1.0/', fallback: 'xmp', local: 'ModifyDate' },
+};
+
+const RDF_NS = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
+
+/** XML の文字参照を戻す。 */
+function decodeXmlText(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|lt|gt|amp|quot|apos);/g, (_, ref: string) => {
+    if (ref[0] === '#') {
+      const code =
+        ref[1] === 'x' ? Number.parseInt(ref.slice(2), 16) : Number.parseInt(ref.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : '';
+    }
+    return { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" }[ref] ?? '';
+  });
+}
+
+/**
+ * 1 つのプロパティの値。属性の形と要素の形の両方を見る（XMP Part 1 §7.9.2）。
+ *
+ * - `rdf:Alt`（言語ごと）は `xml:lang="x-default"` の項目、無ければ最初の項目
+ * - `rdf:Seq`・`rdf:Bag` は項目を `; ` でつなぐ
+ *
+ * 🔴 pdfjs の `getMetadata().metadata` は `rdf:Alt` の項目を区切りなしでつなぎ、
+ * 属性の形を読まない（2026-11-05 実測）。ここで読む理由はそれである。
+ */
+function xmpProperty(xml: string, prefixes: string[], rdf: string[], local: string): string | null {
+  for (const p of prefixes) {
+    const name = `${escapeRegExp(p)}:${escapeRegExp(local)}`;
+    const attr = new RegExp(`\\s${name}\\s*=\\s*"([^"]*)"|\\s${name}\\s*=\\s*'([^']*)'`).exec(xml);
+    if (attr) return decodeXmlText(attr[1] ?? attr[2] ?? '').trim();
+    const elem = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`).exec(xml);
+    if (!elem) continue;
+    const inner = elem[1];
+    for (const r of rdf) {
+      const R = escapeRegExp(r);
+      const container = new RegExp(`<${R}:(Alt|Seq|Bag)(?:\\s[^>]*)?>([\\s\\S]*?)</${R}:\\1>`).exec(
+        inner,
+      );
+      if (!container) continue;
+      const items = [
+        ...container[2].matchAll(new RegExp(`<${R}:li(\\s[^>]*)?>([\\s\\S]*?)</${R}:li>`, 'g')),
+      ].map((m) => ({
+        lang: /xml:lang\s*=\s*["']([^"']*)["']/.exec(m[1] ?? '')?.[1] ?? null,
+        text: decodeXmlText(m[2]).trim(),
+      }));
+      if (items.length === 0) return null;
+      if (container[1] === 'Alt') {
+        return (items.find((i) => i.lang === 'x-default') ?? items[0]).text;
+      }
+      return items.map((i) => i.text).join('; ');
+    }
+    return decodeXmlText(inner.replace(/<[^>]*>/g, '')).trim();
+  }
+  return null;
+}
+
+/** XMP の packet から 8 項目を取り出す。無い項目・空の項目は `null`。 */
+export function parseDocumentMetadata(xml: string): Record<DocumentMetadataField, string | null> {
+  const namespaces = collectNamespaces(xml);
+  const prefixesFor = (uri: string, fallback: string): string[] => {
+    const found = namespaces.filter((n) => n.uri === uri).map((n) => n.prefix);
+    return found.length > 0 ? found : [fallback];
+  };
+  const rdf = prefixesFor(RDF_NS, 'rdf');
+  const out = {} as Record<DocumentMetadataField, string | null>;
+  for (const field of DOCUMENT_METADATA_FIELDS) {
+    const { ns, fallback, local } = XMP_PROPERTY_OF[field];
+    const value = xmpProperty(xml, prefixesFor(ns, fallback), rdf, local);
+    out[field] = value === null || value === '' ? null : value;
+  }
+  return out;
+}
+
+/** `get_metadata` の XMP の読み取り結果。読めなかったことを「無い」と同じ顔にしない。 */
+export type DocumentXmp =
+  | { status: 'read'; fields: Record<DocumentMetadataField, string | null> }
+  | { status: 'absent' }
+  | { status: 'unreadable'; reason: string };
+
+/** ファイルを開き、catalog の `/Metadata` から 8 項目を読む（#42）。例外は投げない。 */
+export async function readDocumentXmp(filePath: string): Promise<DocumentXmp> {
+  try {
+    const { doc, scope } = await openPdf(filePath);
+    if (lockedOut(scope)) {
+      return {
+        status: 'unreadable',
+        reason:
+          'the document is encrypted and the key could not be derived from the empty user ' +
+          'password (ISO 32000-2 §7.6.4.3.2), so the catalog and its /Metadata could not be read',
+      };
+    }
+    const catalog = asDict(await doc.getCatalog().catch(() => null));
+    if (!catalog) {
+      return {
+        status: 'unreadable',
+        reason: 'the catalog dictionary could not be read (ISO 32000-2 §7.7.2)',
+      };
+    }
+    const info = await readXmpMetadata(doc, catalog);
+    if (info === null) return { status: 'absent' };
+    if (info.status === 'unreadable') return { status: 'unreadable', reason: info.reason };
+    return { status: 'read', fields: parseDocumentMetadata(info.xml ?? '') };
+  } catch (error) {
+    return {
+      status: 'unreadable',
+      reason: `the file could not be opened to read /Metadata: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }

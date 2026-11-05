@@ -8,6 +8,7 @@ import type {
   ActionInfo,
   AnnotationsAnalysis,
   CatalogInventory,
+  DocumentMetadataField,
   ExtractedTable,
   FontsAnalysis,
   ObjectLocationResult,
@@ -47,15 +48,27 @@ export function truncateIfNeeded(text: string): { text: string; truncated: boole
 export function formatMetadataMarkdown(meta: PdfMetadata): string {
   const lines: string[] = ['# PDF Metadata', ''];
 
+  // 文書レベルの 8 項目には出どころを添える（#42）。
+  const documentFields: [string, DocumentMetadataField][] = [
+    ['Title', 'title'],
+    ['Author', 'author'],
+    ['Subject', 'subject'],
+    ['Keywords', 'keywords'],
+    ['Creator', 'creator'],
+    ['Producer', 'producer'],
+    ['Creation Date', 'creationDate'],
+    ['Modification Date', 'modificationDate'],
+  ];
+  const sourceLabel = { info: 'document information dictionary', xmp: 'XMP metadata stream' };
+  for (const [label, field] of documentFields) {
+    const value = meta[field];
+    const source = meta.metadataSources?.[field];
+    if (value !== null && value !== undefined) {
+      lines.push(`- **${label}**: ${value}${source ? ` _(from the ${sourceLabel[source]})_` : ''}`);
+    }
+  }
+
   const fields: [string, string | number | boolean | null][] = [
-    ['Title', meta.title],
-    ['Author', meta.author],
-    ['Subject', meta.subject],
-    ['Keywords', meta.keywords],
-    ['Creator', meta.creator],
-    ['Producer', meta.producer],
-    ['Creation Date', meta.creationDate],
-    ['Modification Date', meta.modificationDate],
     ['Page Count', meta.pageCount],
     ['PDF Version', meta.pdfVersion],
     ['Linearized', meta.isLinearized],
@@ -69,6 +82,26 @@ export function formatMetadataMarkdown(meta: PdfMetadata): string {
     if (value !== null && value !== undefined) {
       const displayValue = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value);
       lines.push(`- **${label}**: ${displayValue}`);
+    }
+  }
+
+  if (meta.xmpMetadata) {
+    const x = meta.xmpMetadata;
+    lines.push(
+      `- **XMP Metadata Stream**: ${x.status === 'read' ? 'read' : x.status === 'absent' ? 'absent' : `could not be read — ${x.reason}`}`,
+    );
+  }
+
+  if (meta.metadataConflicts && meta.metadataConflicts.length > 0) {
+    lines.push(
+      '',
+      '## Values that differ between the two sources',
+      '',
+      '| Field | Document information dictionary | XMP metadata stream |',
+      '|---|---|---|',
+    );
+    for (const c of meta.metadataConflicts) {
+      lines.push(`| ${c.field} | ${escapeTableCell(c.info)} | ${escapeTableCell(c.xmp)} |`);
     }
   }
 
@@ -897,4 +930,8 @@ export function formatCatalogMarkdown(inv: CatalogInventory): string {
   }
 
   return lines.join('\n');
+}
+
+function escapeTableCell(s: string): string {
+  return s.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
