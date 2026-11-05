@@ -12,3 +12,7 @@ tests/fixtures/*.pdf
 
 # 撤去前のゴールデン（pdf-lib が在るうちにしか採れない）。消さない
 .golden/
+
+
+
+_to_delete/
