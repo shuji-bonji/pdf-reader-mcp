@@ -10,6 +10,7 @@
 
 import { isAbsolute, normalize } from 'node:path';
 import {
+  type FileSystemReason,
   type LawErrorCode,
   type LawServiceError,
   makeError,
@@ -93,8 +94,11 @@ function inferFamilyCodeFromMessage(message: string): LawErrorCode | undefined {
   if (message.includes('ENOENT') || message.includes('no such file')) {
     return 'DOC_NOT_FOUND';
   }
+  // SPEC-READER-COMMON-ERRORS-008（#49）: 権限が無いのはサーバーの故障ではない。
+  // 0.20.x は INTERNAL_ERROR にしていた。Node の例外は `code` で先に分ける
+  // （`fileSystemError`）ので、ここに来るのは `code` を持たない経路だけ
   if (message.includes('EACCES') || message.includes('permission denied')) {
-    return 'INTERNAL_ERROR';
+    return 'INVALID_ARGUMENT';
   }
   if (message.includes('Invalid PDF') || message.includes('PDF header not found')) {
     return 'INVALID_PDF';
@@ -183,6 +187,48 @@ function defaultNextActionsForLegacy(legacyCode: string): NextAction[] | undefin
   }
 }
 
+const ERRNO_REASON: Readonly<Record<string, FileSystemReason>> = {
+  EACCES: 'PERMISSION_DENIED',
+  EPERM: 'PERMISSION_DENIED',
+  ENOTDIR: 'NOT_A_DIRECTORY',
+  EISDIR: 'IS_A_DIRECTORY',
+  EROFS: 'READ_ONLY_FILESYSTEM',
+  ENOSPC: 'NO_SPACE',
+};
+
+const REASON_TEXT: Readonly<Record<FileSystemReason, string>> = {
+  PERMISSION_DENIED: 'permission denied',
+  NOT_A_DIRECTORY: 'a part of the path is a file, not a folder',
+  IS_A_DIRECTORY: 'the path is a folder',
+  READ_ONLY_FILESYSTEM: 'the file system is read-only',
+  NO_SPACE: 'no space left on the device',
+  FILESYSTEM_ERROR: 'the file system refused the read',
+};
+
+/**
+ * 入力を読めないファイルシステムのエラー（SPEC-READER-COMMON-ERRORS-008。#49）。
+ *
+ * family の決定（2026-11-06）: 入力を読めない・出力を書けないは `INVALID_ARGUMENT`
+ * （`retryable: true`）にし、`detail.cause` に元の文を入れる。共通のコードは足さない。
+ * `ENOENT` は従来どおり `DOC_NOT_FOUND`（ここでは扱わず、下の推定に任せる）。
+ */
+function fileSystemError(error: unknown): LawServiceError | null {
+  if (!(error instanceof Error)) return null;
+  const errno = (error as { code?: unknown }).code;
+  if (typeof errno !== 'string' || !(errno in ERRNO_REASON)) return null;
+  const reason = ERRNO_REASON[errno];
+  const rawPath = (error as { path?: unknown }).path;
+  const path = typeof rawPath === 'string' ? rawPath : undefined;
+  return makeError(
+    'INVALID_ARGUMENT',
+    `Cannot read the input file${path ? ` "${path}"` : ''}: ${REASON_TEXT[reason]} (${errno})`,
+    {
+      hint: 'Check that this server is allowed to read the file, or pass a path it can read.',
+      detail: { reason, ...(path ? { path } : {}), cause: error.message },
+    },
+  );
+}
+
 /**
  * unknown を構造化エラー (`LawServiceError`) に正規化する。
  *
@@ -201,6 +247,10 @@ export function handleStructuredError(error: unknown): LawServiceError {
       detail: error.detail ?? { cause: `PdfReaderError(${error.code})` },
     });
   }
+
+  // Node のファイルシステムの例外: 文面ではなく `code`（errno の名前）で分ける
+  const fsError = fileSystemError(error);
+  if (fsError) return fsError;
 
   // 通常の Error: メッセージから推定
   if (error instanceof Error) {
@@ -259,14 +309,13 @@ function buildInferredError(
         next_actions: [NEXT_ACTIONS.checkFilePath()],
         detail: { cause: original.message },
       });
+    case 'INVALID_ARGUMENT':
+      // `code` を持たない権限のエラー（文面だけで分かるもの）
+      return makeError(code, 'Cannot read the input file: permission denied.', {
+        hint: 'Check that this server is allowed to read the file, or pass a path it can read.',
+        detail: { reason: 'PERMISSION_DENIED', cause: original.message },
+      });
     case 'INTERNAL_ERROR':
-      // EACCES の場合はヒントを差し替える
-      if (rawMessage.includes('EACCES') || rawMessage.includes('permission denied')) {
-        return makeError(code, 'Permission denied.', {
-          hint: 'Check that this server is allowed to read the file.',
-          detail: { cause: original.message },
-        });
-      }
       return makeError(code, rawMessage, { detail: { cause: original.name } });
     case 'INVALID_PDF':
       return makeError(code, 'The file does not appear to be a valid PDF.', {

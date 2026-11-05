@@ -134,10 +134,14 @@ describe('handleStructuredError - inference from generic Error', () => {
     expect(err.next_actions?.[0].action).toBe('verify_file_path');
   });
 
-  it('infers INTERNAL_ERROR with permission hint from EACCES', () => {
+  it('infers INVALID_ARGUMENT from an EACCES message that carries no errno code (#49)', () => {
+    // 0.20.x は INTERNAL_ERROR だった。権限が無いのはサーバーの故障ではない
+    // （SPEC-READER-COMMON-ERRORS-008）。Node の例外は `code` で先に分けるので、
+    // ここは `code` を持たない例外の経路
     const err = handleStructuredError(new Error('EACCES: permission denied'));
-    expect(err.code).toBe('INTERNAL_ERROR');
-    expect(err.error).toBe('Permission denied.');
+    expect(err.code).toBe('INVALID_ARGUMENT');
+    expect(err.retryable).toBe(true);
+    expect(err.detail?.reason).toBe('PERMISSION_DENIED');
   });
 
   it('infers INVALID_PDF from "Invalid PDF"', () => {

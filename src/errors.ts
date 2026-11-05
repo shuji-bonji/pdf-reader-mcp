@@ -80,8 +80,24 @@ export interface LawServiceError {
     status?: number;
     url?: string;
     cause?: string;
+    /** ファイルシステムのエラーの理由（SPEC-READER-COMMON-ERRORS-008。pdf-writer-mcp と同じ値） */
+    reason?: FileSystemReason;
+    /** 読めなかったパス */
+    path?: string;
   };
 }
+
+/**
+ * ファイルシステムのエラーの細かい理由（SPEC-READER-COMMON-ERRORS-008）。
+ * 🔴 pdf-writer-mcp の出力側（#10・F-23）と同じ値を使う。family で値をそろえる。
+ */
+export type FileSystemReason =
+  | 'PERMISSION_DENIED'
+  | 'NOT_A_DIRECTORY'
+  | 'IS_A_DIRECTORY'
+  | 'READ_ONLY_FILESYSTEM'
+  | 'NO_SPACE'
+  | 'FILESYSTEM_ERROR';
 
 /**
  * `retryable` の値。**code ごとに 1 つ**で、エラーを作る箇所では選ばせない
