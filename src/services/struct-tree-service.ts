@@ -51,6 +51,7 @@ import type {
   TagNode,
   TagsAnalysis,
 } from '../types.js';
+import { ENCRYPTED_PDF_HINT, PdfReaderError } from '../utils/error-handler.js';
 import { resolvePageNumbers } from '../utils/pdf-helpers.js';
 import {
   buildDocumentIdToBoxMap,
@@ -574,8 +575,41 @@ async function isMarked(doc: PdfDocument, catalog: CosDict | null): Promise<bool
   return boolOf(await resolved(doc, get(markInfo, 'Marked'))) === true;
 }
 
+/**
+ * 鍵を導けない文書の note（#39）。ほかの 5 ツール（inspect_fonts など）と同じ趣旨で、
+ * **読めなかった**ことと、それがタグの無い文書という意味ではないことを書く。
+ */
+export const STRUCT_TREE_LOCKED_NOTE =
+  'The document is encrypted and the key could not be derived from the empty user password ' +
+  '(ISO 32000-2 §7.6.4.3.2), so the catalog and its structure tree could not be read. ' +
+  'This is not a document without tags: whether it is tagged is unknown.';
+
+/** `extract_structured_text` が投げる、鍵を導けなかった失敗（#39）。 */
+function structTreeLockedError(): PdfReaderError {
+  return new PdfReaderError(
+    'This PDF is password-protected, so its structure tree could not be read.',
+    'ENCRYPTED_PDF',
+    ENCRYPTED_PDF_HINT,
+    'ENCRYPTED_PDF',
+    undefined,
+    { cause: STRUCT_TREE_LOCKED_NOTE },
+  );
+}
+
 export async function analyzeTags(filePath: string): Promise<TagsAnalysis> {
   const { doc, scope } = await openPdf(filePath);
+  // 🔴 鍵を導けないと catalog を読めず、`/MarkInfo` は「無い」と同じ顔で返る。
+  // 「タグが無い」と「見に行けなかった」を同じ false で言わない（#39）。
+  if (lockedOut(scope)) {
+    return {
+      isTagged: null,
+      rootTag: null,
+      maxDepth: null,
+      totalElements: null,
+      roleCounts: null,
+      note: STRUCT_TREE_LOCKED_NOTE,
+    };
+  }
   const catalog = asDict(await doc.getCatalog().catch(() => null));
   const isTagged = await isMarked(doc, catalog);
   return analyzeTagsFromStructTree(await walkStructTree(doc, lockedOut(scope)), isTagged);
@@ -601,6 +635,9 @@ export async function extractStructuredText(
   options: { pages?: string; roles?: string[]; includeBbox?: boolean } = {},
 ): Promise<StructuredTextResult> {
   const { doc: libDoc, scope } = await openPdf(filePath);
+  // 🔴 構造木を読めなかったことを、読み取りの失敗として申告する。呼び出し側の
+  // `bothHalves` が `scope.textExtraction` に `failed` を書き、`isTagged` を null にする（#39）。
+  if (lockedOut(scope)) throw structTreeLockedError();
 
   const catalog = asDict(await libDoc.getCatalog().catch(() => null));
   const isTagged = await isMarked(libDoc, catalog);
@@ -755,6 +792,16 @@ export async function extractTables(
   pages?: string,
 ): Promise<TablesExtractionResult> {
   const { doc: libDoc, scope } = await openPdf(filePath);
+  // 🔴 「表が 0 個」と「表を見に行けなかった」を同じ 0 で言わない（#39）。
+  if (lockedOut(scope)) {
+    return {
+      isTagged: null,
+      tables: null,
+      totalTables: null,
+      pagesScanned: 0,
+      note: STRUCT_TREE_LOCKED_NOTE,
+    };
+  }
 
   const catalog = asDict(await libDoc.getCatalog().catch(() => null));
   const isTagged = await isMarked(libDoc, catalog);

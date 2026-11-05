@@ -402,11 +402,18 @@ export interface StructuredTextResult {
 
 /** inspect_tags output */
 export interface TagsAnalysis {
-  isTagged: boolean;
+  /**
+   * 🔴 `null` は false ではない。false は「タグが無いと観測した」、`null` は
+   * 「構造木を読めなかった」（鍵を導けない暗号化文書。#39）で、理由は `note` にある。
+   * 数える項目も同じく、読めなかったときは 0 ではなく `null`。
+   */
+  isTagged: boolean | null;
   rootTag: TagNode | null;
-  maxDepth: number;
-  totalElements: number;
-  roleCounts: Record<string, number>;
+  maxDepth: number | null;
+  totalElements: number | null;
+  roleCounts: Record<string, number> | null;
+  /** Why the structure tree could not be read, when `isTagged` is null. */
+  note?: string;
 }
 
 /** Font information */
@@ -470,12 +477,16 @@ export interface ExtractedTable {
 
 /** Output of `extract_tables`. */
 export interface TablesExtractionResult {
-  /** Whether the PDF claims to be tagged (`/MarkInfo /Marked true`). */
-  isTagged: boolean;
-  /** All tables extracted from the requested pages. */
-  tables: ExtractedTable[];
-  /** Total number of tables across `pagesScanned`. */
-  totalTables: number;
+  /**
+   * Whether the PDF claims to be tagged (`/MarkInfo /Marked true`).
+   * `null` when the structure tree could not be read (an encrypted document whose
+   * key cannot be derived, #39) — not the same answer as `false`.
+   */
+  isTagged: boolean | null;
+  /** All tables extracted from the requested pages. `null` when the structure tree could not be read. */
+  tables: ExtractedTable[] | null;
+  /** Total number of tables across `pagesScanned`. `null` when the structure tree could not be read. */
+  totalTables: number | null;
   /** Number of pages traversed (subject to the `pages` filter). */
   pagesScanned: number;
   /**

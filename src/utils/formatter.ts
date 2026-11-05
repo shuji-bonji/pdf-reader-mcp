@@ -284,9 +284,19 @@ export function formatStructureMarkdown(analysis: StructureAnalysis): string {
 export function formatTagsMarkdown(analysis: TagsAnalysis): string {
   const lines: string[] = ['# Tagged PDF Analysis', ''];
 
+  if (analysis.isTagged === null) {
+    // 🔴 「Tagged: No」と書かない。読めなかっただけである（#39）。
+    lines.push(
+      '- **Tagged**: not read',
+      '',
+      `> ${analysis.note ?? 'The structure tree could not be read.'}`,
+    );
+    return lines.join('\n');
+  }
+
   lines.push(`- **Tagged**: ${analysis.isTagged ? 'Yes' : 'No'}`);
 
-  if (!analysis.isTagged || !analysis.rootTag) {
+  if (!analysis.isTagged || !analysis.rootTag || analysis.roleCounts === null) {
     lines.push('', 'This PDF is not tagged. No structure tree available.');
     return lines.join('\n');
   }
@@ -618,6 +628,12 @@ export function formatCompareStructureMarkdown(result: StructureComparison): str
  */
 export function formatTablesMarkdown(result: TablesExtractionResult): string {
   const lines: string[] = ['# Extracted Tables', ''];
+  if (result.isTagged === null || result.tables === null) {
+    // 🔴 「Tagged: No」「No tables were extracted」と書かない（#39）。
+    lines.push('- **Tagged**: not read', '- **Tables Found**: not read');
+    if (result.note) lines.push('', '## Note', '', `> ${result.note}`);
+    return lines.join('\n');
+  }
   lines.push(`- **Tagged**: ${result.isTagged ? 'Yes' : 'No'}`);
   lines.push(`- **Pages Scanned**: ${result.pagesScanned}`);
   lines.push(`- **Tables Found**: ${result.totalTables}`);

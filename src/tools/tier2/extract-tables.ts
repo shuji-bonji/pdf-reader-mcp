@@ -46,6 +46,9 @@ Returns:
 
 Limitations:
   - Untagged PDFs return an empty result and a \`note\`.
+  - An encrypted PDF whose key cannot be derived from the empty user password returns
+    \`isTagged\`, \`tables\` and \`totalTables\` as \`null\` with a \`note\`: the structure
+    tree could not be read, which is not the same answer as "not tagged".
   - colspan/rowspan are not honoured (cells are listed in source order).
   - Nested tables are not emitted separately (their text appears in the outer cell).
 

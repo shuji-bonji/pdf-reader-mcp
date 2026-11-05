@@ -21,6 +21,7 @@ Args:
 
 Returns:
   Whether the PDF is tagged, the structure tree hierarchy with roles, max nesting depth, total element count, and role distribution (e.g., Document, P, H1, Table, Figure).
+  For an encrypted PDF whose key cannot be derived from the empty user password, isTagged and the counts are null and a note says why: the structure tree could not be read, which is not the same answer as "not tagged".
 
 Examples:
   - Check if a PDF is tagged for accessibility (PDF/UA)
