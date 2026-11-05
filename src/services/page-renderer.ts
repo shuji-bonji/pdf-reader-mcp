@@ -38,6 +38,7 @@
 
 import { Worker } from 'node:worker_threads';
 import { DEFAULT_IMAGE_QUALITY, MAX_IMAGE_PIXELS, MAX_IMAGE_RESPONSE_BYTES } from '../constants.js';
+import { PdfReaderError } from '../utils/error-handler.js';
 import { readPdfFile, resolvePageNumbers } from '../utils/pdf-helpers.js';
 import { encodeJpeg, encodePng } from './image-encoder.js';
 import { downscale, type Samples } from './image-resampler.js';
@@ -147,6 +148,23 @@ export async function rendererAvailable(): Promise<boolean> {
   return (await loadPdfium()) !== null;
 }
 
+/**
+ * 描画の部品が読み込めないときのエラー。§2.3 の形で返す（SPEC-READER-COMMON-ERRORS-001・002）。
+ * 0.18.1 までは `RENDERER_MISSING_MESSAGE` を平文のまま返していた。
+ * `retryable` は true（部品を入れれば同じプロセスで通る。SPEC-READER-RENDER-PAGE-001）。
+ */
+export function rendererNotAvailableError(): PdfReaderError {
+  return new PdfReaderError(
+    RENDERER_MISSING_MESSAGE,
+    'RENDERER_NOT_AVAILABLE',
+    'This server retries loading the renderer on every call, so after installing it, call ' +
+      'render_page again without restarting.',
+    'RENDERER_NOT_AVAILABLE',
+    undefined,
+    { cause: 'optional dependency @hyzyla/pdfium could not be loaded' },
+  );
+}
+
 export const RENDERER_MISSING_MESSAGE =
   'render_page needs the optional dependency @hyzyla/pdfium (PDFium compiled to ' +
   'WebAssembly), which is not installed here. Install it next to this server — ' +
@@ -177,7 +195,7 @@ export async function renderPages(
   pages: string,
   options: RenderOptions = {},
 ): Promise<RenderResult> {
-  if (!(await rendererAvailable())) throw new Error(RENDERER_MISSING_MESSAGE);
+  if (!(await rendererAvailable())) throw rendererNotAvailableError();
 
   const format = options.format ?? 'png';
   const quality = options.quality ?? DEFAULT_IMAGE_QUALITY;

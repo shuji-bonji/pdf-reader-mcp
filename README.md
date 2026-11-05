@@ -421,31 +421,35 @@ On error, every tool returns `isError: true` and the JSON-stringified `LawServic
 {
   "error": "The file does not appear to be a valid PDF.",
   "code": "INVALID_PDF",
-  "hint": "ファイルが破損していないか確認してください。",
+  "retryable": false,
+  "hint": "The file breaks a structural rule of ISO 32000 (for example, it does not begin with %PDF- (§7.5.2), or it does not end with startxref and %%EOF (§7.5.5)), so it cannot be read as written. This is a finding about the file, not a failure of this server.",
   "next_actions": [
     {
       "action": "inspect_structure",
-      "reason": "PDF が壊れている可能性があります。Catalog / Pages 等の構造を確認してください"
+      "reason": "Look at the catalog and the page tree to see where the file stops following the specification."
     }
   ],
-  "detail": { "cause": "Invalid PDF structure" }
+  "detail": { "cause": "The PDF file is empty, i.e. its size is zero bytes." }
 }
 ```
 
+Every error carries `error` (an English sentence), `code` and `retryable`; `hint`, `next_actions` and `detail` are optional, and nothing else appears at the top level (PDF family contract, pdf-agent-stack `docs/specs/06` §2.3, since v0.19.0). `retryable` is fixed per code: it says whether changing the arguments, flags or environment could make the same reading of the same document succeed. The values of `next_actions[].action` are stable — a Skill may branch on them.
+
 ### Codes used by pdf-reader-mcp
 
-| code | 用途 |
-|---|---|
-| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 |
-| `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) |
-| `INVALID_PDF` | PDF として不正・破損 |
-| `ENCRYPTED_PDF` | 暗号化 PDF (現状未対応) |
-| `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 |
-| `FILE_TOO_LARGE` | 50MB 上限超過 (pdf-reader 固有) |
-| `SOURCE_API_ERROR` | URL fetch の HTTP エラー (4xx/5xx) |
-| `SOURCE_TIMEOUT` | リモート取得タイムアウト |
-| `SOURCE_UNAVAILABLE` | DNS / 接続失敗 |
-| `INTERNAL_ERROR` | パーミッション拒否を含むその他バグ |
+| code | When | `retryable` |
+|---|---|---|
+| `INVALID_ARGUMENT` | A path, URL or page range the caller passed is wrong | `true` |
+| `DOC_NOT_FOUND` | No file at the path (ENOENT) | `false` |
+| `INVALID_PDF` | The file breaks a structural rule of ISO 32000 — empty, not a PDF, or cut short. A finding about the file, not a failure of this server | `false` |
+| `ENCRYPTED_PDF` | The file encryption key cannot be derived from the empty user password. This server takes no password; pass a decrypted copy | `false` |
+| `UNSUPPORTED_PDF_FEATURE` | A PDF feature this server does not handle | `false` |
+| `FILE_TOO_LARGE` | Over the 50 MB limit | `false` |
+| `SOURCE_API_ERROR` | `read_url`: the HTTP response was not a success (4xx/5xx) | `false` |
+| `SOURCE_TIMEOUT` | `read_url`: the request timed out | `true` |
+| `SOURCE_UNAVAILABLE` | `read_url`: DNS or connection failure | `true` |
+| `RENDERER_NOT_AVAILABLE` | `render_page`: the optional `@hyzyla/pdfium` is not installed. Install it and call again; no restart is needed | `true` |
+| `INTERNAL_ERROR` | A failure inside this server | `false` |
 
 ### Migration note (v0.5.x → v0.6.0)
 

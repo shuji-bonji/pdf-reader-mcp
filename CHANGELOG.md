@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Target version: 0.19.0 (the `code` of some errors changes, and a reader-specific code is added).
+Every error now follows the PDF family contract (pdf-agent-stack `docs/specs/06` §2.3,
+pdf-agent-stack#48), pinned by the new common capability `openspec/specs/common-errors`
+(SPEC-READER-COMMON-ERRORS-001..006).
+
+### Changed
+
+- **Every error carries `retryable`** (#44). Its value is fixed per `code` (`RETRYABLE` in
+  `src/errors.ts`), so the place that throws can no longer choose it: `true` for
+  `INVALID_ARGUMENT`, `SOURCE_TIMEOUT`, `SOURCE_UNAVAILABLE` and `RENDERER_NOT_AVAILABLE`;
+  `false` for `DOC_NOT_FOUND`, `INVALID_PDF`, `ENCRYPTED_PDF`, `UNSUPPORTED_PDF_FEATURE`,
+  `FILE_TOO_LARGE`, `SOURCE_API_ERROR` and `INTERNAL_ERROR`. `DOC_NOT_FOUND` is `false` to match
+  pdf-verify-mcp 0.33.0. `ENCRYPTED_PDF` is `false` here (verify says `true`) because this server
+  takes no password. Until now only `SOURCE_UNAVAILABLE` and `SOURCE_TIMEOUT` carried it, so a
+  receiver could not tell whether to retry. The field is required in the `LawServiceError` type.
+- **`hint` and `next_actions[].reason` are English** (#43, F-10). One response used to switch
+  language: `error` was English, `hint` and `reason` Japanese. The values of
+  `next_actions[].action` and `example` do not change, except below.
+- **`SOURCE_API_ERROR` (`read_url` got a non-success HTTP status) suggests `verify_url` instead
+  of `retry_later`**, to agree with `retryable: false`.
+- **The `INVALID_PDF` hint says that this is a finding about the file, not a failure of this
+  server**, and names the clauses (§7.5.2 header, §7.5.5 trailer).
+
+### Fixed
+
+- **An empty file, a file that is not a PDF, or a PDF cut short was reported as
+  `INTERNAL_ERROR`** — a failure of this server — **by up to 9 tools** (#40, F-05, F-06). An empty
+  file gave `INTERNAL_ERROR` from `get_page_count`, `get_metadata`, `read_text`, `search_text`,
+  `read_images`, `render_page`, `summarize`, `inspect_annotations` and `compare_structure`;
+  `render_page` gave it for every unreadable file. Cause: the text tools' PDF library throws
+  `InvalidPDFException` ("The PDF file is empty, i.e. its size is zero bytes."), and the
+  renderer throws a plain `Error` ("File not in PDF format or corrupted"); neither message
+  matched any branch of the classifier, so both fell through to `INTERNAL_ERROR`, with no hint
+  and no next action. Exceptions are now classified by name first, and the renderer's messages
+  are recognised. All 17 tools that take a file now answer `INVALID_PDF` for each of the three
+  inputs.
+- **The encrypted-document text told the caller to supply a password this server does not
+  accept** (#43, F-07). The `hint` said a user password was needed, and `locate_objects` said
+  "Supply the user password." No reader tool has a `password` argument. Both now say that
+  pdf-reader-mcp takes no password and that a decrypted copy of the file can be read, and that
+  pdf-verify-mcp's `password` argument verifies the document without extracting its content.
+- **`render_page` without the optional `@hyzyla/pdfium` answered in plain text**, not the JSON
+  every other error uses. It now returns `code: "RENDERER_NOT_AVAILABLE"`, `retryable: true`,
+  with the same message as `error`. This is the only reader-specific code.
+
 ## [0.18.1] - 2026-11-03
 
 ### Changed

@@ -21,7 +21,10 @@
  * - PDF コンテンツ: `INVALID_PDF` / `ENCRYPTED_PDF` / `UNSUPPORTED_PDF_FEATURE`
  * - 外部ソース由来: `SOURCE_API_ERROR` / `SOURCE_TIMEOUT` / `SOURCE_UNAVAILABLE`
  * - PDF 固有: `FILE_TOO_LARGE` (50MB 制限超過)
+ * - reader 固有: `RENDERER_NOT_AVAILABLE`（render_page の描画の部品が読み込めない）
  * - システム: `INTERNAL_ERROR`
+ *
+ * 共通語彙と同じ意味の別名を作らない（pdf-agent-stack docs/specs/06 §2.3）。
  */
 export type LawErrorCode =
   // 引数・入力 (クライアント責任)
@@ -38,6 +41,7 @@ export type LawErrorCode =
   | 'SOURCE_UNAVAILABLE'
   // pdf-reader-mcp 固有
   | 'FILE_TOO_LARGE'
+  | 'RENDERER_NOT_AVAILABLE'
   // システム
   | 'INTERNAL_ERROR';
 
@@ -66,8 +70,11 @@ export interface LawServiceError {
   hint?: string;
   /** LLM が次に呼ぶべき tool / 取るべき手段の候補 */
   next_actions?: NextAction[];
-  /** 一時的エラーかどうか (true なら時間をおいて再試行可) */
-  retryable?: boolean;
+  /**
+   * 引数・フラグ・環境を変えれば、同じ文書についての同じ読み取りが成功しうるか。
+   * 値は `code` ごとに 1 つ（`RETRYABLE`）。SPEC-READER-COMMON-ERRORS-004
+   */
+  retryable: boolean;
   /** 元のエラー詳細 (debug 用) */
   detail?: {
     status?: number;
@@ -77,8 +84,35 @@ export interface LawServiceError {
 }
 
 /**
+ * `retryable` の値。**code ごとに 1 つ**で、エラーを作る箇所では選ばせない
+ * （同じ code に 2 つの値があると、受け側は code で分岐できない）。
+ *
+ * 決め方は verify 0.33.0 と同じ「同じ文書についての同じ読み取りが成功しうるか」。
+ * - `DOC_NOT_FOUND` は false（verify と §2.3 の例に合わせた。2026-11-05 決定）
+ * - `ENCRYPTED_PDF` は false（reader には password 引数が無い。verify は true）
+ * - `SOURCE_API_ERROR` は false（HTTP の失敗の多くは URL の誤り。2026-11-05 決定）
+ *
+ * `Record` なので、code を足して値を書き忘れると型検査で落ちる。
+ * SPEC-READER-COMMON-ERRORS-004
+ */
+export const RETRYABLE: Readonly<Record<LawErrorCode, boolean>> = {
+  INVALID_ARGUMENT: true,
+  SOURCE_TIMEOUT: true,
+  SOURCE_UNAVAILABLE: true,
+  RENDERER_NOT_AVAILABLE: true,
+  DOC_NOT_FOUND: false,
+  INVALID_PDF: false,
+  ENCRYPTED_PDF: false,
+  UNSUPPORTED_PDF_FEATURE: false,
+  FILE_TOO_LARGE: false,
+  SOURCE_API_ERROR: false,
+  INTERNAL_ERROR: false,
+};
+
+/**
  * エラーレスポンスを構築するヘルパー。
- * 必須フィールド (error, code) と任意フィールドを安全に組み立てる。
+ * 必須フィールド (error, code, retryable) と任意フィールドを安全に組み立てる。
+ * `retryable` は `RETRYABLE` から引く。
  */
 export function makeError(
   code: LawErrorCode,
@@ -86,16 +120,14 @@ export function makeError(
   options: {
     hint?: string;
     next_actions?: NextAction[];
-    retryable?: boolean;
     detail?: LawServiceError['detail'];
   } = {},
 ): LawServiceError {
-  const err: LawServiceError = { error: message, code };
+  const err: LawServiceError = { error: message, code, retryable: RETRYABLE[code] };
   if (options.hint) err.hint = options.hint;
   if (options.next_actions && options.next_actions.length > 0) {
     err.next_actions = options.next_actions;
   }
-  if (options.retryable !== undefined) err.retryable = options.retryable;
   if (options.detail) err.detail = options.detail;
   return err;
 }
@@ -115,34 +147,38 @@ export function isLawServiceError(value: unknown): value is LawServiceError {
 /**
  * よく使う next_actions のプリセット。
  * pdf-reader-mcp 固有の tool 名を含む。
+ *
+ * 🔴 `action` と `example` は受け側の Skill が分岐と再試行に使う。値を変えない
+ * （SPEC-READER-COMMON-ERRORS-005）。`reason` は英語で書く（§2.3・F-10）。
  */
 export const NEXT_ACTIONS = {
   checkFilePath: (filePath?: string): NextAction => ({
     action: 'verify_file_path',
-    reason: 'ファイルパスが正しいか、絶対パスで指定されているか確認してください',
+    reason: 'Check that the file path is correct and absolute, and that the file exists.',
     example: filePath ? { file_path: filePath } : undefined,
   }),
   useGetPageCount: (filePath?: string): NextAction => ({
     action: 'get_page_count',
-    reason: '総ページ数を確認してから pages を指定してください',
+    reason: 'Check the total page count, then pass pages within it.',
     example: filePath ? { file_path: filePath } : undefined,
   }),
   useInspectStructure: (filePath?: string): NextAction => ({
     action: 'inspect_structure',
-    reason: 'PDF が壊れている可能性があります。Catalog / Pages 等の構造を確認してください',
+    reason:
+      'Look at the catalog and the page tree to see where the file stops following the specification.',
     example: filePath ? { file_path: filePath } : undefined,
   }),
   splitPdf: (): NextAction => ({
     action: 'split_pdf',
-    reason: 'ファイルサイズが 50MB を超えています。分割してから再試行してください',
+    reason: 'The file is over the 50 MB limit. Split it, then call again with a part.',
   }),
   retryLater: (): NextAction => ({
     action: 'retry_later',
-    reason: '一時的なネットワークエラーの可能性があります。30秒〜数分後に再試行してください',
+    reason: 'This may be a temporary network failure. Try again in 30 seconds to a few minutes.',
   }),
   checkUrl: (url?: string): NextAction => ({
     action: 'verify_url',
-    reason: 'URL が正しいか・HTTP/HTTPS であるか確認してください',
+    reason: 'Check that the URL is correct, uses HTTP or HTTPS, and points to a PDF.',
     example: url ? { url } : undefined,
   }),
 } as const;

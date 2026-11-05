@@ -331,12 +331,15 @@ function notFoundReason(
   }
   // 🔴 ライブラリの文面をそのまま出さない。「parsePdf で開け」はこのツールの
   // 利用者にできることではない（ライブラリの内側の話である）。
+  // 🔴 同じ理由で「パスワードを渡せ」とも書かない。reader のツールは password を
+  // 受け取らない（#43・F-07。SPEC-READER-COMMON-ERRORS-006）。
   if (scope.encrypted) {
     return (
       'The cross-reference table names this object, but the file encryption key could not be ' +
-      'derived (ISO 32000-2 §7.6.4.3.2), so no indirect object was read. Numbers and names are ' +
-      'not encrypted (§7.6.2), but they cannot be reached without opening the document. ' +
-      'Supply the user password. This is not an object freed by a later revision.'
+      'derived from the empty user password (ISO 32000-2 §7.6.4.3.2), so no indirect object ' +
+      'was read. Numbers and names are not encrypted (§7.6.2), but they cannot be reached ' +
+      'without opening the document. pdf-reader-mcp does not take a password; pass a ' +
+      'decrypted copy of the file instead. This is not an object freed by a later revision.'
     );
   }
   return (

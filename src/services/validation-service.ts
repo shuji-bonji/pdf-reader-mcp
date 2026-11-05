@@ -62,13 +62,19 @@ export async function compareStructure(
     const parts: string[] = [];
     if (!a.ok) parts.push(`file_path_1 (${filePath1}): ${a.outcome.code}: ${a.outcome.reason}`);
     if (!b.ok) parts.push(`file_path_2 (${filePath2}): ${b.outcome.code}: ${b.outcome.reason}`);
+    // 最上位の code と hint は、先に名指しした（file_path_1 を優先する）ほうのもの。
+    // hint は英語で書く（SPEC-READER-COMMON-ERRORS-005）。読めなかった理由の hint
+    // （INVALID_PDF なら「文書についての所見」）をそのまま後ろに続ける。
+    const failed = !a.ok ? a : !b.ok ? b : undefined;
+    const which =
+      !a.ok && !b.ok
+        ? 'Neither file could be read.'
+        : `Only ${!a.ok ? 'file_path_1' : 'file_path_2'} could not be read; the other file was read.`;
     throw new PdfReaderError(
       `The comparison needs both files. ${parts.join(' / ')}`,
       'INVALID_PDF',
-      !a.ok && !b.ok
-        ? 'どちらのファイルも読めませんでした。'
-        : `読めなかったのは ${!a.ok ? 'file_path_1' : 'file_path_2'} のほうです。もう一方は読めています。`,
-      !a.ok ? a.outcome.code : !b.ok ? b.outcome.code : 'INVALID_PDF',
+      failed?.outcome.hint ? `${which} ${failed.outcome.hint}` : which,
+      failed?.outcome.code ?? 'INVALID_PDF',
     );
   }
 

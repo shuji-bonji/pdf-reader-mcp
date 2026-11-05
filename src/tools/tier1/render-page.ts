@@ -6,8 +6,8 @@ import { MAX_IMAGE_RESPONSE_BYTES } from '../../constants.js';
 import { type RenderPageInput, RenderPageSchema } from '../../schemas/tier1.js';
 import {
   DEFAULT_RENDER_DPI,
-  RENDERER_MISSING_MESSAGE,
   rendererAvailable,
+  rendererNotAvailableError,
   renderPages,
 } from '../../services/page-renderer.js';
 import { handleStructuredError } from '../../utils/error-handler.js';
@@ -52,8 +52,10 @@ Examples:
     async (params: RenderPageInput) => {
       try {
         if (!(await rendererAvailable())) {
+          // 平文ではなく §2.3 の形で返す（SPEC-READER-COMMON-ERRORS-001・002）
+          const err = handleStructuredError(rendererNotAvailableError());
           return {
-            content: [{ type: 'text' as const, text: RENDERER_MISSING_MESSAGE }],
+            content: [{ type: 'text' as const, text: JSON.stringify(err, null, 2) }],
             isError: true,
           };
         }

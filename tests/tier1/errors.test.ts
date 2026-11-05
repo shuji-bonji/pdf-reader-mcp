@@ -11,14 +11,14 @@ import { handleStructuredError, PdfReaderError } from '../../src/utils/error-han
 describe('makeError', () => {
   it('should create a minimal error with just code and message', () => {
     const err = makeError('INVALID_PDF', 'Bad PDF');
-    expect(err).toEqual({ error: 'Bad PDF', code: 'INVALID_PDF' });
+    // retryable は code から決まり、常に付く（SPEC-READER-COMMON-ERRORS-004）
+    expect(err).toEqual({ error: 'Bad PDF', code: 'INVALID_PDF', retryable: false });
   });
 
   it('should include optional fields when provided', () => {
     const err = makeError('SOURCE_TIMEOUT', 'timeout', {
       hint: 'try again',
       next_actions: [NEXT_ACTIONS.retryLater()],
-      retryable: true,
       detail: { url: 'https://example.com', cause: 'AbortError' },
     });
     expect(err.hint).toBe('try again');
@@ -98,7 +98,10 @@ describe('handleStructuredError - PdfReaderError mapping', () => {
   it('maps legacy FETCH_FAILED to SOURCE_API_ERROR', () => {
     const err = handleStructuredError(new PdfReaderError('HTTP 500', 'FETCH_FAILED'));
     expect(err.code).toBe('SOURCE_API_ERROR');
-    expect(err.next_actions?.[0].action).toBe('retry_later');
+    // SOURCE_API_ERROR は retryable: false なので、同じ URL への再試行は勧めない
+    // （2026-11-05 決定。SPEC-READER-COMMON-ERRORS-005）
+    expect(err.retryable).toBe(false);
+    expect(err.next_actions?.map((a) => a.action)).toEqual(['verify_url']);
   });
 
   it('maps unknown legacy code to INTERNAL_ERROR', () => {
@@ -113,7 +116,6 @@ describe('handleStructuredError - PdfReaderError mapping', () => {
       undefined,
       'ENCRYPTED_PDF',
       [NEXT_ACTIONS.retryLater()],
-      false,
       { url: 'https://x' },
     );
     const err = handleStructuredError(e);
@@ -165,6 +167,30 @@ describe('handleStructuredError - inference from generic Error', () => {
     const err = handleStructuredError(new Error('AbortError: signal is aborted'));
     expect(err.code).toBe('SOURCE_TIMEOUT');
     expect(err.retryable).toBe(true);
+  });
+
+  it('classifies InvalidPDFException by its name, whatever its message (#40)', () => {
+    const e = new Error('The PDF file is empty, i.e. its size is zero bytes.');
+    e.name = 'InvalidPDFException';
+    expect(handleStructuredError(e).code).toBe('INVALID_PDF');
+  });
+
+  it('classifies PasswordException by its name', () => {
+    const e = new Error('No password given');
+    e.name = 'PasswordException';
+    expect(handleStructuredError(e).code).toBe('ENCRYPTED_PDF');
+  });
+
+  it('classifies the renderer messages, which carry no name (#40)', () => {
+    expect(handleStructuredError(new Error('File not in PDF format or corrupted')).code).toBe(
+      'INVALID_PDF',
+    );
+    expect(handleStructuredError(new Error('Password required or incorrect password')).code).toBe(
+      'ENCRYPTED_PDF',
+    );
+    expect(handleStructuredError(new Error('Unsupported security scheme')).code).toBe(
+      'ENCRYPTED_PDF',
+    );
   });
 
   it('falls back to INTERNAL_ERROR for unrecognized Error', () => {

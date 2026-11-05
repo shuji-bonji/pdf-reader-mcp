@@ -413,31 +413,35 @@ pdf-reader-mcp/
 {
   "error": "The file does not appear to be a valid PDF.",
   "code": "INVALID_PDF",
-  "hint": "ファイルが破損していないか確認してください。",
+  "retryable": false,
+  "hint": "The file breaks a structural rule of ISO 32000 (for example, it does not begin with %PDF- (§7.5.2), or it does not end with startxref and %%EOF (§7.5.5)), so it cannot be read as written. This is a finding about the file, not a failure of this server.",
   "next_actions": [
     {
       "action": "inspect_structure",
-      "reason": "PDF が壊れている可能性があります。Catalog / Pages 等の構造を確認してください"
+      "reason": "Look at the catalog and the page tree to see where the file stops following the specification."
     }
   ],
-  "detail": { "cause": "Invalid PDF structure" }
+  "detail": { "cause": "The PDF file is empty, i.e. its size is zero bytes." }
 }
 ```
 
+どのエラーも `error`（英語の文）・`code`・`retryable` を持ちます。`hint`・`next_actions`・`detail` は任意で、最上位にこれ以外の項目は置きません（PDF family の規約 pdf-agent-stack `docs/specs/06` §2.3。v0.19.0 から）。`retryable` は code ごとに 1 つの値で、引数・フラグ・環境を変えれば同じ文書の同じ読み取りが成功しうるかを表します。`next_actions[].action` の値は変えないので、Skill はこれで分岐できます。
+
 ### 本 MCP で使用するコード
 
-| code | 用途 |
-|---|---|
-| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 |
-| `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) |
-| `INVALID_PDF` | PDF として不正・破損 |
-| `ENCRYPTED_PDF` | 暗号化 PDF (現状未対応) |
-| `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 |
-| `FILE_TOO_LARGE` | 50MB 上限超過 (pdf-reader 固有) |
-| `SOURCE_API_ERROR` | URL fetch の HTTP エラー (4xx/5xx) |
-| `SOURCE_TIMEOUT` | リモート取得タイムアウト |
-| `SOURCE_UNAVAILABLE` | DNS / 接続失敗 |
-| `INTERNAL_ERROR` | パーミッション拒否を含むその他バグ |
+| code | 用途 | `retryable` |
+|---|---|---|
+| `INVALID_ARGUMENT` | パス・URL・ページ範囲などクライアント側引数の不正 | `true` |
+| `DOC_NOT_FOUND` | ファイル未存在 (ENOENT) | `false` |
+| `INVALID_PDF` | ISO 32000 の構造の条文に反していて読めない（0 バイト・PDF でない・途中で切れた）。文書についての所見で、サーバーの故障ではない | `false` |
+| `ENCRYPTED_PDF` | 空の利用者パスワードから暗号鍵を導けない。本サーバーはパスワードを受け取らないので、復号したファイルを渡す | `false` |
+| `UNSUPPORTED_PDF_FEATURE` | サポート外の PDF 機能 | `false` |
+| `FILE_TOO_LARGE` | 50MB 上限超過 | `false` |
+| `SOURCE_API_ERROR` | `read_url` の HTTP エラー (4xx/5xx) | `false` |
+| `SOURCE_TIMEOUT` | `read_url` のタイムアウト | `true` |
+| `SOURCE_UNAVAILABLE` | `read_url` の DNS / 接続失敗 | `true` |
+| `RENDERER_NOT_AVAILABLE` | `render_page` の任意の部品 `@hyzyla/pdfium` が無い。入れてから再度呼べばよく、再起動は要らない | `true` |
+| `INTERNAL_ERROR` | サーバー内部の故障 | `false` |
 
 ### 移行ノート (v0.5.x → v0.6.0)
 

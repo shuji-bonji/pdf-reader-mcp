@@ -23,6 +23,8 @@ import {
  * v0.6.0 以降は `familyCode` (LawErrorCode) を直接指定して投げることで、
  * `handleStructuredError()` が family code をそのまま採用する。
  * `familyCode` 未指定時は `code` (legacy 文字列) と message から推定される。
+ *
+ * `retryable` は持たない。値は code から決まる（`RETRYABLE`・SPEC-READER-COMMON-ERRORS-004）。
  */
 export class PdfReaderError extends Error {
   constructor(
@@ -31,7 +33,6 @@ export class PdfReaderError extends Error {
     public readonly suggestion?: string,
     public readonly familyCode?: LawErrorCode,
     public readonly nextActions?: NextAction[],
-    public readonly retryable?: boolean,
     public readonly detail?: LawServiceError['detail'],
   ) {
     super(message);
@@ -60,6 +61,27 @@ function mapLegacyCodeToFamily(legacyCode: string): LawErrorCode {
       return 'SOURCE_API_ERROR';
     default:
       return 'INTERNAL_ERROR';
+  }
+}
+
+/**
+ * 文書を開く部品が投げた例外を、**名前**で family code に分ける（#40）。
+ *
+ * 文で分けると、部品の文言が 1 つ変わるだけで INTERNAL_ERROR（= この server の
+ * 落ち度）に落ちる。0.18.1 では 0 バイトのファイルで投げられる
+ * `InvalidPDFException`（文は "The PDF file is empty, i.e. its size is zero bytes."）が
+ * どの文の分岐にも当たらず、9 ツールが INTERNAL_ERROR を返していた。
+ *
+ * 名前を持たない例外（描画の部品が投げる素の Error）は、下の文の照合で分ける。
+ */
+function inferFamilyCodeFromName(error: Error): LawErrorCode | undefined {
+  switch (error.name) {
+    case 'InvalidPDFException':
+      return 'INVALID_PDF';
+    case 'PasswordException':
+      return 'ENCRYPTED_PDF';
+    default:
+      return undefined;
   }
 }
 
@@ -97,6 +119,16 @@ function inferFamilyCodeFromMessage(message: string): LawErrorCode | undefined {
     // 暗号は別の口へ（下の分岐より先にここへ来るので、ここで分ける）
     if (message.includes('encrypted PDF') || message.includes('§7.6')) return 'ENCRYPTED_PDF';
     return 'INVALID_PDF';
+  }
+  // render_page の描画の部品（PDFium）が投げる文。部品は素の Error を投げ、
+  // 名前で分けられない。FPDF_GetLastError の値ごとに 1 つの文が決まっている
+  // （3 = FORMAT、4 = PASSWORD、5 = SECURITY）。描画は worker で動き、
+  // 例外は文だけが渡ってくる。
+  if (message.includes('File not in PDF format or corrupted')) {
+    return 'INVALID_PDF';
+  }
+  if (message.includes('Unsupported security scheme')) {
+    return 'ENCRYPTED_PDF';
   }
   if (message.includes('password') || message.includes('encrypted')) {
     return 'ENCRYPTED_PDF';
@@ -143,7 +175,9 @@ function defaultNextActionsForLegacy(legacyCode: string): NextAction[] | undefin
     case 'FILE_TOO_LARGE':
       return [NEXT_ACTIONS.splitPdf()];
     case 'FETCH_FAILED':
-      return [NEXT_ACTIONS.retryLater()];
+      // SOURCE_API_ERROR は retryable: false（多くは URL の誤り）。
+      // 同じ URL への再試行を勧めない（SPEC-READER-COMMON-ERRORS-005）。
+      return [NEXT_ACTIONS.checkUrl()];
     default:
       return undefined;
   }
@@ -164,14 +198,13 @@ export function handleStructuredError(error: unknown): LawServiceError {
     return makeError(code, error.message, {
       hint: error.suggestion,
       next_actions,
-      retryable: error.retryable,
       detail: error.detail ?? { cause: `PdfReaderError(${error.code})` },
     });
   }
 
   // 通常の Error: メッセージから推定
   if (error instanceof Error) {
-    const inferred = inferFamilyCodeFromMessage(error.message);
+    const inferred = inferFamilyCodeFromName(error) ?? inferFamilyCodeFromMessage(error.message);
     if (inferred) {
       // 推定できた場合: 適切なヒント / next_actions を付与
       return buildInferredError(inferred, error.message, error);
@@ -187,6 +220,31 @@ export function handleStructuredError(error: unknown): LawServiceError {
 }
 
 /**
+ * `INVALID_PDF` の hint。**文書についての所見であって、この server の故障ではない**
+ * ことを書く（pdf-agent-stack docs/specs/06 §2.3。SPEC-READER-COMMON-ERRORS-003）。
+ * 受け側はこれを「未実施」に入れない。
+ */
+export const INVALID_PDF_HINT =
+  'The file breaks a structural rule of ISO 32000 (for example, it does not begin with ' +
+  '%PDF- (§7.5.2), or it does not end with startxref and %%EOF (§7.5.5)), so it cannot be ' +
+  'read as written. This is a finding about the file, not a failure of this server.';
+
+/**
+ * 鍵を導けない暗号化文書の hint（SPEC-READER-COMMON-ERRORS-006）。
+ *
+ * 🔴 reader で取れない手を案内しない。reader のツールは password を受け取らない。
+ * 🔴 「暗号化をサポートしていない」とも書かない。空の利用者パスワードの文書は
+ * 復号して読んでいる。読めないのは鍵が導けなかったからである。
+ */
+export const ENCRYPTED_PDF_HINT =
+  'The file encryption key could not be derived from the empty user password ' +
+  '(ISO 32000-2 §7.6.4.3.2), so no indirect object in the file could be read — not even ' +
+  'the page count. pdf-reader-mcp does not take a password. To read this document, ' +
+  'decrypt it with a tool that has the password and pass the decrypted file. ' +
+  "(pdf-verify-mcp's verify_signatures, validate_conformance and evaluate_policy accept " +
+  'a password, but they verify the document; they do not extract its content.)';
+
+/**
  * 推定 family code に応じたヒント / next_actions を組み立てる。
  */
 function buildInferredError(
@@ -197,7 +255,7 @@ function buildInferredError(
   switch (code) {
     case 'DOC_NOT_FOUND':
       return makeError(code, 'File not found.', {
-        hint: 'ファイルパスが正しいか、ファイルが存在するか確認してください。',
+        hint: 'Check that the path is correct and that the file exists.',
         next_actions: [NEXT_ACTIONS.checkFilePath()],
         detail: { cause: original.message },
       });
@@ -205,14 +263,14 @@ function buildInferredError(
       // EACCES の場合はヒントを差し替える
       if (rawMessage.includes('EACCES') || rawMessage.includes('permission denied')) {
         return makeError(code, 'Permission denied.', {
-          hint: 'ファイルパーミッションを確認してください。',
+          hint: 'Check that this server is allowed to read the file.',
           detail: { cause: original.message },
         });
       }
       return makeError(code, rawMessage, { detail: { cause: original.name } });
     case 'INVALID_PDF':
       return makeError(code, 'The file does not appear to be a valid PDF.', {
-        hint: 'ファイルが破損していないか確認してください。',
+        hint: INVALID_PDF_HINT,
         next_actions: [NEXT_ACTIONS.useInspectStructure()],
         // 🔴 条文を名指しする文面はここに載せる。`original.name`（"ParseError"）に
         // 畳むと、どの条文に反しているのか・ファイルのどこなのかが消える。
@@ -231,31 +289,29 @@ function buildInferredError(
           // 続いていない —— 鍵が導けないと間接オブジェクトを 1 つも読めないので
           // （ADR-0008）、ページ数も分からない。読めていないことを
           // 「続けています」と書くのは、観測していないことに観測の顔をさせる。
-          hint:
-            '利用者パスワードが必要です。ISO 32000-2 §7.6.4.3.2 のとおり、' +
-            'ファイル暗号鍵は利用者パスワードから導くため、パスワードが無いと' +
-            'ファイル内の間接オブジェクトを 1 つも読めません（ページ数も含めて）。',
+          // 🔴 2026-11-05（#43・F-07）に文面を直した。それまでは「利用者パスワードが
+          // 必要です」と書いていたが、reader のツールに password 引数は無い。
+          // reader で取れない手を案内しない。
+          hint: ENCRYPTED_PDF_HINT,
           detail: { cause: original.message },
         },
       );
     case 'FILE_TOO_LARGE':
       return makeError(code, 'File exceeds the 50MB size limit.', {
-        hint: 'PDF を分割してから再試行してください。',
+        hint: 'Split the PDF into smaller files, then call again with one of them.',
         next_actions: [NEXT_ACTIONS.splitPdf()],
         detail: { cause: original.message },
       });
     case 'SOURCE_UNAVAILABLE':
       return makeError(code, 'Failed to reach the remote host.', {
-        hint: 'URL のホストが応答していない、または DNS が解決できません。',
+        hint: 'The host did not answer, or its name could not be resolved.',
         next_actions: [NEXT_ACTIONS.checkUrl(), NEXT_ACTIONS.retryLater()],
-        retryable: true,
         detail: { cause: original.message },
       });
     case 'SOURCE_TIMEOUT':
       return makeError(code, 'Request to remote PDF timed out.', {
-        hint: 'ネットワークが遅いか、サーバーが応答しません。',
+        hint: 'The network is slow, or the remote server did not respond in time.',
         next_actions: [NEXT_ACTIONS.retryLater()],
-        retryable: true,
         detail: { cause: original.message },
       });
     default:
