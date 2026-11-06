@@ -23,6 +23,6 @@
 
 ## 4. 承認と取り込み（人が判断する）
 
-- [ ] 4.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
-- [ ] 4.2 マージの前に、同じ PR の中で `npx openspec archive nested-lists-as-elements --yes` を実行する
-- [ ] 4.3 `npx openspec validate --all && npx spec-ids check` が通る
+- [x] 4.1 人が `proposal.md` の front matter に `approved: YYYY-MM-DD` と `pr: N` を書く
+- [x] 4.2 マージの前に、同じ PR の中で `npx openspec archive nested-lists-as-elements --yes` を実行する
+- [x] 4.3 `npx openspec validate --all && npx spec-ids check` が通る
