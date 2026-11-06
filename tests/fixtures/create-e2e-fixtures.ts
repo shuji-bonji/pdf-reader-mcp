@@ -1823,6 +1823,132 @@ async function createCatalogFeaturesPdf(): Promise<void> {
   console.log('Created: catalog-features.pdf (outlines, OCG, embedded files, XMP, OpenAction, AA)');
 }
 
+/**
+ * Create nested-lists.pdf — two nested lists in the two places the standard allows (#52).
+ *
+ *  - Form A: the nested `L` is a child of the parent item's `LBody`. ISO 32000-1
+ *    §14.8.4.3.3 Table 336 (LBody "may … have other BLSEs, perhaps including nested
+ *    lists, as children"). pdf-writer-mcp 0.25.0 writes lists this way.
+ *  - Form B: the nested `L` is a direct child of the parent `L`, right after the item
+ *    it belongs to. ISO 32000-2 §14.8.4.8.2 ("shall be a direct child of its parent
+ *    L") and its example H.8.3.
+ *
+ * Every label is "•", so a label that leaks into a `text` is visible at once.
+ */
+async function createNestedListsPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const page = doc.addPage([595, 842]);
+
+  let mcid = 0;
+  let y = 790;
+  /** Draw one line inside `/Tag <</MCID n>> BDC … EMC` and return its MCID. */
+  const line = (tag: string, text: string, x: number, f = font, size = 12): number => {
+    const id = mcid++;
+    page.pushOperators(
+      PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [`/${tag}`, `<</MCID ${id}>>`]),
+    );
+    page.drawText(text, { x, y, size, font: f });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
+    return id;
+  };
+  const next = (gap = 18) => {
+    y -= gap;
+  };
+
+  const structRootRef = context.nextRef();
+  const docRef = context.nextRef();
+  const pg = page.ref;
+  const parentOf: Array<ReturnType<typeof context.nextRef>> = [];
+  type Ref = ReturnType<typeof context.nextRef>;
+
+  /** A leaf element owning one line of marked content. */
+  const leaf = (S: string, parent: Ref, text: string, x: number, f = font, size = 12): Ref => {
+    const r = context.nextRef();
+    const id = line(S, text, x, f, size);
+    parentOf[id] = r;
+    context.assign(r, context.obj({ Type: 'StructElem', S, P: parent, Pg: pg, K: id }));
+    return r;
+  };
+
+  /** `LI > (Lbl "•", LBody text)`; `extra` adds children after the LBody's own text. */
+  const item = (list: Ref, text: string, indent: number, extra?: (lbody: Ref) => Ref[]): Ref => {
+    const li = context.nextRef();
+    const lbl = leaf('Lbl', li, '•', indent);
+    const lbody = context.nextRef();
+    const id = line('LBody', text, indent + 12);
+    parentOf[id] = lbody;
+    next();
+    const kids = extra ? extra(lbody) : [];
+    context.assign(
+      lbody,
+      context.obj({ Type: 'StructElem', S: 'LBody', P: li, Pg: pg, K: [id, ...kids] as never }),
+    );
+    context.assign(
+      li,
+      context.obj({ Type: 'StructElem', S: 'LI', P: list, Pg: pg, K: [lbl, lbody] }),
+    );
+    return li;
+  };
+
+  // ── Form A: nested L inside the parent item's LBody ──
+  const hA = leaf('H1', docRef, 'Form A', 50, bold, 18);
+  next(26);
+  const listA = context.nextRef();
+  const a1 = item(listA, 'Parent one', 60, (lbody) => {
+    const nested = context.nextRef();
+    const n1 = item(nested, 'Nested one', 80);
+    const n2 = item(nested, 'Nested two', 80);
+    context.assign(nested, context.obj({ Type: 'StructElem', S: 'L', P: lbody, K: [n1, n2] }));
+    return [nested];
+  });
+  const a2 = item(listA, 'Parent two', 60);
+  context.assign(listA, context.obj({ Type: 'StructElem', S: 'L', P: docRef, K: [a1, a2] }));
+  next(14);
+
+  // ── Form B: nested L as a direct child of the parent L (ISO 32000-2 H.8.3) ──
+  const hB = leaf('H1', docRef, 'Form B', 50, bold, 18);
+  next(26);
+  const listB = context.nextRef();
+  const b1 = item(listB, 'Alpha', 60);
+  const nestedB = context.nextRef();
+  const b11 = item(nestedB, 'Alpha one', 80);
+  const b12 = item(nestedB, 'Alpha two', 80);
+  context.assign(nestedB, context.obj({ Type: 'StructElem', S: 'L', P: listB, K: [b11, b12] }));
+  const b2 = item(listB, 'Beta', 60);
+  context.assign(
+    listB,
+    context.obj({ Type: 'StructElem', S: 'L', P: docRef, K: [b1, nestedB, b2] }),
+  );
+
+  context.assign(
+    docRef,
+    context.obj({ Type: 'StructElem', S: 'Document', P: structRootRef, K: [hA, listA, hB, listB] }),
+  );
+
+  doc.catalog.set(PDFName.of('MarkInfo'), context.obj({ Marked: true }));
+  page.node.set(PDFName.of('StructParents'), context.obj(0));
+  const parentTree = context.obj({ Nums: [0, parentOf] });
+  context.assign(
+    structRootRef,
+    context.obj({
+      Type: 'StructTreeRoot',
+      K: [docRef],
+      ParentTree: context.register(parentTree),
+      ParentTreeNextKey: 1,
+    }),
+  );
+  doc.catalog.set(PDFName.of('StructTreeRoot'), structRootRef);
+  doc.setTitle('Nested Lists Test PDF');
+  doc.setProducer('pdf-reader-mcp test suite');
+  doc.setLanguage('en-US');
+
+  await writeFile(`${FIXTURES_DIR}/nested-lists.pdf`, await doc.save());
+  console.log('Created: nested-lists.pdf (nested L inside LBody, and nested L under L)');
+}
+
 async function main(): Promise<void> {
   // An optional argv narrows the run to one fixture, so adding a fixture does
   // not force regenerating (and re-committing) every existing one.
@@ -1844,6 +1970,7 @@ async function main(): Promise<void> {
     ['no-metadata', createNoMetadataPdf],
     ['corrupted', createCorruptedPdf],
     ['catalog-features', createCatalogFeaturesPdf],
+    ['nested-lists', createNestedListsPdf],
   ];
   const wanted = creators.filter(([name]) => !only || name === only);
   if (wanted.length === 0) {

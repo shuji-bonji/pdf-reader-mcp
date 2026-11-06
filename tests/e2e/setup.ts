@@ -87,6 +87,12 @@ export const FIXTURES = {
    * /OpenAction with a /Next JavaScript action, /AA.
    */
   catalogFeatures: resolve(FIXTURES_DIR, 'catalog-features.pdf'),
+  /**
+   * Nested lists in the two places the standard allows (#52): inside the parent
+   * item's LBody (ISO 32000-1 Table 336; pdf-writer-mcp 0.25.0), and as a direct
+   * child of the parent L (ISO 32000-2 §14.8.4.8.2, example H.8.3).
+   */
+  nestedLists: resolve(FIXTURES_DIR, 'nested-lists.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */
