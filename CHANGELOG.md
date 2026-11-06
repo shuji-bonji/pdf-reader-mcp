@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Proposed version: 0.22.0 (the maintainer decides; the output of `extract_structured_text`
+changes for documents with nested lists). OpenSpec change `nested-lists-as-elements`
+(SPEC-READER-EXTRACT-STRUCTURED-TEXT-003).
+
+### Fixed
+
+- **`extract_structured_text` folded a nested list into its parent item** (#52). A list
+  inside an item's `LBody` — the place ISO 32000-1 Table 336 gives it, and how
+  pdf-writer-mcp 0.25.0 writes nested lists — came back as part of the parent `LI`'s
+  `text`, labels included (`"Parent one • Nested one • Nested two"`), and its items were not
+  returned at all. The `LI` text took everything under the `LBody`, and the walk stopped at
+  the `LI`. The nested `L` and its `LI`s are now returned right after the parent item, one
+  level below it (the `LBody` is not returned, so it is not counted in `depth`), and the
+  parent's `text` leaves the nested list out. A nested `L` placed directly under the parent
+  `L` (ISO 32000-2 §14.8.4.8.2, example H.8.3) was already returned this way; it now has a
+  fixture. Lists without nesting are unchanged (compared on every fixture, JSON and
+  Markdown). The tool description says how nested lists are returned.
+
+Why the tests did not catch it: the only list fixture (`structured.pdf`) had no nesting, and
+the tool description's "Lbl is reported in label, not mixed into text" was only ever checked
+for the item's own label.
+
 ## [0.21.0] - 2026-11-06
 
 Proposed version: 0.21.0 (the maintainer decides; a `code` changes). OpenSpec changes

@@ -113,6 +113,34 @@ const CONTAINER_ROLES = new Set([
 /** `Lbl` is a list label ("•", "1."), not body text — reported separately. */
 const LABEL_ROLE = 'Lbl';
 
+/** A list. Nested under an item's LBody, it is emitted as its own elements (#52). */
+const LIST_ROLE = 'L';
+
+/**
+ * Lists nested under an item's body, in document order. Descends until it meets an
+ * `L` (an `LBody` may wrap one in a `Div`) and does not look inside the `L` itself.
+ *
+ * ISO 32000-1 §14.8.4.3.3 Table 336: an LBody "may either contain the content
+ * directly or have other BLSEs, perhaps including nested lists, as children";
+ * ISO 32000-2 §14.8.4.8.2 NOTE: "Lists can occur within the content of an LBody".
+ */
+function nestedListsOf(element: StructElement, into: StructElement[] = []): StructElement[] {
+  for (const child of element.children) {
+    if (child.role === LIST_ROLE) into.push(child);
+    else nestedListsOf(child, into);
+  }
+  return into;
+}
+
+/** Marked-content references of an element, leaving out every nested `L` subtree. */
+function contentRefsOutsideLists(element: StructElement, into: ContentRef[] = []): ContentRef[] {
+  into.push(...element.contentRefs);
+  for (const child of element.children) {
+    if (child.role !== LIST_ROLE) contentRefsOutsideLists(child, into);
+  }
+  return into;
+}
+
 /**
  * Assemble the text of an element from its marked content.
  *
@@ -130,11 +158,16 @@ const LABEL_ROLE = 'Lbl';
 function textOf(
   element: StructElement,
   idToText: Map<string, string>,
-  includeDescendants: boolean,
+  includeDescendants: boolean | 'outside-lists',
 ): string {
   if (element.actualText !== null) return element.actualText;
 
-  const refs = includeDescendants ? collectContentRefs(element) : element.contentRefs;
+  const refs =
+    includeDescendants === 'outside-lists'
+      ? contentRefsOutsideLists(element)
+      : includeDescendants
+        ? collectContentRefs(element)
+        : element.contentRefs;
 
   let assembled = '';
   let previousPage: number | undefined;
@@ -429,9 +462,15 @@ function flatten(
       if (labelText) entry.label = labelText;
     }
     // The LI's text is its LBody; emit it here so consumers get one entry per item.
+    // A list nested in the body is not the item's text: it is emitted after the item
+    // as elements of its own, so its labels stay in `label` (#52).
     const body = element.children.filter((c) => c.role !== LABEL_ROLE);
     if (body.length > 0) {
-      const text = tidy(body.map((b) => textOf(b, idToText, true)).join(''));
+      const text = tidy(
+        body
+          .map((b) => (b.role === LIST_ROLE ? '' : textOf(b, idToText, 'outside-lists')))
+          .join(''),
+      );
       entry.text = text === '' ? null : text;
     }
   }
@@ -448,7 +487,17 @@ function flatten(
   out.push(entry);
 
   // Table rows and LI bodies are already represented; don't emit them again.
-  if (isTable || element.role === 'LI') return;
+  if (isTable) return;
+  if (element.role === 'LI') {
+    // LBody itself is not emitted, so a nested list sits one level below its item.
+    const nested = element.children
+      .filter((c) => c.role !== LABEL_ROLE)
+      .flatMap((c) => (c.role === LIST_ROLE ? [c] : nestedListsOf(c)));
+    for (const list of nested) {
+      flatten(list, depth + 1, idToText, pageNumByObjNum, out, idToBox, pageBoxByNumber);
+    }
+    return;
+  }
 
   for (const child of element.children) {
     flatten(child, depth + 1, idToText, pageNumByObjNum, out, idToBox, pageBoxByNumber);
