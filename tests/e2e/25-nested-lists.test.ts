@@ -83,3 +83,77 @@ describe('SPEC-READER-EXTRACT-STRUCTURED-TEXT-003 入れ子のリストは親の
     expect(indentOf(nested)).toBeGreaterThan(indentOf(parent));
   });
 });
+
+// ─── #54: the item's pages / boxes point at what its text points at ──────────
+
+type Box = { page: number; rect: { x1: number; y1: number; x2: number; y2: number } };
+type Measured = { role: string; text: string | null; pages: number[]; boxes?: Box[] };
+
+/** The elements of a fixture with boxes, as `role` + `text` + `pages` + `boxes`. */
+async function measured(file: string): Promise<Measured[]> {
+  const result = await extractStructuredText(file, { includeBbox: true });
+  return (result.elements ?? []).map((e) => ({
+    role: e.role,
+    text: e.text,
+    pages: e.pages,
+    ...(e.boxes ? { boxes: e.boxes as Box[] } : {}),
+  }));
+}
+
+/** The element right after the LI whose text is `text` (the nested L, in these fixtures). */
+function itemAndNext(rows: Measured[], text: string): [Measured, Measured] {
+  const i = rows.findIndex((r) => r.role === 'LI' && r.text === text);
+  expect(i).toBeGreaterThanOrEqual(0);
+  return [rows[i], rows[i + 1]];
+}
+
+describe('SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 項目の pages と boxes は、入れ子のリストを含まない', () => {
+  it('SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 LBody の中の入れ子のリストを持つ項目の boxes は、入れ子の項目を覆わない', async () => {
+    const [parent, nested] = itemAndNext(await measured(FIXTURES.nestedLists), 'Parent one');
+    expect(nested.role).toBe('L');
+    expect(parent.boxes).toHaveLength(1);
+    expect(nested.boxes).toHaveLength(1);
+    const p = (parent.boxes as Box[])[0].rect;
+    const n = (nested.boxes as Box[])[0].rect;
+    // 項目の箱は入れ子のリストより上にあり、重ならない
+    expect(p.y1).toBeGreaterThan(n.y2);
+    // 記号（x = 60）は項目の範囲に入ったまま
+    expect(p.x1).toBeLessThanOrEqual(60.5);
+  });
+
+  it('SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 入れ子のリストの置き場所が違っても、項目の範囲の高さは同じ', async () => {
+    const rows = await measured(FIXTURES.nestedLists);
+    const [a] = itemAndNext(rows, 'Parent one');
+    const [b, bNested] = itemAndNext(rows, 'Alpha');
+    expect(bNested.role).toBe('L');
+    const ra = (a.boxes as Box[])[0].rect;
+    const rb = (b.boxes as Box[])[0].rect;
+    expect(ra.y2 - ra.y1).toBeCloseTo(rb.y2 - rb.y1, 3);
+    expect(rb.y1).toBeGreaterThan((bNested.boxes as Box[])[0].rect.y2);
+  });
+
+  it('SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 入れ子の項目が次のページにあっても、親の項目の pages に入らない', async () => {
+    const [parent, nested] = itemAndNext(
+      await measured(FIXTURES.nestedListAcrossPages),
+      'Parent one',
+    );
+    expect(parent.pages).toEqual([1]);
+    expect(parent.boxes?.map((b) => b.page)).toEqual([1]);
+    expect(nested.role).toBe('L');
+    expect(nested.pages).toEqual([1, 2]);
+    expect(nested.boxes?.map((b) => b.page)).toEqual([1, 2]);
+  });
+
+  it('SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 入れ子の L の範囲は下位項目を含む', async () => {
+    const rows = await measured(FIXTURES.nestedLists);
+    const [, nested] = itemAndNext(rows, 'Parent one');
+    const n = (nested.boxes as Box[])[0].rect;
+    for (const text of ['Nested one', 'Nested two']) {
+      const r = (
+        (rows.find((x) => x.role === 'LI' && x.text === text) as Measured).boxes as Box[]
+      )[0].rect;
+      expect(n.y1).toBeLessThanOrEqual(r.y1);
+      expect(n.y2).toBeGreaterThanOrEqual(r.y2);
+    }
+  });
+});

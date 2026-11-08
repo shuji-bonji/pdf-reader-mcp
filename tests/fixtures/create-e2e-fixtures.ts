@@ -1949,6 +1949,109 @@ async function createNestedListsPdf(): Promise<void> {
   console.log('Created: nested-lists.pdf (nested L inside LBody, and nested L under L)');
 }
 
+/**
+ * Create nested-list-across-pages.pdf — a nested list that continues on the next page (#54).
+ *
+ * Page 1 holds the parent item "Parent one" and the first nested item; page 2 holds the
+ * second nested item. The nested `L` is a child of the parent item's `LBody` (the form
+ * pdf-writer-mcp writes for PDF/UA-1). The parent item's own label and body are on page 1
+ * only, so its `pages` must be [1] even though its LBody reaches page 2.
+ */
+async function createNestedListAcrossPagesPdf(): Promise<void> {
+  const doc = await PDFDocument.create();
+  const context = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = [doc.addPage([595, 842]), doc.addPage([595, 842])];
+  type Ref = ReturnType<typeof context.nextRef>;
+  const parentOf: Ref[][] = [[], []];
+  const mcids = [0, 0];
+
+  /** One line of marked content on page `p` (0-based), owned by `owner`. */
+  const line = (p: number, tag: string, text: string, x: number, y: number, owner: Ref): number => {
+    const id = mcids[p]++;
+    const page = pages[p];
+    page.pushOperators(
+      PDFOperator.of(PDFOperatorNames.BeginMarkedContentSequence, [`/${tag}`, `<</MCID ${id}>>`]),
+    );
+    page.drawText(text, { x, y, size: 12, font });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
+    parentOf[p][id] = owner;
+    return id;
+  };
+  const mcr = (p: number, id: number) => context.obj({ Type: 'MCR', Pg: pages[p].ref, MCID: id });
+
+  /** `LI > (Lbl "•", LBody text)` on page `p`; `extra` adds children after the LBody's text. */
+  const item = (
+    list: Ref,
+    p: number,
+    text: string,
+    x: number,
+    y: number,
+    extra?: (lbody: Ref) => Ref[],
+  ): Ref => {
+    const li = context.nextRef();
+    const lbl = context.nextRef();
+    context.assign(
+      lbl,
+      context.obj({
+        Type: 'StructElem',
+        S: 'Lbl',
+        P: li,
+        K: [mcr(p, line(p, 'Lbl', '•', x, y, lbl))],
+      }),
+    );
+    const lbody = context.nextRef();
+    const own = mcr(p, line(p, 'LBody', text, x + 12, y, lbody));
+    const kids = extra ? extra(lbody) : [];
+    context.assign(
+      lbody,
+      context.obj({ Type: 'StructElem', S: 'LBody', P: li, K: [own, ...kids] as never }),
+    );
+    context.assign(li, context.obj({ Type: 'StructElem', S: 'LI', P: list, K: [lbl, lbody] }));
+    return li;
+  };
+
+  const structRootRef = context.nextRef();
+  const docRef = context.nextRef();
+  const list = context.nextRef();
+  let nestedRef: Ref | undefined;
+  const parent = item(list, 0, 'Parent one', 60, 790, (lbody) => {
+    const nested = context.nextRef();
+    nestedRef = nested;
+    const n1 = item(nested, 0, 'Nested one', 80, 772);
+    const n2 = item(nested, 1, 'Nested two', 80, 790);
+    context.assign(nested, context.obj({ Type: 'StructElem', S: 'L', P: lbody, K: [n1, n2] }));
+    return [nested];
+  });
+  if (!nestedRef) throw new Error('nested list not built');
+  context.assign(list, context.obj({ Type: 'StructElem', S: 'L', P: docRef, K: [parent] }));
+  context.assign(
+    docRef,
+    context.obj({ Type: 'StructElem', S: 'Document', P: structRootRef, K: [list] }),
+  );
+
+  doc.catalog.set(PDFName.of('MarkInfo'), context.obj({ Marked: true }));
+  pages[0].node.set(PDFName.of('StructParents'), context.obj(0));
+  pages[1].node.set(PDFName.of('StructParents'), context.obj(1));
+  const parentTree = context.obj({ Nums: [0, parentOf[0], 1, parentOf[1]] });
+  context.assign(
+    structRootRef,
+    context.obj({
+      Type: 'StructTreeRoot',
+      K: [docRef],
+      ParentTree: context.register(parentTree),
+      ParentTreeNextKey: 2,
+    }),
+  );
+  doc.catalog.set(PDFName.of('StructTreeRoot'), structRootRef);
+  doc.setTitle('Nested List Across Pages Test PDF');
+  doc.setProducer('pdf-reader-mcp test suite');
+  doc.setLanguage('en-US');
+
+  await writeFile(`${FIXTURES_DIR}/nested-list-across-pages.pdf`, await doc.save());
+  console.log('Created: nested-list-across-pages.pdf (nested list continuing on page 2)');
+}
+
 async function main(): Promise<void> {
   // An optional argv narrows the run to one fixture, so adding a fixture does
   // not force regenerating (and re-committing) every existing one.
@@ -1971,6 +2074,7 @@ async function main(): Promise<void> {
     ['corrupted', createCorruptedPdf],
     ['catalog-features', createCatalogFeaturesPdf],
     ['nested-lists', createNestedListsPdf],
+    ['nested-list-across-pages', createNestedListAcrossPagesPdf],
   ];
   const wanted = creators.filter(([name]) => !only || name === only);
   if (wanted.length === 0) {

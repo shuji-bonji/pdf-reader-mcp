@@ -93,6 +93,7 @@ export const FIXTURES = {
    * child of the parent L (ISO 32000-2 §14.8.4.8.2, example H.8.3).
    */
   nestedLists: resolve(FIXTURES_DIR, 'nested-lists.pdf'),
+  nestedListAcrossPages: resolve(FIXTURES_DIR, 'nested-list-across-pages.pdf'),
   noMetadata: resolve(FIXTURES_DIR, 'no-metadata.pdf'),
   corrupted: resolve(FIXTURES_DIR, 'corrupted.pdf'),
   /** Linearized variant of simple.pdf (Issue #1 regression). */
