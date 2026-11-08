@@ -1,6 +1,6 @@
 ---
-approved:
-pr:
+approved: 2026-11-08
+pr: 55
 implementation: required
 targets: [extract-structured-text]
 ---
