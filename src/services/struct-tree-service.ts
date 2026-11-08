@@ -186,10 +186,25 @@ function tidy(text: string): string {
   return text.replace(/[\s　]+/g, ' ').trim();
 }
 
+/**
+ * The marked content an element's `pages` and `boxes` are measured from.
+ *
+ * An `LI` owns its label and its body, but not a list nested in the body: that list
+ * is returned as elements of its own right after the item (#52), so measuring the
+ * item over it would make `pages` / `boxes` point at the nested items while `text`
+ * does not (#54). ISO 32000-2 §14.8.4.8.2 NOTE: lists inside an LBody "are not
+ * considered part of the hierarchy". The nested `L`'s own `boxes` cover its items.
+ * With the nested `L` as a direct child of the parent `L` (H.8.3) it is not under
+ * the `LI` at all, so both forms give the item the same extent.
+ */
+function extentRefsOf(element: StructElement): ContentRef[] {
+  return element.role === 'LI' ? contentRefsOutsideLists(element) : collectContentRefs(element);
+}
+
 /** Pages an element's content lives on, in order of first appearance. */
 function pagesOf(element: StructElement, pageNumByObjNum: Map<number, number>): number[] {
   const seen: number[] = [];
-  for (const ref of collectContentRefs(element)) {
+  for (const ref of extentRefsOf(element)) {
     const pageNum = pageNumByObjNum.get(ref.pageObjNum);
     if (pageNum !== undefined && !seen.includes(pageNum)) seen.push(pageNum);
   }
@@ -260,7 +275,7 @@ function measureText(
   let sawUnmeasurable = false;
   let sawContent = false;
 
-  for (const ref of collectContentRefs(element)) {
+  for (const ref of extentRefsOf(element)) {
     sawContent = true;
     const extent = idToBox.get(pdfjsMarkedContentId(ref));
     if (!extent) continue;

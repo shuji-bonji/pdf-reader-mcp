@@ -281,7 +281,8 @@ coordinate order) cannot. Order is a depth-first traversal of the structure
 tree (ISO 32000-2 §14.8.2.5). `/ActualText` replaces the glyphs (§14.9.4),
 `/Alt` stays out of the body text (§14.9.3), list labels are reported
 separately, a list nested in an item comes back as its own `L` / `LI`
-elements after the item (not folded into the item's text), and an element
+elements after the item (not folded into the item's text, pages or boxes —
+the nested `L`'s own boxes cover the nested items), and an element
 spanning a page break stays ONE element. Use
 `roles: ["H1", "H2"]` to pull an outline. Untagged PDFs return
 `isTagged: false` with a reason — nothing is guessed from coordinates.

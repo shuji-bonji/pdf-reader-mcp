@@ -58,6 +58,8 @@ Key properties:
     parent item, never folded into the item's text. Inside the item's LBody (ISO 32000-1
     Table 336) it sits one level below the LI, since LBody itself is not returned; as a
     direct child of the parent L (ISO 32000-2 §14.8.4.8.2) it sits at the LI's level.
+    Either way the item's pages and boxes cover its own label and body only, like its text;
+    the nested L's own pages and boxes cover the nested items.
   - Artifacts (page numbers, running heads) are excluded: §14.8.2.5 NOTE 3 puts them
     outside the logical content order.
 

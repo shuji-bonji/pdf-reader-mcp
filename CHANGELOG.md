@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-11-08
+
+Proposed version: 0.23.0 (filtering by `pages` changes for list items). OpenSpec change
+`list-item-extent` (SPEC-READER-EXTRACT-STRUCTURED-TEXT-004 added).
+
+### Changed
+
+- **`extract_structured_text`: a list item's `pages` and `boxes` no longer include a list
+  nested in it** (#54). Since 0.22.0 a list inside an item's `LBody` is returned as elements of
+  its own and kept out of the item's `text`, but the item's `pages` and `boxes` were still
+  measured over the whole subtree. For a pdf-writer-mcp nested list, the box of
+  `Parent one` ran from y 705.3 to 751.4 and covered both nested items, while its text is
+  drawn at 741–751; passing that box to `add_annotation` marked the nested items too. When a
+  nested item continued on the next page, that page also appeared in the parent item's
+  `pages`, so `pages: "2"` returned the parent item although none of its text is there.
+  The item's extent is now measured from its label and its body outside nested lists — the
+  same content its `text` comes from — and the nested `L`'s own `pages` and `boxes` cover the
+  nested items. ISO 32000-2 §14.8.4.8.2 NOTE: lists inside an LBody "are not considered part
+  of the hierarchy". A list placed as a direct child of the parent `L` (H.8.3) was already
+  measured this way, so both forms now give an item the same extent.
+- Why it was not caught: #52 decided to keep the old extent ("an item's area includes its
+  sub-items") and no test looked at a nested item's `boxes`.
+- Unchanged: the extent of every other element (the nested `L` and the outer `L` still cover
+  their nested items), a declared `/BBox` (`basis: "layout-attribute-bbox"`), and `text`,
+  `label`, `depth` and the order of elements.
+
 ## [0.22.0] - 2026-11-06
 
 Proposed version: 0.22.0 (the maintainer decides; the output of `extract_structured_text`
